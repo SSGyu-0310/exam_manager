@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ block.name }} - 강의 관리</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .header-info h1 {
+            font-size: 1.8rem;
+        }
+
+        .header-info .subtitle {
+            color: #aaa;
+            margin-top: 0.3rem;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .nav-links a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.6rem 1.2rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .lecture-table {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            overflow: hidden;
+            border-collapse: collapse;
+        }
+
+        .lecture-table th,
+        .lecture-table td {
+            padding: 1rem 1.2rem;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .lecture-table th {
+            background: rgba(0, 0, 0, 0.3);
+            color: #aaa;
+            font-weight: 500;
+            font-size: 0.85rem;
+        }
+
+        .lecture-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .lecture-table tr:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .lecture-order {
+            font-weight: bold;
+            color: #667eea;
+            text-align: center;
+        }
+
+        .lecture-title {
+            font-weight: 500;
+        }
+
+        .lecture-professor {
+            color: #aaa;
+            font-size: 0.9rem;
+        }
+
+        .lecture-count {
+            color: #aaa;
+            text-align: center;
+        }
+
+        .actions {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-end;
+        }
+
+        .actions form {
+            display: inline;
+        }
+
+        .actions .btn {
+            padding: 0.4rem 0.8rem;
+            font-size: 0.85rem;
+        }
+
+        .flash-messages {
+            margin-bottom: 1rem;
+        }
+
+        .flash {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+
+        .flash.success {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #aaa;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="header-info">
+                <h1>📖 {{ block.name }}</h1>
+                <div class="subtitle">강의 관리</div>
+            </div>
+            <div class="nav-links">
+                <a href="{{ url_for('manage.list_blocks') }}">← 블록 목록</a>
+                <a href="{{ url_for('manage.create_lecture', block_id=block.id) }}" class="btn btn-primary">+ 새 강의</a>
+            </div>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        {% if lectures %}
+        <table class="lecture-table">
+            <thead>
+                <tr>
+                    <th style="width: 80px; text-align: center;">순서</th>
+                    <th>강의 제목</th>
+                    <th style="width: 120px;">교수</th>
+                    <th style="width: 80px; text-align: center;">문제 수</th>
+                    <th style="width: 140px; text-align: right;">관리</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for lecture in lectures %}
+                <tr>
+                    <td class="lecture-order">{{ lecture.order }}강</td>
+                    <td class="lecture-title">
+                        <a href="{{ url_for('manage.view_lecture', lecture_id=lecture.id) }}"
+                            style="color: inherit; text-decoration: none;">
+                            {{ lecture.title }}
+                        </a>
+                    </td>
+                    <td class="lecture-professor">{{ lecture.professor or '-' }}</td>
+                    <td class="lecture-count">{{ lecture.question_count }}문제</td>
+                    <td class="actions">
+                        <a href="{{ url_for('manage.view_lecture', lecture_id=lecture.id) }}" class="btn btn-primary"
+                            style="background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);">보기</a>
+                        <a href="{{ url_for('manage.edit_lecture', lecture_id=lecture.id) }}"
+                            class="btn btn-secondary">수정</a>
+                        <form action="{{ url_for('manage.delete_lecture', lecture_id=lecture.id) }}" method="POST"
+                            onsubmit="return confirm('정말 삭제하시겠습니까?');">
+                            <button type="submit" class="btn btn-danger">삭제</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>등록된 강의가 없습니다.</p>
+            <a href="{{ url_for('manage.create_lecture', block_id=block.id) }}" class="btn btn-primary"
+                style="margin-top: 1rem;">첫 강의 만들기</a>
+        </div>
+        {% endif %}
+    </div>
+</body>
+
+</html>

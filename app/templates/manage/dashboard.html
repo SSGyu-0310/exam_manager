@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>관리 대시보드 - 기출문제 관리</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            font-size: 2rem;
+        }
+
+        .home-link {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: bold;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 1.5rem;
+            text-align: center;
+            backdrop-filter: blur(10px);
+        }
+
+        .stat-card .number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-card .label {
+            color: #aaa;
+            margin-top: 0.5rem;
+        }
+
+        .stat-card.warning .number {
+            color: #f39c12;
+        }
+
+        .actions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .action-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 2rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .action-card h3 {
+            margin-bottom: 1rem;
+            color: #667eea;
+        }
+
+        .action-card p {
+            color: #aaa;
+            margin-bottom: 1.5rem;
+            line-height: 1.6;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.8rem 1.5rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .recent-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 2rem;
+        }
+
+        .recent-section h3 {
+            margin-bottom: 1rem;
+            color: #667eea;
+        }
+
+        .recent-list {
+            list-style: none;
+        }
+
+        .recent-list li {
+            padding: 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .recent-list li:last-child {
+            border-bottom: none;
+        }
+
+        .exam-info .title {
+            font-weight: bold;
+        }
+
+        .exam-info .meta {
+            color: #aaa;
+            font-size: 0.9rem;
+        }
+
+        .badge {
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+        }
+
+        .badge-warning {
+            background: rgba(243, 156, 18, 0.2);
+            color: #f39c12;
+        }
+
+        .badge-success {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+
+        .flash-messages {
+            margin-bottom: 1rem;
+        }
+
+        .flash {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+
+        .flash.success {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+
+        .flash.error {
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>⚙️ 관리 대시보드</h1>
+            <a href="{{ url_for('main.index') }}" class="home-link">← 홈으로</a>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="number">{{ block_count }}</div>
+                <div class="label">블록</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">{{ lecture_count }}</div>
+                <div class="label">강의</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">{{ exam_count }}</div>
+                <div class="label">기출 시험</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">{{ question_count }}</div>
+                <div class="label">문제</div>
+            </div>
+            <div class="stat-card warning">
+                <div class="number">{{ unclassified_count }}</div>
+                <div class="label">미분류 문제</div>
+            </div>
+        </div>
+
+        <div class="actions-grid">
+            <div class="action-card">
+                <h3>📚 블록/강의 관리</h3>
+                <p>학습 단위를 구성하세요. 블록을 만들고 그 안에 강의들을 추가합니다.</p>
+                <a href="{{ url_for('manage.list_blocks') }}" class="btn btn-primary">블록 관리</a>
+            </div>
+            <div class="action-card">
+                <h3>📝 기출 시험 관리</h3>
+                <p>기출 시험지를 관리하고 PDF 파일을 업로드합니다.</p>
+                <a href="{{ url_for('manage.list_exams') }}" class="btn btn-primary">시험 관리</a>
+                <a href="{{ url_for('manage.upload_pdf') }}" class="btn btn-secondary" style="margin-left: 0.5rem;">📄
+                    PDF 업로드</a>
+            </div>
+            <div class="action-card">
+                <h3>🏷️ 문제 분류</h3>
+                <p>미분류 문제들을 강의에 배정합니다.</p>
+                <a href="{{ url_for('exam.unclassified_questions') }}" class="btn btn-primary">분류하기</a>
+            </div>
+        </div>
+
+        <div class="recent-section">
+            <h3>📋 최근 추가된 시험</h3>
+            {% if recent_exams %}
+            <ul class="recent-list">
+                {% for exam in recent_exams %}
+                <li>
+                    <div class="exam-info">
+                        <div class="title">{{ exam.title }}</div>
+                        <div class="meta">{{ exam.subject or '과목 미지정' }} | {{ exam.question_count }}문제</div>
+                    </div>
+                    <div>
+                        {% if exam.unclassified_count > 0 %}
+                        <span class="badge badge-warning">미분류 {{ exam.unclassified_count }}개</span>
+                        {% else %}
+                        <span class="badge badge-success">분류 완료</span>
+                        {% endif %}
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p style="color: #aaa; padding: 1rem;">등록된 시험이 없습니다.</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+
+</html>

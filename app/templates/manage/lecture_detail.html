@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ lecture.order }}강. {{ lecture.title }} - {{ block.name }}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .header-info h1 {
+            font-size: 1.6rem;
+        }
+
+        .header-info .meta {
+            color: #667eea;
+            margin-top: 0.3rem;
+            font-size: 0.9rem;
+        }
+
+        .header-info .professor {
+            color: #aaa;
+            font-size: 0.85rem;
+        }
+
+        .nav-links a {
+            color: #667eea;
+            text-decoration: none;
+            margin-left: 1rem;
+        }
+
+        .stats-row {
+            display: flex;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-box {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 1.2rem 1.5rem;
+            text-align: center;
+        }
+
+        .stat-box .num {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-box .label {
+            color: #aaa;
+            font-size: 0.85rem;
+        }
+
+        .questions-container {
+            margin-top: 2rem;
+        }
+
+        .question-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 1.5rem;
+        }
+
+        .question-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 0.8rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .question-number {
+            font-weight: bold;
+            color: #667eea;
+            font-size: 1.1rem;
+        }
+
+        .question-meta {
+            font-size: 0.8rem;
+            color: #888;
+        }
+
+        .question-type {
+            font-size: 0.75rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 10px;
+            background: rgba(102, 126, 234, 0.2);
+            color: #667eea;
+        }
+
+        .question-type.short {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+
+        .question-type.multi {
+            background: rgba(243, 156, 18, 0.2);
+            color: #f39c12;
+        }
+
+        .question-content {
+            font-size: 1rem;
+            line-height: 1.7;
+            margin-bottom: 1rem;
+        }
+
+        .question-image {
+            max-width: 100%;
+            border-radius: 10px;
+            margin-bottom: 1rem;
+        }
+
+        .choices-list {
+            list-style: none;
+            margin-bottom: 1rem;
+        }
+
+        .choice-item {
+            padding: 0.8rem 1rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            background: rgba(0, 0, 0, 0.2);
+            display: flex;
+            gap: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .choice-item:hover {
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .choice-item.correct {
+            background: rgba(46, 204, 113, 0.2);
+            border: 1px solid rgba(46, 204, 113, 0.4);
+        }
+
+        .choice-item.correct::after {
+            content: '✓ 정답';
+            margin-left: auto;
+            color: #2ecc71;
+            font-weight: bold;
+            font-size: 0.85rem;
+        }
+
+        .choice-number {
+            font-weight: bold;
+            color: #667eea;
+            min-width: 25px;
+        }
+
+        /* 정답 숨김 상태 */
+        .answer-hidden .choice-item.correct {
+            background: rgba(0, 0, 0, 0.2);
+            border: none;
+        }
+
+        .answer-hidden .choice-item.correct::after {
+            display: none;
+        }
+
+        .answer-hidden .short-answer {
+            display: none;
+        }
+
+        /* 정답 표시 버튼 */
+        .toggle-answer-btn {
+            padding: 0.3rem 0.7rem;
+            border-radius: 6px;
+            border: 1px solid rgba(102, 126, 234, 0.4);
+            background: transparent;
+            color: #667eea;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 0.5rem;
+        }
+
+        .toggle-answer-btn:hover {
+            background: rgba(102, 126, 234, 0.15);
+            border-color: #667eea;
+        }
+
+        .toggle-answer-btn.showing {
+            background: rgba(46, 204, 113, 0.15);
+            border-color: rgba(46, 204, 113, 0.4);
+            color: #2ecc71;
+        }
+
+        .short-answer {
+            background: rgba(46, 204, 113, 0.1);
+            border-radius: 8px;
+            padding: 1rem;
+            border-left: 3px solid #2ecc71;
+        }
+
+        .short-answer label {
+            display: block;
+            color: #2ecc71;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+
+        .short-answer .answer {
+            color: #fff;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: #aaa;
+        }
+
+        .empty-state .icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.6rem 1.2rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+        }
+
+        .toolbar button {
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="header-info">
+                <h1>{{ lecture.order }}강. {{ lecture.title }}</h1>
+                <div class="meta">{{ block.name }}</div>
+                {% if lecture.professor %}
+                <div class="professor">👤 {{ lecture.professor }}</div>
+                {% endif %}
+            </div>
+            <div class="nav-links">
+                <a href="{{ url_for('manage.list_lectures', block_id=block.id) }}">← 강의 목록</a>
+                <a href="{{ url_for('manage.edit_lecture', lecture_id=lecture.id) }}">✏️ 수정</a>
+            </div>
+        </header>
+
+        <div class="stats-row">
+            <div class="stat-box">
+                <div class="num">{{ questions|length }}</div>
+                <div class="label">문제 수</div>
+            </div>
+            <div class="stat-box">
+                <div class="num">{{ questions|selectattr('q_type', 'equalto', 'multiple_choice')|list|length }}</div>
+                <div class="label">객관식</div>
+            </div>
+            <div class="stat-box">
+                <div class="num">{{ questions|selectattr('q_type', 'equalto', 'multiple_response')|list|length }}</div>
+                <div class="label">복수정답</div>
+            </div>
+            <div class="stat-box">
+                <div class="num">{{ questions|selectattr('q_type', 'equalto', 'short_answer')|list|length }}</div>
+                <div class="label">주관식</div>
+            </div>
+        </div>
+
+        <div class="toolbar">
+            <button class="btn btn-secondary" onclick="showAllAnswers()">📖 전체 정답 보기</button>
+            <button class="btn btn-secondary" onclick="hideAllAnswers()">🙈 전체 정답 숨기기</button>
+        </div>
+
+        <div class="questions-container">
+            {% if questions %}
+            {% for question in questions %}
+            <div class="question-card answer-hidden" id="q-{{ question.id }}">
+                <div class="question-header">
+                    <div>
+                        <span class="question-number">Q{{ question.question_number }}</span>
+                        <span class="question-meta">({{ question.exam.title }})</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span
+                            class="question-type {{ 'short' if question.q_type == 'short_answer' else 'multi' if question.q_type == 'multiple_response' else '' }}">
+                            {% if question.q_type == 'short_answer' %}주관식
+                            {% elif question.q_type == 'multiple_response' %}복수정답
+                            {% else %}객관식{% endif %}
+                        </span>
+                        <button class="toggle-answer-btn" onclick="toggleAnswer({{ question.id }}, this)">
+                            👁️ 정답
+                        </button>
+                    </div>
+                </div>
+
+                {% if question.image_path %}
+                <img src="{{ url_for('static', filename='uploads/' + question.image_path) }}" class="question-image"
+                    alt="문제 이미지">
+                {% endif %}
+
+                <div class="question-content">
+                    {{ question.content or '(이미지 문제)' }}
+                </div>
+
+                {% if question.q_type == 'short_answer' %}
+                <div class="short-answer">
+                    <label>정답</label>
+                    <div class="answer">{{ question.correct_answer_text or question.answer or '정답 없음' }}</div>
+                </div>
+                {% else %}
+                <ul class="choices-list">
+                    {% for choice in question.choices %}
+                    <li class="choice-item {{ 'correct' if choice.is_correct else '' }}">
+                        <span class="choice-number">{{ choice.choice_number }}.</span>
+                        <span>{{ choice.content }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="empty-state">
+                <div class="icon">📭</div>
+                <p>이 강의에 분류된 문제가 없습니다.</p>
+                <a href="{{ url_for('exam.unclassified_questions') }}" class="btn btn-primary"
+                    style="margin-top: 1rem;">문제 분류하러 가기</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        function toggleAnswer(questionId, btn) {
+            const card = document.getElementById('q-' + questionId);
+            const isHidden = card.classList.contains('answer-hidden');
+
+            if (isHidden) {
+                card.classList.remove('answer-hidden');
+                btn.textContent = '🙈 가리기';
+                btn.classList.add('showing');
+            } else {
+                card.classList.add('answer-hidden');
+                btn.textContent = '👁️ 정답';
+                btn.classList.remove('showing');
+            }
+        }
+
+        function showAllAnswers() {
+            document.querySelectorAll('.question-card').forEach(card => {
+                card.classList.remove('answer-hidden');
+                const btn = card.querySelector('.toggle-answer-btn');
+                btn.textContent = '🙈 가리기';
+                btn.classList.add('showing');
+            });
+        }
+
+        function hideAllAnswers() {
+            document.querySelectorAll('.question-card').forEach(card => {
+                card.classList.add('answer-hidden');
+                const btn = card.querySelector('.toggle-answer-btn');
+                btn.textContent = '👁️ 정답';
+                btn.classList.remove('showing');
+            });
+        }
+    </script>
+</body>
+
+</html>

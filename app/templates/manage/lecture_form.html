@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ '강의 수정' if lecture else '새 강의 만들기' }} - {{ block.name }}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .header-info h1 {
+            font-size: 1.8rem;
+        }
+
+        .header-info .subtitle {
+            color: #667eea;
+            margin-top: 0.3rem;
+        }
+
+        .back-link {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .form-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 2rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group.full {
+            grid-column: 1 / -1;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #aaa;
+        }
+
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 0.8rem 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            color: #fff;
+            font-size: 1rem;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.8rem 2rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            margin-left: 0.5rem;
+        }
+
+        .form-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="header-info">
+                <h1>{{ '✏️ 강의 수정' if lecture else '➕ 새 강의 만들기' }}</h1>
+                <div class="subtitle">{{ block.name }}</div>
+            </div>
+            <a href="{{ url_for('manage.list_lectures', block_id=block.id) }}" class="back-link">← 목록으로</a>
+        </header>
+
+        <div class="form-card">
+            <form method="POST">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="order">강의 번호 *</label>
+                        <input type="number" id="order" name="order"
+                            value="{{ lecture.order if lecture else (next_order or 1) }}" min="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="professor">교수명</label>
+                        <input type="text" id="professor" name="professor"
+                            value="{{ lecture.professor if lecture else '' }}" placeholder="예: 홍길동">
+                    </div>
+                </div>
+                <div class="form-group full">
+                    <label for="title">강의 제목 *</label>
+                    <input type="text" id="title" name="title" value="{{ lecture.title if lecture else '' }}"
+                        placeholder="예: 심전도의 원리, 부정맥의 이해" required>
+                </div>
+                <div class="form-group full">
+                    <label for="description">설명 (선택)</label>
+                    <textarea id="description" name="description"
+                        placeholder="강의에 대한 설명을 입력하세요">{{ lecture.description if lecture else '' }}</textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">
+                        {{ '수정 완료' if lecture else '강의 생성' }}
+                    </button>
+                    <a href="{{ url_for('manage.list_lectures', block_id=block.id) }}" class="btn btn-secondary">취소</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</body>
+
+</html>

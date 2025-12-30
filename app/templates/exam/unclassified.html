@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>분류 대기소 - 기출문제 관리</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container-fluid {
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+        }
+
+        .nav-links a {
+            color: #667eea;
+            text-decoration: none;
+            margin-left: 1rem;
+        }
+
+        .main-layout {
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 2rem;
+        }
+
+        /* 사이드바 */
+        .lecture-tree {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 1.5rem;
+            position: sticky;
+            top: 1rem;
+            max-height: calc(100vh - 150px);
+            overflow-y: auto;
+        }
+
+        .lecture-tree h3 {
+            font-size: 1rem;
+            color: #667eea;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 0.5rem;
+        }
+
+        .block-item {
+            margin-bottom: 1rem;
+        }
+
+        .block-name {
+            font-weight: bold;
+            color: #aaa;
+            padding: 0.5rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .block-name:hover {
+            color: #fff;
+        }
+
+        .block-name .icon {
+            transition: transform 0.2s;
+        }
+
+        .block-item.collapsed .icon {
+            transform: rotate(-90deg);
+        }
+
+        .block-item.collapsed .lecture-list {
+            display: none;
+        }
+
+        .lecture-list {
+            margin-left: 1rem;
+        }
+
+        .lecture-item {
+            padding: 0.4rem 0.8rem;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            color: #ccc;
+            transition: all 0.2s;
+        }
+
+        .lecture-item:hover {
+            background: rgba(102, 126, 234, 0.2);
+            color: #fff;
+        }
+
+        .lecture-item.selected {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+        }
+
+        .lecture-count {
+            font-size: 0.75rem;
+            color: #888;
+            margin-left: 0.3rem;
+        }
+
+        /* 필터 바 */
+        .filter-bar {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .filter-bar label {
+            color: #aaa;
+            font-size: 0.9rem;
+        }
+
+        .filter-bar select {
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(0, 0, 0, 0.3);
+            color: #fff;
+        }
+
+        .stats-badge {
+            margin-left: auto;
+            font-size: 0.9rem;
+            color: #f39c12;
+        }
+
+        /* 전체선택 */
+        .select-all-bar {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            padding: 0.8rem 1rem;
+            background: rgba(102, 126, 234, 0.1);
+            border-radius: 8px;
+        }
+
+        .select-all-bar label {
+            color: #ccc;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* 문제 카드 그리드 */
+        .questions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+            gap: 1.5rem;
+        }
+
+        /* 문제 카드 */
+        .question-card {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 15px;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            overflow: hidden;
+            transition: all 0.3s;
+            position: relative;
+        }
+
+        .question-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .question-card.selected {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.15);
+        }
+
+        .question-card.assigning {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .question-card.assigned {
+            animation: fadeOut 0.5s forwards;
+        }
+
+        @keyframes fadeOut {
+            to {
+                opacity: 0;
+                transform: scale(0.9);
+                height: 0;
+                margin: 0;
+                padding: 0;
+            }
+        }
+
+        .card-checkbox {
+            position: absolute;
+            top: 1rem;
+            left: 1rem;
+            width: 22px;
+            height: 22px;
+            cursor: pointer;
+            accent-color: #667eea;
+            z-index: 10;
+        }
+
+        .card-header {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 1rem 1rem 1rem 3rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .question-number {
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .exam-name {
+            font-size: 0.8rem;
+            color: #888;
+        }
+
+        .current-lecture {
+            font-size: 0.75rem;
+            padding: 0.2rem 0.6rem;
+            background: rgba(102, 126, 234, 0.3);
+            border-radius: 10px;
+            color: #aaa;
+        }
+
+        .card-body {
+            padding: 1.2rem;
+        }
+
+        .question-content {
+            font-size: 0.95rem;
+            line-height: 1.6;
+            margin-bottom: 1rem;
+            color: #eee;
+        }
+
+        .question-image {
+            max-width: 100%;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .choices-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .choice-item {
+            padding: 0.6rem 0.8rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            background: rgba(0, 0, 0, 0.2);
+            font-size: 0.9rem;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .choice-item.correct {
+            background: rgba(46, 204, 113, 0.2);
+            border: 1px solid rgba(46, 204, 113, 0.3);
+        }
+
+        .choice-number {
+            color: #667eea;
+            font-weight: bold;
+            min-width: 25px;
+        }
+
+        .card-footer {
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.2);
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .lecture-select {
+            flex: 1;
+            padding: 0.5rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(0, 0, 0, 0.3);
+            color: #fff;
+            font-size: 0.9rem;
+        }
+
+        .btn-assign {
+            padding: 0.5rem 1.2rem;
+            border-radius: 8px;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-assign:hover {
+            transform: scale(1.05);
+        }
+
+        /* 일괄 분류 바 */
+        .bulk-action-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(135deg, #2d3436 0%, #1a1a2e 100%);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 1.5rem;
+            box-shadow: 0 -5px 30px rgba(0, 0, 0, 0.5);
+            transform: translateY(100%);
+            transition: transform 0.3s;
+            z-index: 1000;
+        }
+
+        .bulk-action-bar.visible {
+            transform: translateY(0);
+        }
+
+        .bulk-action-bar .selected-count {
+            font-size: 1.1rem;
+            color: #667eea;
+            font-weight: bold;
+        }
+
+        .bulk-action-bar select {
+            padding: 0.6rem 1rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(0, 0, 0, 0.3);
+            color: #fff;
+            min-width: 250px;
+        }
+
+        .bulk-action-bar .btn-bulk {
+            padding: 0.7rem 2rem;
+            border-radius: 8px;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .bulk-action-bar .btn-cancel {
+            padding: 0.7rem 1.5rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            background: transparent;
+            color: #aaa;
+            cursor: pointer;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: #aaa;
+        }
+
+        .empty-state .icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container-fluid">
+        <header>
+            <h1>🏷️ 분류 대기소</h1>
+            <div class="nav-links">
+                <a href="{{ url_for('manage.dashboard') }}">← 관리</a>
+                <a href="{{ url_for('main.index') }}">홈</a>
+            </div>
+        </header>
+
+        <div class="main-layout">
+            <aside class="lecture-tree">
+                <h3>📚 강의 선택</h3>
+                {% if blocks %}
+                {% for block in blocks %}
+                <div class="block-item">
+                    <div class="block-name" onclick="toggleBlock(this.parentElement)">
+                        <span class="icon">▼</span>
+                        {{ block.name }}
+                    </div>
+                    <div class="lecture-list">
+                        {% for lecture in block.lectures %}
+                        <div class="lecture-item" data-lecture-id="{{ lecture.id }}"
+                            onclick="selectLecture(this, {{ lecture.id }}, '{{ block.name }} > {{ lecture.title }}')">
+                            {{ lecture.order }}강. {{ lecture.title }}
+                            <span class="lecture-count">({{ lecture.question_count }})</span>
+                        </div>
+                        {% endfor %}
+                        {% if not block.lectures.count() %}
+                        <div style="color: #666; font-size: 0.85rem; padding: 0.5rem;">강의 없음</div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <p style="color: #666; font-size: 0.9rem;">블록을 먼저 생성하세요.</p>
+                {% endif %}
+            </aside>
+
+            <main>
+                <div class="filter-bar">
+                    <input type="text" id="searchInput" placeholder="🔍 문제 내용 검색..."
+                        style="flex: 1; padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.3); color: #fff;"
+                        oninput="filterQuestions()">
+                    <label>시험:</label>
+                    <select id="examFilter" onchange="filterQuestions()">
+                        <option value="all">전체</option>
+                        {% for exam in exams %}
+                        <option value="{{ exam.id }}">{{ exam.title }}</option>
+                        {% endfor %}
+                    </select>
+                    <label>상태:</label>
+                    <select id="statusFilter" onchange="filterQuestions()">
+                        <option value="unclassified">미분류만</option>
+                        <option value="classified">분류됨</option>
+                        <option value="all">전체</option>
+                    </select>
+                    <span class="stats-badge">
+                        📊 미분류: <strong id="unclassifiedCount">{{ unclassified_count }}</strong>개
+                    </span>
+                </div>
+
+                <div class="select-all-bar">
+                    <label>
+                        <input type="checkbox" id="selectAll" onchange="toggleSelectAll()">
+                        전체 선택
+                    </label>
+                    <span id="selectedInfo" style="color: #667eea;"></span>
+                </div>
+
+                <div class="questions-grid" id="questionsGrid">
+                    {% if questions %}
+                    {% for question in questions %}
+                    <div class="question-card" data-question-id="{{ question.id }}"
+                        data-exam-id="{{ question.exam_id }}"
+                        data-classified="{{ 'true' if question.is_classified else 'false' }}"
+                        data-content="{{ (question.content or '')|lower }}">
+                        <input type="checkbox" class="card-checkbox" data-id="{{ question.id }}"
+                            onchange="updateSelection()">
+                        <div class="card-header">
+                            <div>
+                                <span class="question-number">Q{{ question.question_number }}</span>
+                                <span class="exam-name">{{ question.exam.title }}</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                {% if question.lecture %}
+                                <span class="current-lecture">{{ question.lecture.block.name }} > {{
+                                    question.lecture.title }}</span>
+                                {% endif %}
+                                <a href="{{ url_for('manage.edit_question', question_id=question.id) }}" target="_blank"
+                                    style="padding: 0.2rem 0.5rem; font-size: 0.7rem; background: rgba(255,255,255,0.1); border-radius: 4px; color: #aaa; text-decoration: none;"
+                                    title="새 창에서 수정">✏️</a>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            {% if question.image_path %}
+                            <img src="{{ url_for('static', filename='uploads/' + question.image_path) }}"
+                                class="question-image" alt="문제 이미지">
+                            {% endif %}
+                            <div class="question-content">{{ question.content[:200] if question.content else '(이미지 문제)'
+                                }}{% if question.content and question.content|length > 200 %}...{% endif %}</div>
+                            <ul class="choices-list">
+                                {% for choice in question.choices %}
+                                <li class="choice-item {{ 'correct' if choice.is_correct else '' }}">
+                                    <span class="choice-number">{{ choice.choice_number }}.</span>
+                                    <span>{{ choice.content[:50] }}{% if choice.content|length > 50 %}...{% endif
+                                        %}</span>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        <div class="card-footer">
+                            <select class="lecture-select" id="select-{{ question.id }}">
+                                <option value="">강의 선택...</option>
+                                {% for block in blocks %}
+                                <optgroup label="{{ block.name }}">
+                                    {% for lecture in block.lectures %}
+                                    <option value="{{ lecture.id }}" {{ 'selected' if question.lecture_id==lecture.id
+                                        else '' }}>
+                                        {{ lecture.order }}강. {{ lecture.title }}
+                                    </option>
+                                    {% endfor %}
+                                </optgroup>
+                                {% endfor %}
+                            </select>
+                            <button class="btn-assign" onclick="assignQuestion({{ question.id }})">
+                                {{ '이동' if question.is_classified else '배정' }}
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <div class="empty-state" style="grid-column: 1 / -1;">
+                        <div class="icon">🎉</div>
+                        <p>모든 문제가 분류되었습니다!</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- 일괄 분류 바 -->
+    <div class="bulk-action-bar" id="bulkActionBar">
+        <span class="selected-count"><span id="bulkCount">0</span>개 선택됨</span>
+        <select id="bulkLectureSelect">
+            <option value="">분류할 강의 선택...</option>
+            {% for block in blocks %}
+            <optgroup label="{{ block.name }}">
+                {% for lecture in block.lectures %}
+                <option value="{{ lecture.id }}">{{ lecture.order }}강. {{ lecture.title }}</option>
+                {% endfor %}
+            </optgroup>
+            {% endfor %}
+        </select>
+        <button class="btn-bulk" onclick="bulkClassify()">일괄 분류</button>
+        <button class="btn-cancel" onclick="clearSelection()">취소</button>
+    </div>
+
+    <script>
+        let selectedLectureId = null;
+        let selectedIds = new Set();
+
+        function toggleBlock(blockElement) {
+            blockElement.classList.toggle('collapsed');
+        }
+
+        function selectLecture(element, lectureId, lectureName) {
+            document.querySelectorAll('.lecture-item.selected').forEach(el => el.classList.remove('selected'));
+            element.classList.add('selected');
+            selectedLectureId = lectureId;
+
+            // 모든 드롭다운과 벌크 셀렉트 업데이트
+            document.querySelectorAll('.lecture-select').forEach(s => s.value = lectureId);
+            document.getElementById('bulkLectureSelect').value = lectureId;
+        }
+
+        function filterQuestions() {
+            const examFilter = document.getElementById('examFilter').value;
+            const statusFilter = document.getElementById('statusFilter').value;
+            const searchQuery = document.getElementById('searchInput').value.toLowerCase();
+
+            document.querySelectorAll('.question-card').forEach(card => {
+                const examId = card.dataset.examId;
+                const isClassified = card.dataset.classified === 'true';
+                const content = card.dataset.content || '';
+                let show = true;
+
+                // 시험 필터
+                if (examFilter !== 'all' && examId !== examFilter) show = false;
+
+                // 상태 필터
+                if (statusFilter === 'unclassified' && isClassified) show = false;
+                else if (statusFilter === 'classified' && !isClassified) show = false;
+
+                // 검색어 필터
+                if (searchQuery && !content.includes(searchQuery)) show = false;
+
+                card.style.display = show ? '' : 'none';
+            });
+        }
+
+        function toggleSelectAll() {
+            const checked = document.getElementById('selectAll').checked;
+            document.querySelectorAll('.question-card:not([style*="display: none"]) .card-checkbox').forEach(cb => {
+                cb.checked = checked;
+            });
+            updateSelection();
+        }
+
+        function updateSelection() {
+            selectedIds.clear();
+            document.querySelectorAll('.card-checkbox:checked').forEach(cb => {
+                selectedIds.add(parseInt(cb.dataset.id));
+                cb.closest('.question-card').classList.add('selected');
+            });
+            document.querySelectorAll('.card-checkbox:not(:checked)').forEach(cb => {
+                cb.closest('.question-card').classList.remove('selected');
+            });
+
+            const count = selectedIds.size;
+            document.getElementById('bulkCount').textContent = count;
+            document.getElementById('selectedInfo').textContent = count > 0 ? `${count}개 선택됨` : '';
+            document.getElementById('bulkActionBar').classList.toggle('visible', count > 0);
+        }
+
+        function clearSelection() {
+            document.querySelectorAll('.card-checkbox').forEach(cb => cb.checked = false);
+            document.getElementById('selectAll').checked = false;
+            updateSelection();
+        }
+
+        async function bulkClassify() {
+            const lectureId = document.getElementById('bulkLectureSelect').value;
+            if (!lectureId) {
+                alert('분류할 강의를 선택해주세요.');
+                return;
+            }
+            if (selectedIds.size === 0) {
+                alert('문제를 선택해주세요.');
+                return;
+            }
+
+            const questionIds = Array.from(selectedIds);
+
+            try {
+                const response = await fetch('/exam/questions/bulk-classify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question_ids: questionIds, lecture_id: parseInt(lectureId) })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert(`${result.updated_count}개 문제가 "${result.lecture_name}"로 분류되었습니다.`);
+
+                    // 분류된 카드 업데이트
+                    const statusFilter = document.getElementById('statusFilter').value;
+                    questionIds.forEach(id => {
+                        const card = document.querySelector(`.question-card[data-question-id="${id}"]`);
+                        if (card) {
+                            card.dataset.classified = 'true';
+                            if (statusFilter === 'unclassified') {
+                                card.classList.add('assigned');
+                                setTimeout(() => card.remove(), 500);
+                            }
+                        }
+                    });
+
+                    clearSelection();
+                    updateUnclassifiedCount();
+                } else {
+                    alert('분류 실패: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('오류가 발생했습니다.');
+            }
+        }
+
+        async function assignQuestion(questionId) {
+            const select = document.getElementById(`select-${questionId}`);
+            const lectureId = select.value;
+            if (!lectureId) { alert('강의를 선택해주세요.'); return; }
+
+            const card = document.querySelector(`.question-card[data-question-id="${questionId}"]`);
+            card.classList.add('assigning');
+
+            try {
+                const formData = new FormData();
+                formData.append('lecture_id', lectureId);
+                const response = await fetch(`/exam/question/${questionId}/classify`, {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    card.dataset.classified = 'true';
+                    card.classList.remove('assigning');
+                    if (document.getElementById('statusFilter').value === 'unclassified') {
+                        card.classList.add('assigned');
+                        setTimeout(() => card.remove(), 500);
+                    }
+                    updateUnclassifiedCount();
+                } else {
+                    alert('분류 실패: ' + result.error);
+                    card.classList.remove('assigning');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                card.classList.remove('assigning');
+            }
+        }
+
+        function updateUnclassifiedCount() {
+            const count = document.querySelectorAll('.question-card[data-classified="false"]').length;
+            document.getElementById('unclassifiedCount').textContent = count;
+        }
+
+        filterQuestions();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>기출 시험 관리 - 기출문제 관리</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            font-size: 2rem;
+        }
+
+        .nav-links a {
+            color: #667eea;
+            text-decoration: none;
+            margin-left: 1rem;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.6rem 1.2rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-sm {
+            padding: 0.4rem 0.8rem;
+            font-size: 0.85rem;
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        .exam-grid {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .exam-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .exam-info .title {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .exam-info .meta {
+            color: #aaa;
+            font-size: 0.9rem;
+            margin-top: 0.3rem;
+        }
+
+        .exam-stats {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .stat {
+            text-align: center;
+            padding: 0.5rem 1rem;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+        }
+
+        .stat .num {
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+
+        .stat .label {
+            font-size: 0.75rem;
+            color: #aaa;
+        }
+
+        .stat.warning .num {
+            color: #f39c12;
+        }
+
+        .stat.success .num {
+            color: #2ecc71;
+        }
+
+        .exam-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .exam-actions form {
+            display: inline;
+        }
+
+        .flash-messages {
+            margin-bottom: 1rem;
+        }
+
+        .flash {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+
+        .flash.success {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #aaa;
+        }
+
+        .search-bar {
+            margin-bottom: 1.5rem;
+        }
+
+        .search-bar input {
+            width: 100%;
+            padding: 0.8rem 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            color: #fff;
+            font-size: 1rem;
+        }
+
+        .search-bar input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .search-bar input::placeholder {
+            color: #666;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>📝 기출 시험 관리</h1>
+            <div class="nav-links">
+                <a href="{{ url_for('manage.dashboard') }}">← 대시보드</a>
+                <a href="{{ url_for('manage.upload_pdf') }}" class="btn btn-primary btn-sm">📄 PDF 업로드</a>
+            </div>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="search-bar">
+            <input type="text" id="searchInput" placeholder="🔍 시험 이름, 과목으로 검색..." oninput="filterExams()">
+        </div>
+
+        {% if exams %}
+        <div class="exam-grid" id="examGrid">
+            {% for exam in exams %}
+            <div class="exam-card" data-title="{{ exam.title|lower }}" data-subject="{{ (exam.subject or '')|lower }}">
+                <div class="exam-info">
+                    <div class="title">{{ exam.title }}</div>
+                    <div class="meta">
+                        {{ exam.subject or '과목 미지정' }}
+                        {% if exam.year %} | {{ exam.year }}년{% endif %}
+                        {% if exam.term %} {{ exam.term }}{% endif %}
+                    </div>
+                </div>
+                <div class="exam-stats">
+                    <div class="stat">
+                        <div class="num">{{ exam.question_count }}</div>
+                        <div class="label">전체</div>
+                    </div>
+                    <div class="stat {{ 'success' if exam.unclassified_count == 0 else 'warning' }}">
+                        <div class="num">{{ exam.classified_count }}</div>
+                        <div class="label">분류됨</div>
+                    </div>
+                </div>
+                <div class="exam-actions">
+                    <a href="{{ url_for('exam.view_exam', exam_id=exam.id) }}" class="btn btn-secondary btn-sm">보기</a>
+                    <form action="{{ url_for('manage.delete_exam', exam_id=exam.id) }}" method="POST"
+                        onsubmit="return confirm('정말 삭제하시겠습니까? 모든 문제가 함께 삭제됩니다.');">
+                        <button type="submit" class="btn btn-danger btn-sm">삭제</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p>등록된 기출 시험이 없습니다.</p>
+            <a href="{{ url_for('manage.upload_pdf') }}" class="btn btn-primary" style="margin-top: 1rem;">첫 시험
+                업로드하기</a>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        function filterExams() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            document.querySelectorAll('.exam-card').forEach(card => {
+                const title = card.dataset.title;
+                const subject = card.dataset.subject;
+                const match = title.includes(query) || subject.includes(query);
+                card.style.display = match ? '' : 'none';
+            });
+        }
+    </script>
+</body>
+
+</html>

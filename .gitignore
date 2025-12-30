@@ -1,0 +1,28 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+
+# Databases and generated datasets
+*.sqlite3
+*.db
+data/**/*.db
+
+# Uploaded assets
+app/static/uploads/*
+!app/static/uploads/.gitkeep
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

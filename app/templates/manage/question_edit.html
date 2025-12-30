@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>문제 수정 - Q{{ question.question_number }}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .header-info h1 {
+            font-size: 1.5rem;
+        }
+
+        .header-info .meta {
+            color: #aaa;
+            margin-top: 0.3rem;
+            font-size: 0.9rem;
+        }
+
+        .back-link {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .edit-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 2rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #aaa;
+        }
+
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 0.8rem 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            color: #fff;
+            font-size: 1rem;
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .choice-row {
+            display: flex;
+            gap: 0.8rem;
+            align-items: center;
+            margin-bottom: 0.8rem;
+            padding: 0.8rem;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+        }
+
+        .choice-row .choice-num {
+            font-weight: bold;
+            color: #667eea;
+            min-width: 30px;
+        }
+
+        .choice-row input[type="text"] {
+            flex: 1;
+        }
+
+        .choice-row input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            accent-color: #2ecc71;
+        }
+
+        .choice-row label {
+            color: #2ecc71;
+            font-size: 0.85rem;
+            min-width: 40px;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.8rem 2rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            margin-left: 0.5rem;
+        }
+
+        .form-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 1.5rem;
+        }
+
+        .question-type-selector {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .type-option {
+            padding: 0.8rem 1.5rem;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.2);
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .type-option:hover {
+            background: rgba(102, 126, 234, 0.2);
+        }
+
+        .type-option.active {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.2);
+        }
+
+        .type-option input {
+            display: none;
+        }
+
+        .short-answer-section,
+        .choices-section {
+            display: none;
+        }
+
+        .short-answer-section.active,
+        .choices-section.active {
+            display: block;
+        }
+
+        .question-image {
+            max-width: 100%;
+            border-radius: 10px;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="header-info">
+                <h1>✏️ 문제 수정</h1>
+                <div class="meta">Q{{ question.question_number }} - {{ exam.title }}</div>
+            </div>
+            <a href="{{ url_for('exam.view_question', exam_id=exam.id, question_number=question.question_number) }}"
+                class="back-link">← 돌아가기</a>
+        </header>
+
+        <div class="edit-card">
+            <form method="POST">
+                <!-- 문제 이미지 (읽기 전용) -->
+                {% if question.image_path %}
+                <div class="form-group">
+                    <label>문제 이미지</label>
+                    <img src="{{ url_for('static', filename='uploads/' + question.image_path) }}" class="question-image"
+                        alt="문제 이미지">
+                </div>
+                {% endif %}
+
+                <!-- 문제 유형 선택 -->
+                <div class="form-group">
+                    <label>문제 유형</label>
+                    <div class="question-type-selector">
+                        <label class="type-option {{ 'active' if question.q_type == 'multiple_choice' else '' }}"
+                            id="type-mc">
+                            <input type="radio" name="q_type" value="multiple_choice" {{ 'checked' if
+                                question.q_type=='multiple_choice' else '' }} onchange="toggleQuestionType('mc')">
+                            객관식
+                        </label>
+                        <label class="type-option {{ 'active' if question.q_type == 'multiple_response' else '' }}"
+                            id="type-mr">
+                            <input type="radio" name="q_type" value="multiple_response" {{ 'checked' if
+                                question.q_type=='multiple_response' else '' }} onchange="toggleQuestionType('mr')">
+                            복수정답
+                        </label>
+                        <label class="type-option {{ 'active' if question.q_type == 'short_answer' else '' }}"
+                            id="type-short">
+                            <input type="radio" name="q_type" value="short_answer" {{ 'checked' if
+                                question.q_type=='short_answer' else '' }} onchange="toggleQuestionType('short')">
+                            주관식
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 문제 내용 -->
+                <div class="form-group">
+                    <label for="content">문제 내용</label>
+                    <textarea id="content" name="content" rows="4">{{ question.content or '' }}</textarea>
+                </div>
+
+                <!-- 주관식 정답 -->
+                <div class="short-answer-section {{ 'active' if question.q_type == 'short_answer' else '' }}"
+                    id="shortAnswerSection">
+                    <div class="form-group">
+                        <label for="correct_answer_text">정답</label>
+                        <input type="text" id="correct_answer_text" name="correct_answer_text"
+                            value="{{ question.correct_answer_text or question.answer or '' }}">
+                    </div>
+                </div>
+
+                <!-- 객관식 선택지 -->
+                <div class="choices-section {{ 'active' if question.q_type != 'short_answer' else '' }}"
+                    id="choicesSection">
+                    <div class="form-group">
+                        <label>선택지</label>
+                        {% for choice in question.choices %}
+                        <div class="choice-row">
+                            <span class="choice-num">{{ choice.choice_number }}.</span>
+                            <input type="text" name="choice_{{ choice.choice_number }}" value="{{ choice.content }}">
+                            <input type="checkbox" name="correct_answers" value="{{ choice.choice_number }}"
+                                {{ 'checked' if choice.is_correct else '' }}>
+                            <label>정답</label>
+                        </div>
+                        {% endfor %}
+                        {% if not question.choices %}
+                        {% for i in range(1, 6) %}
+                        <div class="choice-row">
+                            <span class="choice-num">{{ i }}.</span>
+                            <input type="text" name="choice_{{ i }}" value="">
+                            <input type="checkbox" name="correct_answers" value="{{ i }}">
+                            <label>정답</label>
+                        </div>
+                        {% endfor %}
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- 해설 -->
+                <div class="form-group">
+                    <label for="explanation">해설 (선택)</label>
+                    <textarea id="explanation" name="explanation" rows="3">{{ question.explanation or '' }}</textarea>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">저장</button>
+                    <a href="{{ url_for('exam.view_question', exam_id=exam.id, question_number=question.question_number) }}"
+                        class="btn btn-secondary">취소</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function toggleQuestionType(type) {
+            // 버튼 활성화
+            document.querySelectorAll('.type-option').forEach(el => el.classList.remove('active'));
+            if (type === 'short') {
+                document.getElementById('type-short').classList.add('active');
+                document.getElementById('shortAnswerSection').classList.add('active');
+                document.getElementById('choicesSection').classList.remove('active');
+            } else {
+                document.getElementById('type-' + type).classList.add('active');
+                document.getElementById('shortAnswerSection').classList.remove('active');
+                document.getElementById('choicesSection').classList.add('active');
+            }
+        }
+    </script>
+</body>
+
+</html>

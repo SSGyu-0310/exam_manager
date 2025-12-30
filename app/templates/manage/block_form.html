@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ '블록 수정' if block else '새 블록 만들기' }} - 기출문제 관리</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+        }
+
+        .back-link {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .form-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 2rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #aaa;
+        }
+
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 0.8rem 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            color: #fff;
+            font-size: 1rem;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.8rem 2rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            margin-left: 0.5rem;
+        }
+
+        .form-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>{{ '✏️ 블록 수정' if block else '➕ 새 블록 만들기' }}</h1>
+            <a href="{{ url_for('manage.list_blocks') }}" class="back-link">← 목록으로</a>
+        </header>
+
+        <div class="form-card">
+            <form method="POST">
+                <div class="form-group">
+                    <label for="name">블록 이름 *</label>
+                    <input type="text" id="name" name="name" value="{{ block.name if block else '' }}"
+                        placeholder="예: 심혈관학, 호흡기학" required>
+                </div>
+                <div class="form-group">
+                    <label for="order">표시 순서</label>
+                    <input type="number" id="order" name="order" value="{{ block.order if block else 0 }}" min="0">
+                </div>
+                <div class="form-group">
+                    <label for="description">설명 (선택)</label>
+                    <textarea id="description" name="description"
+                        placeholder="블록에 대한 설명을 입력하세요">{{ block.description if block else '' }}</textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">
+                        {{ '수정 완료' if block else '블록 생성' }}
+                    </button>
+                    <a href="{{ url_for('manage.list_blocks') }}" class="btn btn-secondary">취소</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</body>
+
+</html>

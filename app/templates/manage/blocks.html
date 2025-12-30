@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>블록 관리 - 기출문제 관리</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            font-size: 2rem;
+        }
+
+        .nav-links a {
+            color: #667eea;
+            text-decoration: none;
+            margin-left: 1rem;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.8rem 1.5rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-sm {
+            padding: 0.5rem 1rem;
+            font-size: 0.9rem;
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        .block-list {
+            margin-top: 1rem;
+        }
+
+        .block-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .block-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .block-title {
+            font-size: 1.3rem;
+            color: #667eea;
+        }
+
+        .block-meta {
+            color: #aaa;
+            font-size: 0.9rem;
+        }
+
+        .block-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .lecture-list {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+
+        .lecture-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.8rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .lecture-item:last-child {
+            border-bottom: none;
+        }
+
+        .lecture-title {
+            font-weight: 500;
+        }
+
+        .lecture-count {
+            color: #aaa;
+            font-size: 0.9rem;
+        }
+
+        .flash-messages {
+            margin-bottom: 1rem;
+        }
+
+        .flash {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+
+        .flash.success {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #aaa;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>📚 블록 관리</h1>
+            <div class="nav-links">
+                <a href="{{ url_for('manage.dashboard') }}">← 대시보드</a>
+                <a href="{{ url_for('manage.create_block') }}" class="btn btn-primary btn-sm">+ 새 블록</a>
+            </div>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="block-list">
+            {% if blocks %}
+            {% for block in blocks %}
+            <div class="block-card">
+                <div class="block-header">
+                    <div>
+                        <div class="block-title">{{ block.name }}</div>
+                        <div class="block-meta">
+                            {{ block.lecture_count }}개 강의 | {{ block.question_count }}개 문제
+                        </div>
+                    </div>
+                    <div class="block-actions">
+                        <a href="{{ url_for('manage.list_lectures', block_id=block.id) }}"
+                            class="btn btn-secondary btn-sm">강의 관리</a>
+                        <a href="{{ url_for('manage.edit_block', block_id=block.id) }}"
+                            class="btn btn-secondary btn-sm">수정</a>
+                        <form action="{{ url_for('manage.delete_block', block_id=block.id) }}" method="POST"
+                            style="display:inline;" onsubmit="return confirm('정말 삭제하시겠습니까?');">
+                            <button type="submit" class="btn btn-danger btn-sm">삭제</button>
+                        </form>
+                    </div>
+                </div>
+                {% if block.description %}
+                <p style="color: #aaa;">{{ block.description }}</p>
+                {% endif %}
+
+                {% if block.lectures.count() > 0 %}
+                <div class="lecture-list">
+                    {% for lecture in block.lectures.limit(5) %}
+                    <a href="{{ url_for('manage.view_lecture', lecture_id=lecture.id) }}" class="lecture-item"
+                        style="text-decoration: none; color: inherit; cursor: pointer;">
+                        <span class="lecture-title">{{ lecture.order }}강. {{ lecture.title }}</span>
+                        <span class="lecture-count">{{ lecture.question_count }}문제 →</span>
+                    </a>
+                    {% endfor %}
+                    {% if block.lectures.count() > 5 %}
+                    <div style="text-align: center; padding-top: 0.5rem; color: #667eea;">
+                        + {{ block.lectures.count() - 5 }}개 더보기
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="empty-state">
+                <p>등록된 블록이 없습니다.</p>
+                <a href="{{ url_for('manage.create_block') }}" class="btn btn-primary" style="margin-top: 1rem;">첫 블록
+                    만들기</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+
+</html>

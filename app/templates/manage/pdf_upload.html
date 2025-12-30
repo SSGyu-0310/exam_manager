@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF 업로드 - 기출문제 관리</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 700px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+        }
+
+        .back-link {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .upload-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 2rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #aaa;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 0.8rem 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            color: #fff;
+            font-size: 1rem;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            background: rgba(102, 126, 234, 0.1);
+            border: 2px dashed #667eea;
+            border-radius: 10px;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .file-input-wrapper:hover {
+            background: rgba(102, 126, 234, 0.2);
+        }
+
+        .file-input-wrapper input[type="file"] {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .file-input-wrapper .icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .file-input-wrapper .text {
+            color: #aaa;
+        }
+
+        .file-name {
+            margin-top: 1rem;
+            padding: 0.5rem 1rem;
+            background: rgba(46, 204, 113, 0.2);
+            border-radius: 5px;
+            display: none;
+            color: #2ecc71;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+            width: 100%;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .info-box {
+            background: rgba(102, 126, 234, 0.1);
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            border-left: 4px solid #667eea;
+        }
+
+        .info-box h4 {
+            color: #667eea;
+            margin-bottom: 0.5rem;
+        }
+
+        .info-box ul {
+            margin-left: 1.5rem;
+            color: #ccc;
+            font-size: 0.9rem;
+        }
+
+        .info-box li {
+            margin-bottom: 0.3rem;
+        }
+
+        .flash-messages {
+            margin-bottom: 1rem;
+        }
+
+        .flash {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+
+        .flash.success {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+
+        .flash.error {
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>📄 PDF 업로드</h1>
+            <a href="{{ url_for('manage.dashboard') }}" class="back-link">← 대시보드</a>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="info-box">
+            <h4>📄 PDF 형식 안내</h4>
+            <ul>
+                <li>문제 번호는 <strong>"1."</strong>, <strong>"2."</strong> 형식이어야 합니다.</li>
+                <li>선택지는 <strong>"1)"</strong>, <strong>"2)"</strong> 형식이어야 합니다.</li>
+                <li>정답은 <strong>색상</strong>으로 표시되어 있어야 자동 감지됩니다.</li>
+                <li>이미지는 자동으로 추출되어 저장됩니다.</li>
+            </ul>
+        </div>
+
+        <div class="upload-card">
+            <form method="POST" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label for="title">시험 이름 *</label>
+                    <input type="text" id="title" name="title" placeholder="예: 21년 생리학 1차" required>
+                </div>
+                <div class="form-group">
+                    <label for="subject">과목</label>
+                    <input type="text" id="subject" name="subject" placeholder="예: 생리학, 해부학">
+                </div>
+                <div class="form-group">
+                    <label for="year">연도</label>
+                    <input type="number" id="year" name="year" placeholder="예: 2021" min="2000" max="2099">
+                </div>
+                <div class="form-group">
+                    <label for="term">차수</label>
+                    <input type="text" id="term" name="term" placeholder="예: 1차, 기말">
+                </div>
+                <div class="form-group">
+                    <label>PDF 파일 *</label>
+                    <div class="file-input-wrapper" id="dropZone">
+                        <div class="icon">📄</div>
+                        <div class="text">클릭하거나 PDF 파일을 드래그하세요</div>
+                        <input type="file" name="pdf_file" accept=".pdf" required id="pdfFile">
+                    </div>
+                    <div class="file-name" id="fileName"></div>
+                </div>
+                <button type="submit" class="btn btn-primary">업로드 및 파싱</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('pdfFile');
+        const fileName = document.getElementById('fileName');
+
+        fileInput.addEventListener('change', function () {
+            if (this.files.length > 0) {
+                fileName.textContent = '📄 ' + this.files[0].name;
+                fileName.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+
+</html>

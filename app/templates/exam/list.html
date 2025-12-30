@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>기출 시험 목록 - 기출문제 관리</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            font-size: 2rem;
+        }
+
+        .nav-links a {
+            color: #667eea;
+            text-decoration: none;
+            margin-left: 1rem;
+        }
+
+        .exam-grid {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .exam-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.2s;
+        }
+
+        .exam-card:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .exam-info .title {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .exam-info .meta {
+            color: #aaa;
+            font-size: 0.9rem;
+            margin-top: 0.3rem;
+        }
+
+        .exam-stats {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .stat {
+            text-align: center;
+            padding: 0.5rem 1rem;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+        }
+
+        .stat .num {
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+
+        .stat .label {
+            font-size: 0.75rem;
+            color: #aaa;
+        }
+
+        .btn {
+            padding: 0.6rem 1.2rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #aaa;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>📋 기출 시험 목록</h1>
+            <div class="nav-links">
+                <a href="{{ url_for('main.index') }}">← 홈</a>
+            </div>
+        </header>
+
+        {% if exams %}
+        <div class="exam-grid">
+            {% for exam in exams %}
+            <div class="exam-card">
+                <div class="exam-info">
+                    <div class="title">{{ exam.title }}</div>
+                    <div class="meta">{{ exam.subject or '과목 미지정' }} | {{ exam.question_count }}문제</div>
+                </div>
+                <div class="exam-stats">
+                    <div class="stat">
+                        <div class="num">{{ exam.classified_count }}</div>
+                        <div class="label">분류됨</div>
+                    </div>
+                </div>
+                <a href="{{ url_for('exam.view_exam', exam_id=exam.id) }}" class="btn btn-primary">보기</a>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p>등록된 시험이 없습니다.</p>
+            <a href="{{ url_for('manage.upload_csv') }}" class="btn btn-primary" style="margin-top: 1rem;">CSV 업로드하기</a>
+        </div>
+        {% endif %}
+    </div>
+</body>
+
+</html>

@@ -1,0 +1,6 @@
+flask
+flask-sqlalchemy
+pandas
+python-dotenv
+Pillow
+pdfplumber

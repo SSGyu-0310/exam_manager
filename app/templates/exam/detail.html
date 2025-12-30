@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ exam.title }} - 기출문제 관리</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .header-info h1 {
+            font-size: 1.8rem;
+        }
+
+        .header-info .meta {
+            color: #aaa;
+            margin-top: 0.3rem;
+        }
+
+        .nav-links a {
+            color: #667eea;
+            text-decoration: none;
+            margin-left: 1rem;
+        }
+
+        .stats-bar {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 1rem 1.5rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            gap: 2rem;
+            align-items: center;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat .num {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat .label {
+            font-size: 0.85rem;
+            color: #aaa;
+        }
+
+        .stat.warning .num {
+            color: #f39c12;
+        }
+
+        .stat.success .num {
+            color: #2ecc71;
+        }
+
+        .progress-bar {
+            flex: 1;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #2ecc71);
+            border-radius: 4px;
+        }
+
+        /* 뷰 토글 */
+        .view-toggle {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .view-btn {
+            padding: 0.6rem 1rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.05);
+            color: #aaa;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .view-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        .view-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            border-color: transparent;
+        }
+
+        /* 리스트 뷰 */
+        .questions-list {
+            display: none;
+        }
+
+        .questions-list.active {
+            display: block;
+        }
+
+        .question-row {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 1rem 1.5rem;
+            margin-bottom: 0.8rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.2s;
+        }
+
+        .question-row:hover {
+            background: rgba(255, 255, 255, 0.08);
+            transform: translateX(5px);
+        }
+
+        .question-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex: 1;
+        }
+
+        .question-number {
+            font-weight: bold;
+            color: #667eea;
+            min-width: 50px;
+        }
+
+        .question-preview {
+            color: #ccc;
+            font-size: 0.95rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 500px;
+        }
+
+        .question-type {
+            font-size: 0.75rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 10px;
+            background: rgba(102, 126, 234, 0.2);
+            color: #667eea;
+        }
+
+        .question-type.short {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+
+        .question-type.multi {
+            background: rgba(243, 156, 18, 0.2);
+            color: #f39c12;
+        }
+
+        .question-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .badge {
+            font-size: 0.75rem;
+            padding: 0.3rem 0.8rem;
+            border-radius: 15px;
+        }
+
+        .badge-success {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+
+        .badge-warning {
+            background: rgba(243, 156, 18, 0.2);
+            color: #f39c12;
+        }
+
+        .btn {
+            padding: 0.4rem 1rem;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+
+        .btn-view {
+            background: rgba(102, 126, 234, 0.2);
+            color: #667eea;
+        }
+
+        .btn-view:hover {
+            background: rgba(102, 126, 234, 0.4);
+        }
+
+        /* 카드 뷰 */
+        .questions-grid {
+            display: none;
+        }
+
+        .questions-grid.active {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1.2rem;
+        }
+
+        .question-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            overflow: hidden;
+            transition: all 0.3s;
+        }
+
+        .question-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .card-header {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 0.8rem 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-body {
+            padding: 1rem;
+            min-height: 120px;
+        }
+
+        .card-content {
+            font-size: 0.9rem;
+            line-height: 1.5;
+            color: #ccc;
+            display: -webkit-box;
+            -webkit-line-clamp: 4;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .card-footer {
+            padding: 0.8rem 1rem;
+            background: rgba(0, 0, 0, 0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 4rem;
+            color: #aaa;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="header-info">
+                <h1>📝 {{ exam.title }}</h1>
+                <div class="meta">
+                    {{ exam.subject or '과목 미지정' }}
+                    {% if exam.year %} | {{ exam.year }}년{% endif %}
+                    {% if exam.term %} {{ exam.term }}{% endif %}
+                </div>
+            </div>
+            <div class="nav-links">
+                <a href="{{ url_for('manage.list_exams') }}">← 시험 목록</a>
+                <a href="{{ url_for('exam.unclassified_questions') }}">분류하기</a>
+            </div>
+        </header>
+
+        <div class="stats-bar">
+            <div class="stat">
+                <div class="num">{{ total_count }}</div>
+                <div class="label">전체 문제</div>
+            </div>
+            <div class="stat success">
+                <div class="num">{{ classified_count }}</div>
+                <div class="label">분류됨</div>
+            </div>
+            <div class="stat warning">
+                <div class="num">{{ total_count - classified_count }}</div>
+                <div class="label">미분류</div>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill"
+                    style="width: {{ (classified_count / total_count * 100) if total_count > 0 else 0 }}%"></div>
+            </div>
+        </div>
+
+        <!-- 뷰 토글 버튼 -->
+        <div class="view-toggle">
+            <button class="view-btn active" onclick="setView('list')" id="listBtn">
+                ☰ 리스트
+            </button>
+            <button class="view-btn" onclick="setView('grid')" id="gridBtn">
+                ▦ 카드
+            </button>
+        </div>
+
+        {% if questions %}
+        <!-- 리스트 뷰 -->
+        <div class="questions-list active" id="listView">
+            {% for question in questions %}
+            <div class="question-row">
+                <div class="question-info">
+                    <span class="question-number">Q{{ question.question_number }}</span>
+                    <span
+                        class="question-type {{ 'short' if question.q_type == 'short_answer' else 'multi' if question.q_type == 'multiple_response' else '' }}">
+                        {% if question.q_type == 'short_answer' %}주관식
+                        {% elif question.q_type == 'multiple_response' %}복수
+                        {% else %}객관식{% endif %}
+                    </span>
+                    <span class="question-preview">{{ question.content[:60] if question.content else '(이미지 문제)'
+                        }}...</span>
+                </div>
+                <div class="question-status">
+                    {% if question.is_classified %}
+                    <span class="badge badge-success">{{ question.lecture.title[:10] if question.lecture else '분류됨'
+                        }}</span>
+                    {% else %}
+                    <span class="badge badge-warning">미분류</span>
+                    {% endif %}
+                    <a href="{{ url_for('exam.view_question', exam_id=exam.id, question_number=question.question_number) }}"
+                        class="btn btn-view">보기</a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- 카드 뷰 -->
+        <div class="questions-grid" id="gridView">
+            {% for question in questions %}
+            <div class="question-card">
+                <div class="card-header">
+                    <span class="question-number">Q{{ question.question_number }}</span>
+                    <span
+                        class="question-type {{ 'short' if question.q_type == 'short_answer' else 'multi' if question.q_type == 'multiple_response' else '' }}">
+                        {% if question.q_type == 'short_answer' %}주관식
+                        {% elif question.q_type == 'multiple_response' %}복수
+                        {% else %}객관식{% endif %}
+                    </span>
+                </div>
+                <div class="card-body">
+                    <div class="card-content">
+                        {{ question.content or '(이미지로 출제된 문제입니다)' }}
+                    </div>
+                </div>
+                <div class="card-footer">
+                    {% if question.is_classified %}
+                    <span class="badge badge-success">{{ question.lecture.title[:8] if question.lecture else '분류됨'
+                        }}...</span>
+                    {% else %}
+                    <span class="badge badge-warning">미분류</span>
+                    {% endif %}
+                    <a href="{{ url_for('exam.view_question', exam_id=exam.id, question_number=question.question_number) }}"
+                        class="btn btn-view">보기</a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p>등록된 문제가 없습니다.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        function setView(view) {
+            const listView = document.getElementById('listView');
+            const gridView = document.getElementById('gridView');
+            const listBtn = document.getElementById('listBtn');
+            const gridBtn = document.getElementById('gridBtn');
+
+            if (view === 'list') {
+                listView.classList.add('active');
+                gridView.classList.remove('active');
+                listBtn.classList.add('active');
+                gridBtn.classList.remove('active');
+            } else {
+                listView.classList.remove('active');
+                gridView.classList.add('active');
+                listBtn.classList.remove('active');
+                gridBtn.classList.add('active');
+            }
+
+            // 설정 저장
+            localStorage.setItem('questionViewMode', view);
+        }
+
+        // 저장된 뷰 모드 복원
+        const savedView = localStorage.getItem('questionViewMode');
+        if (savedView) {
+            setView(savedView);
+        }
+    </script>
+</body>
+
+</html>

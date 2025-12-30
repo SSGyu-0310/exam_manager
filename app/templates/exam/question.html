@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Q{{ question.question_number }} - {{ exam.title }}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .header-info h1 {
+            font-size: 1.5rem;
+        }
+
+        .header-info .meta {
+            color: #aaa;
+            margin-top: 0.3rem;
+            font-size: 0.9rem;
+        }
+
+        .nav-links a {
+            color: #667eea;
+            text-decoration: none;
+            margin-left: 1rem;
+        }
+
+        .question-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 2rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 1.5rem;
+        }
+
+        .question-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .question-number {
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .question-type {
+            font-size: 0.85rem;
+            padding: 0.3rem 0.8rem;
+            border-radius: 15px;
+            background: rgba(102, 126, 234, 0.2);
+            color: #667eea;
+        }
+
+        .question-type.short {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+
+        .question-type.multi {
+            background: rgba(243, 156, 18, 0.2);
+            color: #f39c12;
+        }
+
+        .question-content {
+            font-size: 1.1rem;
+            line-height: 1.8;
+            margin-bottom: 1.5rem;
+        }
+
+        .question-image {
+            max-width: 100%;
+            border-radius: 10px;
+            margin-bottom: 1.5rem;
+        }
+
+        .choices-list {
+            list-style: none;
+            margin-bottom: 1.5rem;
+        }
+
+        .choice-item {
+            padding: 1rem 1.2rem;
+            border-radius: 10px;
+            margin-bottom: 0.8rem;
+            background: rgba(0, 0, 0, 0.2);
+            display: flex;
+            gap: 1rem;
+            align-items: flex-start;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+
+        .choice-item:hover {
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .choice-item.correct {
+            background: rgba(46, 204, 113, 0.15);
+            border-color: rgba(46, 204, 113, 0.5);
+        }
+
+        .choice-item.correct::after {
+            content: '✓ 정답';
+            margin-left: auto;
+            color: #2ecc71;
+            font-weight: bold;
+        }
+
+        .choice-number {
+            font-weight: bold;
+            color: #667eea;
+            min-width: 30px;
+        }
+
+        .choice-content {
+            flex: 1;
+            line-height: 1.6;
+        }
+
+        .short-answer-box {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .short-answer-box label {
+            display: block;
+            color: #aaa;
+            margin-bottom: 0.5rem;
+        }
+
+        .short-answer-box .answer {
+            font-size: 1.1rem;
+            color: #2ecc71;
+            padding: 1rem;
+            background: rgba(46, 204, 113, 0.1);
+            border-radius: 8px;
+            border-left: 3px solid #2ecc71;
+        }
+
+        .explanation-box {
+            background: rgba(52, 152, 219, 0.1);
+            border-radius: 10px;
+            padding: 1.5rem;
+            border-left: 3px solid #3498db;
+        }
+
+        .explanation-box h4 {
+            color: #3498db;
+            margin-bottom: 0.8rem;
+        }
+
+        .explanation-box p {
+            line-height: 1.8;
+            color: #ccc;
+        }
+
+        .classification-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .classification-section h4 {
+            color: #667eea;
+            margin-bottom: 1rem;
+        }
+
+        .current-lecture {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #2ecc71;
+            margin-bottom: 1rem;
+        }
+
+        .classify-form {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .classify-form select {
+            flex: 1;
+            padding: 0.6rem 1rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(0, 0, 0, 0.3);
+            color: #fff;
+        }
+
+        .btn {
+            padding: 0.6rem 1.2rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        .nav-buttons {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 2rem;
+        }
+
+        .flash-messages {
+            margin-bottom: 1rem;
+        }
+
+        .flash {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+
+        .flash.success {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+
+        .flash.error {
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="header-info">
+                <h1>문제 {{ question.question_number }}</h1>
+                <div class="meta">{{ exam.title }}</div>
+            </div>
+            <div class="nav-links">
+                <a href="{{ url_for('exam.view_exam', exam_id=exam.id) }}">← 시험으로</a>
+                <a href="{{ url_for('exam.unclassified_questions') }}">분류 대기소</a>
+            </div>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="question-card">
+            <div class="question-header">
+                <span class="question-number">Q{{ question.question_number }}</span>
+                <div style="display: flex; gap: 0.8rem; align-items: center;">
+                    <span
+                        class="question-type {{ 'short' if question.q_type == 'short_answer' else 'multi' if question.q_type == 'multiple_response' else '' }}">
+                        {% if question.q_type == 'short_answer' %}주관식
+                        {% elif question.q_type == 'multiple_response' %}복수정답
+                        {% else %}객관식{% endif %}
+                    </span>
+                    <a href="{{ url_for('manage.edit_question', question_id=question.id) }}" class="btn btn-secondary"
+                        style="font-size: 0.85rem; padding: 0.4rem 0.8rem;">✏️ 수정</a>
+                </div>
+            </div>
+
+            {% if question.image_path %}
+            <img src="{{ url_for('static', filename='uploads/' + question.image_path) }}" class="question-image"
+                alt="문제 이미지">
+            {% endif %}
+
+            <div class="question-content">
+                {{ question.content or '(이미지로 출제된 문제입니다)' }}
+            </div>
+
+            {% if question.q_type == 'short_answer' %}
+            <!-- 주관식 정답 -->
+            <div class="short-answer-box">
+                <label>정답</label>
+                <div class="answer">{{ question.correct_answer_text or question.answer or '정답 없음' }}</div>
+            </div>
+            {% else %}
+            <!-- 객관식 선택지 -->
+            <ul class="choices-list">
+                {% for choice in question.choices %}
+                <li class="choice-item {{ 'correct' if choice.is_correct else '' }}">
+                    <span class="choice-number">{{ choice.choice_number }}.</span>
+                    <span class="choice-content">{{ choice.content }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+
+            {% if question.explanation %}
+            <div class="explanation-box">
+                <h4>📝 해설</h4>
+                <p>{{ question.explanation }}</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- 분류 섹션 -->
+        <div class="classification-section">
+            <h4>🏷️ 강의 분류</h4>
+            {% if question.is_classified and question.lecture %}
+            <div class="current-lecture">
+                ✓ 현재 분류: <strong>{{ question.lecture.block.name }} > {{ question.lecture.title }}</strong>
+            </div>
+            {% endif %}
+
+            <form class="classify-form" method="POST"
+                action="{{ url_for('exam.classify_question', question_id=question.id) }}">
+                <select name="lecture_id">
+                    <option value="">강의 선택...</option>
+                    {% for block in blocks %}
+                    <optgroup label="{{ block.name }}">
+                        {% for lecture in block.lectures %}
+                        <option value="{{ lecture.id }}" {{ 'selected' if question.lecture_id==lecture.id else '' }}>
+                            {{ lecture.order }}강. {{ lecture.title }}
+                        </option>
+                        {% endfor %}
+                    </optgroup>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-primary">
+                    {{ '이동' if question.is_classified else '배정' }}
+                </button>
+                {% if question.is_classified %}
+                <form method="POST" action="{{ url_for('exam.unclassify_question', question_id=question.id) }}"
+                    style="display:inline;">
+                    <button type="submit" class="btn btn-danger">분류 해제</button>
+                </form>
+                {% endif %}
+            </form>
+        </div>
+
+        <!-- 이전/다음 버튼 -->
+        <div class="nav-buttons">
+            {% if question.question_number > 1 %}
+            <a href="{{ url_for('exam.view_question', exam_id=exam.id, question_number=question.question_number - 1) }}"
+                class="btn btn-secondary">← 이전 문제</a>
+            {% else %}
+            <span></span>
+            {% endif %}
+
+            <a href="{{ url_for('exam.view_question', exam_id=exam.id, question_number=question.question_number + 1) }}"
+                class="btn btn-secondary">다음 문제 →</a>
+        </div>
+    </div>
+</body>
+
+</html>
