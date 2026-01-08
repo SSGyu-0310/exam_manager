@@ -1,5 +1,5 @@
 """관리 Blueprint - 블록, 강의, 시험 CRUD"""
-from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
+from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, abort
 from werkzeug.utils import secure_filename
 from datetime import datetime
 import os
@@ -7,6 +7,16 @@ from app import db
 from app.models import Block, Lecture, PreviousExam, Question, Choice
 
 manage_bp = Blueprint('manage', __name__)
+
+
+@manage_bp.before_request
+def restrict_to_local_admin():
+    if not current_app.config.get('LOCAL_ADMIN_ONLY'):
+        return None
+    remote_addr = request.remote_addr or ''
+    if remote_addr not in {'127.0.0.1', '::1'}:
+        abort(404)
+    return None
 
 
 def allowed_file(filename, allowed_extensions):
@@ -388,7 +398,11 @@ def upload_pdf():
             return redirect(request.url)
         
         try:
-            from app.services.pdf_parser import parse_pdf_to_questions
+            parser_mode = current_app.config.get('PDF_PARSER_MODE', 'legacy')
+            if parser_mode == 'experimental':
+                from app.services.pdf_parser_experimental import parse_pdf_to_questions
+            else:
+                from app.services.pdf_parser import parse_pdf_to_questions
             
             # PDF 파일 임시 저장
             import tempfile
@@ -655,14 +669,16 @@ def upload_image():
     filename = f"{uuid.uuid4().hex}.{ext}"
     
     # 저장 경로
-    upload_folder = os.path.join(current_app.static_folder, 'uploads')
+    upload_folder = current_app.config.get('UPLOAD_FOLDER') or os.path.join(current_app.static_folder, 'uploads')
     os.makedirs(upload_folder, exist_ok=True)
     filepath = os.path.join(upload_folder, filename)
     
     try:
         file.save(filepath)
         # 마크다운 이미지 경로 반환
-        image_url = url_for('static', filename='uploads/' + filename)
+        relative_folder = os.path.relpath(upload_folder, current_app.static_folder)
+        relative_folder = relative_folder.replace('\\', '/').strip('/')
+        image_url = url_for('static', filename=f"{relative_folder}/{filename}")
         return {'success': True, 'url': image_url, 'filename': filename}
     except Exception as e:
         return {'success': False, 'error': str(e)}, 500

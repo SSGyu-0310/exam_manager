@@ -36,6 +36,12 @@ class Config:
     # DB auto-create (dev convenience; disable for production safety)
     AUTO_CREATE_DB = _env_flag('AUTO_CREATE_DB', default=False)
 
+    # Lock admin routes to localhost only when enabled.
+    LOCAL_ADMIN_ONLY = _env_flag('LOCAL_ADMIN_ONLY', default=False)
+
+    # PDF parser selection: "legacy" or "experimental".
+    PDF_PARSER_MODE = os.environ.get('PDF_PARSER_MODE', 'legacy')
+
 
 class DevelopmentConfig(Config):
     """개발 환경 설정"""
@@ -48,9 +54,23 @@ class ProductionConfig(Config):
     DEBUG = False
 
 
+class LocalAdminConfig(DevelopmentConfig):
+    """Local-only admin sandbox configuration."""
+    _local_admin_db = os.environ.get('LOCAL_ADMIN_DB')
+    SQLALCHEMY_DATABASE_URI = (
+        f"sqlite:///{_local_admin_db}"
+        if _local_admin_db
+        else f"sqlite:///{BASE_DIR / 'data' / 'admin_local.db'}"
+    )
+    UPLOAD_FOLDER = BASE_DIR / 'app' / 'static' / 'uploads_admin'
+    LOCAL_ADMIN_ONLY = True
+    PDF_PARSER_MODE = 'experimental'
+
+
 # 설정 매핑
 config = {
     'development': DevelopmentConfig,
     'production': ProductionConfig,
+    'local_admin': LocalAdminConfig,
     'default': DevelopmentConfig
 }
