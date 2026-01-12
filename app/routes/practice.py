@@ -2,14 +2,13 @@
 import json
 
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash
+from urllib.parse import urlencode
 from app import db
 from app.models import Block, Lecture, Choice, PracticeSession, PracticeAnswer, Question
 from app.services.practice_service import (
     build_question_groups,
     build_duplicate_question_map,
     get_lecture_questions_ordered,
-    get_prev_next,
-    get_question_by_seq,
     build_legacy_results,
     evaluate_practice_answers,
     grade_practice_submission,
@@ -45,6 +44,60 @@ def _format_answer_payload(answer):
     if answer_type == 'short':
         return value if isinstance(value, str) else ''
     return ''
+
+
+def _parse_exam_filter_args():
+    raw_ids = request.args.getlist('exam_ids')
+    exam_ids = []
+    for raw in raw_ids:
+        for part in str(raw).split(','):
+            part = part.strip()
+            if not part:
+                continue
+            if part.isdigit():
+                exam_ids.append(int(part))
+    seen = set()
+    ordered = []
+    for exam_id in exam_ids:
+        if exam_id in seen:
+            continue
+        seen.add(exam_id)
+        ordered.append(exam_id)
+    filter_requested = request.args.get('filter')
+    filter_active = filter_requested is not None or bool(ordered)
+    return ordered, filter_active
+
+
+def _build_filter_query(exam_ids, filter_active):
+    if not filter_active:
+        return ''
+    params = {'filter': 1}
+    if exam_ids:
+        params['exam_ids'] = exam_ids
+    return f"?{urlencode(params, doseq=True)}"
+
+
+def _apply_exam_filter(questions, exam_ids, filter_active):
+    if not questions:
+        return []
+    if not filter_active:
+        return questions
+    if not exam_ids:
+        return []
+    exam_set = set(exam_ids)
+    return [question for question in questions if question.exam_id in exam_set]
+
+
+def _build_exam_options(questions):
+    options = []
+    seen = set()
+    for question in questions:
+        exam = question.exam
+        if not exam or exam.id in seen:
+            continue
+        seen.add(exam.id)
+        options.append({'id': exam.id, 'title': exam.title})
+    return options
 
 
 @practice_bp.route('/')
@@ -135,12 +188,20 @@ def session_detail(session_id):
 def dashboard(lecture_id):
     """강의별 문제 대시보드 (바둑판 형태) - 유형별 분리"""
     lecture = Lecture.query.get_or_404(lecture_id)
-    questions = get_lecture_questions_ordered(lecture_id) or []
+    exam_ids, filter_active = _parse_exam_filter_args()
+    all_questions = get_lecture_questions_ordered(lecture_id) or []
+    questions = _apply_exam_filter(all_questions, exam_ids, filter_active)
     
     groups = build_question_groups(questions)
     objective_questions = groups['objective_questions']
     subjective_questions = groups['subjective_questions']
     question_map = groups['question_map']
+    exam_options = _build_exam_options(all_questions)
+    if filter_active:
+        selected_exam_ids = exam_ids
+    else:
+        selected_exam_ids = [option['id'] for option in exam_options]
+    filter_query = _build_filter_query(exam_ids, filter_active)
 
     return render_template('practice/dashboard.html', 
                          lecture=lecture, 
@@ -150,22 +211,69 @@ def dashboard(lecture_id):
                          subjective_questions=subjective_questions,
                          total_count=len(questions),
                          objective_count=len(objective_questions),
-                         subjective_count=len(subjective_questions))
+                         subjective_count=len(subjective_questions),
+                         exam_options=exam_options,
+                         selected_exam_ids=selected_exam_ids,
+                         filter_query=filter_query,
+                         filter_active=filter_active)
 
 
 @practice_bp.route('/lecture/<int:lecture_id>/q/<int:question_id>')
 def question_by_id(lecture_id, question_id):
     """개별 문제 풀이 페이지 (question_id 기반)"""
     lecture = Lecture.query.get_or_404(lecture_id)
-    questions = get_lecture_questions_ordered(lecture_id) or []
+    exam_ids, filter_active = _parse_exam_filter_args()
+    all_questions = get_lecture_questions_ordered(lecture_id) or []
+    questions = _apply_exam_filter(all_questions, exam_ids, filter_active)
+    filter_query = _build_filter_query(exam_ids, filter_active)
     index = next((i for i, q in enumerate(questions) if q.id == question_id), None)
     if index is None:
         flash('유효하지 않은 문제 번호입니다.', 'error')
-        return redirect(url_for('practice.dashboard', lecture_id=lecture_id))
+        return redirect(url_for('practice.dashboard', lecture_id=lecture_id) + filter_query)
 
     current_question = questions[index]
     choices = current_question.choices.order_by(Choice.choice_number).all()
-    prev_question_id, next_question_id = get_prev_next(questions, index)
+    objective_questions = [q for q in questions if not q.is_short_answer]
+    subjective_questions = [q for q in questions if q.is_short_answer]
+    objective_index = {q.id: idx for idx, q in enumerate(objective_questions)}
+    subjective_index = {q.id: idx for idx, q in enumerate(subjective_questions)}
+
+    is_short = current_question.is_short_answer
+    question_type_label = "주관식" if is_short else "객관식"
+    if is_short:
+        type_questions = subjective_questions
+        type_index = subjective_index.get(current_question.id, index)
+    else:
+        type_questions = objective_questions
+        type_index = objective_index.get(current_question.id, index)
+    if not type_questions:
+        type_questions = questions
+        type_index = index
+    type_seq = type_index + 1
+    type_total = len(type_questions)
+
+    prev_question_id = None
+    next_question_id = None
+    prev_label = "이전"
+    next_label = "다음"
+
+    if is_short:
+        if type_index > 0:
+            prev_question_id = subjective_questions[type_index - 1].id
+        elif objective_questions:
+            prev_question_id = objective_questions[-1].id
+            prev_label = "이전 문제(객관식)"
+        if type_index + 1 < len(subjective_questions):
+            next_question_id = subjective_questions[type_index + 1].id
+    else:
+        if type_index > 0:
+            prev_question_id = objective_questions[type_index - 1].id
+        if type_index + 1 < len(objective_questions):
+            next_question_id = objective_questions[type_index + 1].id
+        elif subjective_questions:
+            next_question_id = subjective_questions[0].id
+            next_label = "다음 문제(주관식)"
+
     has_prev = prev_question_id is not None
     has_next = next_question_id is not None
 
@@ -189,34 +297,44 @@ def question_by_id(lecture_id, question_id):
                          lecture=lecture,
                          question=current_question,
                          choices=choices,
-                         seq=index + 1,
-                         total_count=len(questions),
+                         seq=type_seq,
+                         total_count=type_total,
+                         question_type_label=question_type_label,
                          has_prev=has_prev,
                          has_next=has_next,
                          prev_question_id=prev_question_id,
                          next_question_id=next_question_id,
-                         related_questions=related_questions)
+                         prev_label=prev_label,
+                         next_label=next_label,
+                         related_questions=related_questions,
+                         filter_query=filter_query)
 
 
 @practice_bp.route('/lecture/<int:lecture_id>/question/<int:seq>')
 def question(lecture_id, seq):
     """레거시 seq 라우트 -> question_id 라우트로 리다이렉트"""
     Lecture.query.get_or_404(lecture_id)
-    question, _, _ = get_question_by_seq(lecture_id, seq)
-    if not question:
+    exam_ids, filter_active = _parse_exam_filter_args()
+    all_questions = get_lecture_questions_ordered(lecture_id) or []
+    questions = _apply_exam_filter(all_questions, exam_ids, filter_active)
+    filter_query = _build_filter_query(exam_ids, filter_active)
+    index = seq - 1
+    if index < 0 or index >= len(questions):
         flash('유효하지 않은 문제 번호입니다.', 'error')
-        return redirect(url_for('practice.dashboard', lecture_id=lecture_id))
+        return redirect(url_for('practice.dashboard', lecture_id=lecture_id) + filter_query)
 
     return redirect(url_for('practice.question_by_id',
                             lecture_id=lecture_id,
-                            question_id=question.id))
+                            question_id=questions[index].id) + filter_query)
 
 
 @practice_bp.route('/lecture/<int:lecture_id>/submit', methods=['POST'])
 def submit(lecture_id):
     """답안 제출 및 채점 - 유형별 분리 채점"""
     lecture = Lecture.query.get_or_404(lecture_id)
-    questions = get_lecture_questions_ordered(lecture_id) or []
+    exam_ids, filter_active = _parse_exam_filter_args()
+    all_questions = get_lecture_questions_ordered(lecture_id) or []
+    questions = _apply_exam_filter(all_questions, exam_ids, filter_active)
     
     data = request.get_json()
     if not data:
@@ -236,7 +354,7 @@ def submit(lecture_id):
 
     if answers_v1 and not error_code:
         try:
-            grade_practice_submission(lecture_id, answers_v1)
+            grade_practice_submission(lecture_id, answers_v1, questions=questions)
         except Exception:
             db.session.rollback()
 
@@ -262,7 +380,10 @@ def submit(lecture_id):
 def result(lecture_id):
     """결과 페이지 (GET 방식으로 표시, 실제 데이터는 JS에서 처리)"""
     lecture = Lecture.query.get_or_404(lecture_id)
-    questions = get_lecture_questions_ordered(lecture_id) or []
+    exam_ids, filter_active = _parse_exam_filter_args()
+    all_questions = get_lecture_questions_ordered(lecture_id) or []
+    questions = _apply_exam_filter(all_questions, exam_ids, filter_active)
+    filter_query = _build_filter_query(exam_ids, filter_active)
     
     # 문제 정보 (JS에서 사용)
     question_data = []
@@ -283,5 +404,6 @@ def result(lecture_id):
     return render_template('practice/result.html',
                          lecture=lecture,
                          questions=question_data,
-                         total_count=len(questions))
+                         total_count=len(questions),
+                         filter_query=filter_query)
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PDF 문제 파서 - 프로젝트 통합 버전
-PDF를 파싱하여 직접 DB에 저장하고 이미지는 static/uploads/에 저장
+PDF parser for question extraction.
+Uses pdfplumber to detect question blocks, options, and answer hints.
 """
 
 import re
@@ -15,8 +15,12 @@ import pdfplumber
 
 
 CID_RE = re.compile(r"\(cid:\d+\)")
-Q_HEADER = re.compile(r"^\s*(\d{1,3})\.(?!\d)\s*(.*)$")     # 1. 문항 시작
-OPT_RE = re.compile(r"^([1-5])\)\s*(.+)$")         # 1) 선지 시작
+Q_HEADER = re.compile(r"^\s*(\d{1,3})\.(?!\d)\s*(.*)$")
+OPT_RE = re.compile(r"^([1-9]|1[0-6])([)\.])\s*(.*)$")
+EMBEDDED_OPT_RE = re.compile(r"^(?P<prefix>.*)\s+(?P<num>[1-9]|1[0-6])[)\.](?P<suffix>\s+.*)?$")
+ANSWER_LABEL_RE = re.compile(r"^(?:\uC815\uB2F5|\uB2F5|answer)\s*[:\uFF1A]\s*(.*)$", re.IGNORECASE)
+
+INDENT_TOL = 6.0
 
 
 def clean_text(s: str) -> str:
@@ -27,9 +31,6 @@ def clean_text(s: str) -> str:
 
 
 def detect_answer_color(pdf: pdfplumber.PDF, max_pages=None):
-    """
-    PDF에서 가장 많이 등장하는 RGB(3원소) 색 중 검정/흰색이 아닌 것을 '정답색'으로 추정.
-    """
     counter = Counter()
     pages = pdf.pages if max_pages is None else pdf.pages[:max_pages]
 
@@ -44,9 +45,9 @@ def detect_answer_color(pdf: pdfplumber.PDF, max_pages=None):
         return None
 
     for col, _ in counter.most_common():
-        if sum(abs(x) for x in col) < 0.001:        # black-ish
+        if sum(abs(x) for x in col) < 0.001:
             continue
-        if sum(abs(x - 1) for x in col) < 0.001:    # white-ish
+        if sum(abs(x - 1) for x in col) < 0.001:
             continue
         return col
 
@@ -58,13 +59,9 @@ def color_distance(c1, c2) -> float:
 
 
 def extract_events(pdf, answer_color, y_tol=3, min_image_area=2000):
-    """
-    페이지를 위->아래 순서로 '텍스트 라인' + '이미지' 이벤트로 뽑는다.
-    """
     events = []
 
     for pno, page in enumerate(pdf.pages, start=1):
-        # --- text lines ---
         words = page.extract_words(extra_attrs=["non_stroking_color"]) or []
         for w in words:
             col = w.get("non_stroking_color")
@@ -75,7 +72,6 @@ def extract_events(pdf, answer_color, y_tol=3, min_image_area=2000):
 
         words_sorted = sorted(words, key=lambda w: (w["top"], w["x0"]))
 
-        # 라인 클러스터링
         clusters = []
         cur = []
         cur_top = None
@@ -111,12 +107,13 @@ def extract_events(pdf, answer_color, y_tol=3, min_image_area=2000):
                     "page": pno,
                     "top": float(min(w["top"] for w in ws)),
                     "x0": float(min(w["x0"] for w in ws)),
+                    "x1": float(max(w["x1"] for w in ws)),
+                    "bottom": float(max(w["bottom"] for w in ws)),
                     "text": text,
                     "has_key": has_key,
                 }
             )
 
-        # --- images ---
         for img in page.images or []:
             w = float(img["x1"] - img["x0"])
             h = float(img["bottom"] - img["top"])
@@ -139,11 +136,55 @@ def extract_events(pdf, answer_color, y_tol=3, min_image_area=2000):
     return events
 
 
+def match_option_line(text, max_option_number):
+    m_opt = OPT_RE.match(text)
+    if not m_opt:
+        return None
+
+    opt_num = int(m_opt.group(1))
+    if opt_num > max_option_number:
+        return None
+
+    return opt_num, m_opt.group(2), m_opt.group(3).strip()
+
+
+def normalize_embedded_option(text, cur, max_option_number):
+    if not cur:
+        return [text]
+    if OPT_RE.match(text.lstrip()):
+        return [text]
+
+    m = EMBEDDED_OPT_RE.match(text)
+    if not m:
+        return [text]
+
+    prefix = (m.group("prefix") or "").rstrip()
+    if not prefix:
+        return [text]
+
+    num = int(m.group("num"))
+    if num > max_option_number:
+        return [text]
+
+    if cur.get("options_map"):
+        expected = max(cur["options_map"]) + 1
+        if num < expected:
+            return [text]
+    else:
+        if num != 1:
+            return [text]
+
+    if not re.search(r"[A-Za-z\uAC00-\uD7A3]", prefix):
+        return [text]
+
+    suffix = (m.group("suffix") or "").strip()
+    rebuilt = f"{num}) {prefix}".strip()
+    if suffix:
+        return [rebuilt, suffix]
+    return [rebuilt]
+
+
 def save_image_crop(page, bbox, upload_dir: Path, exam_prefix: str, resolution=200) -> str:
-    """
-    bbox 영역을 PNG로 래스터라이즈한 뒤 sha1 해시로 파일명 생성.
-    파일은 upload_dir에 저장하고 파일명만 반환 (DB 저장용)
-    """
     cropped = page.crop(bbox)
     page_image = cropped.to_image(resolution=resolution)
 
@@ -159,76 +200,104 @@ def save_image_crop(page, bbox, upload_dir: Path, exam_prefix: str, resolution=2
     return fname
 
 
-def parse_pdf_to_questions(pdf_path, upload_dir: Path, exam_prefix: str):
-    """
-    PDF를 파싱하여 문제 데이터 리스트 반환
-    
-    Returns:
-        list of dict: 각 문제의 데이터
-        {
-            'question_number': int,
-            'content': str,
-            'image_path': str or None,  # 문제 이미지 (첫번째만)
-            'options': [
-                {'number': 1, 'content': str, 'image_path': str or None, 'is_correct': bool},
-                ...
-            ],
-            'answer_options': [int],  # 정답 번호 리스트
-            'answer_text': str,
-        }
-    """
+def parse_pdf_to_questions(pdf_path, upload_dir: Path, exam_prefix: str, max_option_number=16):
     pdf_path = Path(pdf_path)
     upload_dir = Path(upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
-    
+
     questions = []
-    
+
     with pdfplumber.open(str(pdf_path)) as pdf:
         answer_color = detect_answer_color(pdf)
         events = extract_events(pdf, answer_color)
-        
+
         cur = None
         cur_opt = None
-        
+
         for ev in events:
             if ev["type"] == "text":
-                txt = ev["text"]
+                normalized_lines = normalize_embedded_option(ev["text"], cur, max_option_number)
+                for txt in normalized_lines:
+                    m_q = Q_HEADER.match(txt)
+                    if m_q:
+                        if cur:
+                            opt_match = match_option_line(txt, max_option_number)
+                            if opt_match:
+                                opt_num, _, opt_text = opt_match
+                                qx0 = cur.get("question_x0")
+                                ox0 = cur.get("option_x0")
+                                indented = qx0 is not None and ev["x0"] > qx0 + INDENT_TOL
+                                aligned_to_option = ox0 is not None and abs(ev["x0"] - ox0) <= INDENT_TOL
+                                if indented or (
+                                    ox0 is not None
+                                    and qx0 is not None
+                                    and (ox0 - qx0) > INDENT_TOL
+                                    and aligned_to_option
+                                ):
+                                    option = cur["options_map"].setdefault(
+                                        opt_num,
+                                        {"number": opt_num, "content": "", "image_path": None, "is_correct": False},
+                                    )
+                                    if cur.get("option_x0") is None:
+                                        cur["option_x0"] = ev["x0"]
+                                    cur_opt = opt_num
+                                    if opt_text:
+                                        option["content"] = (option["content"] + " " + opt_text).strip()
+                                    option["is_correct"] = option["is_correct"] or ev["has_key"]
+                                    continue
+                        if cur:
+                            questions.append(cur)
+                        cur = {
+                            "question_number": int(m_q.group(1)),
+                            "content": m_q.group(2).strip(),
+                            "image_path": None,
+                            "options_map": {},
+                            "answer_lines": [],
+                            "question_x0": ev["x0"],
+                            "option_x0": None,
+                        }
+                        cur_opt = None
+                        continue
 
-                m_q = Q_HEADER.match(txt)
-                if m_q:
-                    if cur:
-                        questions.append(cur)
-                    cur = {
-                        "question_number": int(m_q.group(1)),
-                        "content": m_q.group(2).strip(),
-                        "image_path": None,
-                        "options": [
-                            {"number": i, "content": "", "image_path": None, "is_correct": False}
-                            for i in range(1, 6)
-                        ],
-                    }
-                    cur_opt = None
-                    continue
+                    opt_match = match_option_line(txt, max_option_number)
+                    if opt_match and cur:
+                        opt_num, _, opt_text = opt_match
+                        option = cur["options_map"].setdefault(
+                            opt_num,
+                            {"number": opt_num, "content": "", "image_path": None, "is_correct": False},
+                        )
+                        if cur.get("option_x0") is None:
+                            cur["option_x0"] = ev["x0"]
+                        cur_opt = opt_num
+                        if opt_text:
+                            option["content"] = (option["content"] + " " + opt_text).strip()
+                        option["is_correct"] = option["is_correct"] or ev["has_key"]
+                        continue
 
-                if not cur:
-                    continue
+                    if not cur:
+                        continue
 
-                m_opt = OPT_RE.match(txt)
-                if m_opt:
-                    idx = int(m_opt.group(1)) - 1
-                    cur_opt = idx
-                    cur["options"][idx]["content"] = m_opt.group(2).strip()
-                    cur["options"][idx]["is_correct"] = cur["options"][idx]["is_correct"] or ev["has_key"]
-                    continue
+                    if cur_opt is None and not cur["options_map"]:
+                        label_match = ANSWER_LABEL_RE.match(txt)
+                        if label_match:
+                            label_text = label_match.group(1).strip()
+                            if label_text:
+                                cur["answer_lines"].append(label_text)
+                            continue
+                        if ev["has_key"]:
+                            cur["answer_lines"].append(txt)
+                            continue
 
-                # 이어지는 줄 처리
-                if cur_opt is not None:
-                    cur["options"][cur_opt]["content"] = (cur["options"][cur_opt]["content"] + " " + txt).strip()
-                    cur["options"][cur_opt]["is_correct"] = cur["options"][cur_opt]["is_correct"] or ev["has_key"]
-                else:
-                    cur["content"] = (cur["content"] + " " + txt).strip()
-
-            else:  # image
+                    if cur_opt is not None:
+                        option = cur["options_map"].setdefault(
+                            cur_opt,
+                            {"number": cur_opt, "content": "", "image_path": None, "is_correct": False},
+                        )
+                        option["content"] = (option["content"] + " " + txt).strip()
+                        option["is_correct"] = option["is_correct"] or ev["has_key"]
+                    else:
+                        cur["content"] = (cur["content"] + " " + txt).strip()
+            else:
                 if not cur:
                     continue
 
@@ -237,24 +306,34 @@ def parse_pdf_to_questions(pdf_path, upload_dir: Path, exam_prefix: str):
                 fname = save_image_crop(page, bbox, upload_dir, exam_prefix)
 
                 if cur_opt is not None:
-                    # 선택지 이미지
-                    if not cur["options"][cur_opt]["image_path"]:
-                        cur["options"][cur_opt]["image_path"] = fname
+                    option = cur["options_map"].setdefault(
+                        cur_opt,
+                        {"number": cur_opt, "content": "", "image_path": None, "is_correct": False},
+                    )
+                    if not option["image_path"]:
+                        option["image_path"] = fname
                 else:
-                    # 문제 이미지
                     if not cur["image_path"]:
                         cur["image_path"] = fname
 
         if cur:
             questions.append(cur)
-    
-    # 정답 옵션 정리
+
     for q in questions:
+        options = [q["options_map"][n] for n in sorted(q["options_map"])]
+        q["options"] = [opt for opt in options if opt["content"] or opt["image_path"]]
         q["answer_options"] = [opt["number"] for opt in q["options"] if opt["is_correct"]]
-        q["answer_text"] = " | ".join(
-            opt["content"] for opt in q["options"] if opt["is_correct"] and opt["content"]
-        )
-        # 빈 옵션 제거
-        q["options"] = [opt for opt in q["options"] if opt["content"] or opt["image_path"]]
-    
+
+        if q["options"]:
+            q["answer_text"] = " | ".join(
+                opt["content"] for opt in q["options"] if opt["is_correct"] and opt["content"]
+            )
+        else:
+            q["answer_text"] = " ".join(q["answer_lines"]).strip()
+
+        q.pop("options_map", None)
+        q.pop("answer_lines", None)
+        q.pop("question_x0", None)
+        q.pop("option_x0", None)
+
     return questions

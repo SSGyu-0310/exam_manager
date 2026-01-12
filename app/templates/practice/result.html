@@ -287,6 +287,14 @@
             white-space: pre-line;
         }
 
+        .question-content .markdown-image,
+        .explanation .markdown-image {
+            display: block;
+            max-width: 100%;
+            border-radius: 10px;
+            margin-top: 1rem;
+        }
+
         /* 선지 목록 */
         .choices-list {
             display: flex;
@@ -351,6 +359,7 @@
             border-radius: 8px;
             font-size: 0.9rem;
             color: #276749;
+            white-space: pre-line;
         }
 
         .question-source {
@@ -555,7 +564,7 @@
                     </div>
 
                     <div class="actions">
-                        <a href="{{ url_for('practice.dashboard', lecture_id=lecture.id) }}" class="btn btn-secondary"
+                        <a href="{{ url_for('practice.dashboard', lecture_id=lecture.id) }}{{ filter_query }}" class="btn btn-secondary"
                             onclick="clearSession()">다시 풀기</a>
                         <a href="{{ url_for('practice.list_lectures') }}" class="btn btn-primary">다른 강의</a>
                     </div>
@@ -583,6 +592,7 @@
     <script src="{{ url_for('static', filename='js/practice_storage.js') }}"></script>
     <script>
         const lectureId = {{ lecture.id }};
+        const filterQuery = {{ filter_query | tojson }};
         const resultKey = getPracticeResultKey(lectureId);
         const questions = {{ questions | tojson }};
 
@@ -603,7 +613,7 @@
                 localStorage.removeItem(`${resultKey}_currentIndex`);
                 // 대시보드로 이동하여 다시 제출하도록 안내
                 alert('문제가 수정되었습니다. 다시 제출해 주세요.');
-                window.location.href = `/practice/lecture/${lectureId}`;
+                window.location.href = `/practice/lecture/${lectureId}${filterQuery}`;
             }
         });
 
@@ -726,6 +736,7 @@
 
             const sourceInfo = question.exam_name ? `<span class="question-source">📝 ${question.exam_name} #${question.question_number}</span>` : '';
             const editUrl = `/manage/question/${question.id}/edit`;
+            const contentHtml = renderMarkdownImages(question.content || '(이미지 문제)');
 
             let html = `
                 <div class="question-card">
@@ -740,12 +751,12 @@
                             <span class="correct">정답: ${formatAnswer(result.correct_answer)}</span>
                         </div>
                     </div>
-                    <div class="question-content">${question.content || '(이미지 문제)'}</div>
+                    <div class="question-content">${contentHtml}</div>
                     ${choicesHtml}
             `;
 
             if (question.explanation) {
-                html += `<div class="explanation">💡 ${question.explanation}</div>`;
+                html += `<div class="explanation">💡 ${renderMarkdownImages(question.explanation)}</div>`;
             }
 
             // 메모 입력 영역
@@ -783,6 +794,33 @@
             if (!answer) return '-';
             if (Array.isArray(answer)) return answer.join(', ');
             return String(answer);
+        }
+
+        function escapeHtml(value) {
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function renderMarkdownImages(value) {
+            if (!value) return '';
+            const text = String(value).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            const pattern = /!\[([^\]]*)\]\(([^)]+)\)/g;
+            let html = '';
+            let lastIndex = 0;
+            let match;
+            while ((match = pattern.exec(text)) !== null) {
+                html += escapeHtml(text.slice(lastIndex, match.index));
+                const alt = escapeHtml(match[1]);
+                const url = escapeHtml(match[2].trim());
+                html += `<img src="${url}" alt="${alt}" class="markdown-image">`;
+                lastIndex = pattern.lastIndex;
+            }
+            html += escapeHtml(text.slice(lastIndex));
+            return html;
         }
 
         let memoTimeout;

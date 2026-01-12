@@ -131,6 +131,14 @@
             font-size: 1rem;
             line-height: 1.7;
             margin-bottom: 1rem;
+            white-space: pre-wrap;
+        }
+
+        .question-content .markdown-image {
+            display: block;
+            max-width: 100%;
+            border-radius: 10px;
+            margin-top: 1rem;
         }
 
         .question-image {
@@ -495,9 +503,7 @@
                     alt="문제 이미지">
                 {% endif %}
 
-                <div class="question-content">
-                    {{ question.content or '(이미지 문제)' }}
-                </div>
+                <div class="question-content">{{- (question.content or '(이미지 문제)') | md_image -}}</div>
 
                 {% if question.q_type == 'short_answer' %}
                 <div class="short-answer">

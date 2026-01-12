@@ -1,5 +1,10 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+
+"""
+PDF -> CSV utility script.
+Parsing logic synced with app/services/pdf_parser.py.
+"""
 
 import re
 import sys
@@ -13,8 +18,12 @@ import pandas as pd
 
 
 CID_RE = re.compile(r"\(cid:\d+\)")
-Q_HEADER = re.compile(r"^\s*(\d{1,3})\.(?!\d)\s*(.*)$")     # 1. 문항 시작
-OPT_RE = re.compile(r"^([1-5])\)\s*(.+)$")         # 1) 선지 시작
+Q_HEADER = re.compile(r"^\s*(\d{1,3})\.(?!\d)\s*(.*)$")
+OPT_RE = re.compile(r"^([1-9]|1[0-6])([)\.])\s*(.*)$")
+EMBEDDED_OPT_RE = re.compile(r"^(?P<prefix>.*)\s+(?P<num>[1-9]|1[0-6])[)\.](?P<suffix>\s+.*)?$")
+ANSWER_LABEL_RE = re.compile(r"^(?:\uC815\uB2F5|\uB2F5|answer)\s*[:\uFF1A]\s*(.*)$", re.IGNORECASE)
+
+INDENT_TOL = 6.0
 
 
 def clean_text(s: str) -> str:
@@ -25,9 +34,6 @@ def clean_text(s: str) -> str:
 
 
 def detect_answer_color(pdf: pdfplumber.PDF, max_pages=None):
-    """
-    PDF에서 가장 많이 등장하는 RGB(3원소) 색 중 검정/흰색이 아닌 것을 '정답색'으로 추정.
-    """
     counter = Counter()
     pages = pdf.pages if max_pages is None else pdf.pages[:max_pages]
 
@@ -42,9 +48,9 @@ def detect_answer_color(pdf: pdfplumber.PDF, max_pages=None):
         return None
 
     for col, _ in counter.most_common():
-        if sum(abs(x) for x in col) < 0.001:        # black-ish
+        if sum(abs(x) for x in col) < 0.001:
             continue
-        if sum(abs(x - 1) for x in col) < 0.001:    # white-ish
+        if sum(abs(x - 1) for x in col) < 0.001:
             continue
         return col
 
@@ -56,18 +62,12 @@ def color_distance(c1, c2) -> float:
 
 
 def extract_events(pdf, answer_color, y_tol=3, min_image_area=2000):
-    """
-    페이지를 위->아래 순서로 '텍스트 라인' + '이미지' 이벤트로 뽑는다.
-    텍스트 라인에는 has_key(정답색 포함 여부)도 같이 붙임.
-    """
     events = []
 
     for pno, page in enumerate(pdf.pages, start=1):
-        # --- text lines ---
         words = page.extract_words(extra_attrs=["non_stroking_color"]) or []
         for w in words:
             col = w.get("non_stroking_color")
-            # grayscale(len==1)는 정답색 비교에서 제외
             if isinstance(col, (list, tuple)) and len(col) == 3:
                 w["color"] = tuple(round(float(x), 5) for x in col)
             else:
@@ -75,7 +75,6 @@ def extract_events(pdf, answer_color, y_tol=3, min_image_area=2000):
 
         words_sorted = sorted(words, key=lambda w: (w["top"], w["x0"]))
 
-        # 라인 클러스터링
         clusters = []
         cur = []
         cur_top = None
@@ -111,12 +110,13 @@ def extract_events(pdf, answer_color, y_tol=3, min_image_area=2000):
                     "page": pno,
                     "top": float(min(w["top"] for w in ws)),
                     "x0": float(min(w["x0"] for w in ws)),
+                    "x1": float(max(w["x1"] for w in ws)),
+                    "bottom": float(max(w["bottom"] for w in ws)),
                     "text": text,
                     "has_key": has_key,
                 }
             )
 
-        # --- images ---
         for img in page.images or []:
             w = float(img["x1"] - img["x0"])
             h = float(img["bottom"] - img["top"])
@@ -139,10 +139,55 @@ def extract_events(pdf, answer_color, y_tol=3, min_image_area=2000):
     return events
 
 
+def match_option_line(text, max_option_number):
+    m_opt = OPT_RE.match(text)
+    if not m_opt:
+        return None
+
+    opt_num = int(m_opt.group(1))
+    if opt_num > max_option_number:
+        return None
+
+    return opt_num, m_opt.group(2), m_opt.group(3).strip()
+
+
+def normalize_embedded_option(text, cur, max_option_number):
+    if not cur:
+        return [text]
+    if OPT_RE.match(text.lstrip()):
+        return [text]
+
+    m = EMBEDDED_OPT_RE.match(text)
+    if not m:
+        return [text]
+
+    prefix = (m.group("prefix") or "").rstrip()
+    if not prefix:
+        return [text]
+
+    num = int(m.group("num"))
+    if num > max_option_number:
+        return [text]
+
+    if cur.get("options_map"):
+        expected = max(cur["options_map"]) + 1
+        if num < expected:
+            return [text]
+    else:
+        if num != 1:
+            return [text]
+
+    if not re.search(r"[A-Za-z\uAC00-\uD7A3]", prefix):
+        return [text]
+
+    suffix = (m.group("suffix") or "").strip()
+    rebuilt = f"{num}) {prefix}".strip()
+    if suffix:
+        return [rebuilt, suffix]
+    return [rebuilt]
+
+
 def save_image_crop(page, bbox, media_dir: Path, resolution=200) -> str:
-    """
-    bbox 영역을 PNG로 래스터라이즈한 뒤 sha1 해시로 파일명 생성.
-    """
     cropped = page.crop(bbox)
     page_image = cropped.to_image(resolution=resolution)
 
@@ -158,51 +203,102 @@ def save_image_crop(page, bbox, media_dir: Path, resolution=200) -> str:
     return fname
 
 
-def parse_events(events, media_dir: Path, media_ref_prefix="media/") -> pd.DataFrame:
-    """
-    이벤트 스트림을 스캔하며:
-      - 문항/선지 텍스트 구성
-      - 파란색(정답색) 선지 번호 추출
-      - 이미지가 나오면 현재 문맥(선지 우선, 없으면 지문)에 ![]() 형태로 삽입
-    """
+def append_image(text: str, image_path: str | None, media_ref_prefix: str) -> str:
+    if not image_path:
+        return text
+    tag = f"![]({media_ref_prefix}{image_path})"
+    if text:
+        return f"{text} {tag}"
+    return tag
+
+
+def parse_events(events, media_dir: Path, media_ref_prefix="media/", max_option_number=16) -> pd.DataFrame:
     questions = []
     cur = None
     cur_opt = None
 
     for ev in events:
         if ev["type"] == "text":
-            txt = ev["text"]
+            normalized_lines = normalize_embedded_option(ev["text"], cur, max_option_number)
+            for txt in normalized_lines:
+                m_q = Q_HEADER.match(txt)
+                if m_q:
+                    if cur:
+                        opt_match = match_option_line(txt, max_option_number)
+                        if opt_match:
+                            opt_num, _, opt_text = opt_match
+                            qx0 = cur.get("question_x0")
+                            ox0 = cur.get("option_x0")
+                            indented = qx0 is not None and ev["x0"] > qx0 + INDENT_TOL
+                            aligned_to_option = ox0 is not None and abs(ev["x0"] - ox0) <= INDENT_TOL
+                            if indented or (
+                                ox0 is not None
+                                and qx0 is not None
+                                and (ox0 - qx0) > INDENT_TOL
+                                and aligned_to_option
+                            ):
+                                option = cur["options_map"].setdefault(
+                                    opt_num,
+                                    {"number": opt_num, "content": "", "image_path": None, "is_correct": False},
+                                )
+                                if cur.get("option_x0") is None:
+                                    cur["option_x0"] = ev["x0"]
+                                cur_opt = opt_num
+                                if opt_text:
+                                    option["content"] = (option["content"] + " " + opt_text).strip()
+                                option["is_correct"] = option["is_correct"] or ev["has_key"]
+                                continue
+                        questions.append(cur)
+                    cur = {
+                        "ID": m_q.group(1),
+                        "Question": m_q.group(2).strip(),
+                        "image_path": None,
+                        "options_map": {},
+                        "answer_lines": [],
+                        "question_x0": ev["x0"],
+                        "option_x0": None,
+                    }
+                    cur_opt = None
+                    continue
 
-            m_q = Q_HEADER.match(txt)
-            if m_q:
-                if cur:
-                    questions.append(cur)
-                cur = {
-                    "ID": m_q.group(1),
-                    "Question": m_q.group(2).strip(),
-                    "Options": [""] * 5,
-                    "OptKey": [False] * 5,
-                }
-                cur_opt = None
-                continue
+                opt_match = match_option_line(txt, max_option_number)
+                if opt_match and cur:
+                    opt_num, _, opt_text = opt_match
+                    option = cur["options_map"].setdefault(
+                        opt_num,
+                        {"number": opt_num, "content": "", "image_path": None, "is_correct": False},
+                    )
+                    if cur.get("option_x0") is None:
+                        cur["option_x0"] = ev["x0"]
+                    cur_opt = opt_num
+                    if opt_text:
+                        option["content"] = (option["content"] + " " + opt_text).strip()
+                    option["is_correct"] = option["is_correct"] or ev["has_key"]
+                    continue
 
-            if not cur:
-                continue
+                if not cur:
+                    continue
 
-            m_opt = OPT_RE.match(txt)
-            if m_opt:
-                idx = int(m_opt.group(1)) - 1
-                cur_opt = idx
-                cur["Options"][idx] = m_opt.group(2).strip()
-                cur["OptKey"][idx] = cur["OptKey"][idx] or ev["has_key"]
-                continue
+                if cur_opt is None and not cur["options_map"]:
+                    label_match = ANSWER_LABEL_RE.match(txt)
+                    if label_match:
+                        label_text = label_match.group(1).strip()
+                        if label_text:
+                            cur["answer_lines"].append(label_text)
+                        continue
+                    if ev["has_key"]:
+                        cur["answer_lines"].append(txt)
+                        continue
 
-            # 이어지는 줄 처리
-            if cur_opt is not None:
-                cur["Options"][cur_opt] = (cur["Options"][cur_opt] + " " + txt).strip()
-                cur["OptKey"][cur_opt] = cur["OptKey"][cur_opt] or ev["has_key"]
-            else:
-                cur["Question"] = (cur["Question"] + " " + txt).strip()
+                if cur_opt is not None:
+                    option = cur["options_map"].setdefault(
+                        cur_opt,
+                        {"number": cur_opt, "content": "", "image_path": None, "is_correct": False},
+                    )
+                    option["content"] = (option["content"] + " " + txt).strip()
+                    option["is_correct"] = option["is_correct"] or ev["has_key"]
+                else:
+                    cur["Question"] = (cur["Question"] + " " + txt).strip()
 
         else:  # image
             if not cur:
@@ -212,38 +308,54 @@ def parse_events(events, media_dir: Path, media_ref_prefix="media/") -> pd.DataF
             bbox = (ev["x0"], ev["top"], ev["x1"], ev["bottom"])
             fname = save_image_crop(page, bbox, media_dir)
 
-            tag = f" ![]({media_ref_prefix}{fname})"
             if cur_opt is not None:
-                cur["Options"][cur_opt] = (cur["Options"][cur_opt] + tag).strip()
+                option = cur["options_map"].setdefault(
+                    cur_opt,
+                    {"number": cur_opt, "content": "", "image_path": None, "is_correct": False},
+                )
+                if not option["image_path"]:
+                    option["image_path"] = fname
             else:
-                cur["Question"] = (cur["Question"] + tag).strip()
+                if not cur["image_path"]:
+                    cur["image_path"] = fname
 
     if cur:
         questions.append(cur)
 
     rows = []
     for q in questions:
-        ans_opts = [str(i + 1) for i, b in enumerate(q["OptKey"]) if b]
-        ans_text = " | ".join(q["Options"][int(i) - 1] for i in ans_opts if q["Options"][int(i) - 1])
+        options = [q["options_map"][n] for n in sorted(q["options_map"])]
+        answer_options = [opt["number"] for opt in options if opt["is_correct"]]
 
-        rows.append(
-            {
-                "ID": q["ID"],
-                "Question": q["Question"],
-                "Option 1": q["Options"][0],
-                "Option 2": q["Options"][1],
-                "Option 3": q["Options"][2],
-                "Option 4": q["Options"][3],
-                "Option 5": q["Options"][4],
-                "AnswerOption": ",".join(ans_opts),
-                "AnswerText": ans_text,
-            }
-        )
+        question_text = append_image(q.get("Question", ""), q.get("image_path"), media_ref_prefix)
+
+        row = {
+            "ID": q.get("ID"),
+            "Question": question_text.strip(),
+            "AnswerOption": ",".join(str(n) for n in answer_options),
+        }
+
+        if options:
+            answer_text = " | ".join(opt["content"] for opt in options if opt["is_correct"] and opt["content"])
+        else:
+            answer_text = " ".join(q["answer_lines"]).strip()
+        row["AnswerText"] = answer_text
+
+        options_by_num = {opt["number"]: opt for opt in options}
+        for i in range(1, max_option_number + 1):
+            opt = options_by_num.get(i)
+            if opt:
+                opt_text = append_image(opt.get("content", ""), opt.get("image_path"), media_ref_prefix)
+                row[f"Option {i}"] = opt_text.strip()
+            else:
+                row[f"Option {i}"] = ""
+
+        rows.append(row)
 
     return pd.DataFrame(rows)
 
 
-def pdf_to_csv(pdf_path: str, output_csv: str | None = None):
+def pdf_to_csv(pdf_path: str, output_csv: str | None = None, max_option_number=16):
     pdf_path = Path(pdf_path)
 
     if output_csv is None:
@@ -260,15 +372,17 @@ def pdf_to_csv(pdf_path: str, output_csv: str | None = None):
     with pdfplumber.open(str(pdf_path)) as pdf:
         answer_color = detect_answer_color(pdf)
         events = extract_events(pdf, answer_color)
-        df = parse_events(events, media_subdir, media_ref_prefix="media/")
+        media_prefix = f"media/{pdf_path.stem}/"
+        df = parse_events(events, media_subdir, media_ref_prefix=media_prefix, max_option_number=max_option_number)
 
     df.to_csv(output_csv, index=False, encoding="utf-8-sig")
-    print(f"✅ 변환 완료: {output_csv} ({len(df)}문항)")
-    print(f"🖼️ 이미지 폴더: {media_subdir}")
+    print(f"변환 완료: {output_csv} ({len(df)}문항)")
+    print(f"📁 이미지 폴더: {media_subdir}")
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("사용법: python pdf_to_csv_with_images.py input.pdf [output.csv]")
+        print("사용법: python parse_pdf_questions.py input.pdf [output.csv]")
         sys.exit(1)
 
     in_pdf = sys.argv[1]

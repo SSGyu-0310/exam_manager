@@ -316,6 +316,26 @@
             display: block;
         }
 
+        .image-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 0.6rem;
+        }
+
+        .image-remove-btn {
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+            border: 1px solid rgba(231, 76, 60, 0.4);
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+
+        .image-remove-btn:hover {
+            background: rgba(231, 76, 60, 0.35);
+        }
+
         /* AI 교정 모달 */
         .ai-modal-overlay {
             display: none;
@@ -418,17 +438,23 @@
                 <input type="hidden" name="from_practice" value="1">
                 {% endif %}
                 <!-- 문제 이미지 (접기/펼치기) -->
-                {% if question.image_path %}
                 <div class="form-group">
-                    <button type="button" class="image-toggle-btn" onclick="toggleImage()">
+                    <button type="button" class="image-toggle-btn" id="imageToggleBtn" onclick="toggleImage()"
+                        {% if not question.image_path %}style="display:none"{% endif %}>
                         🖼️ 문제 이미지 보기/숨기기
                     </button>
                     <div class="image-collapsible" id="imageCollapsible">
-                        <img src="{{ url_for('static', filename='uploads/' + question.image_path) }}"
-                            class="question-image" alt="문제 이미지">
+                        <img
+                            src="{{ url_for('static', filename='uploads/' + question.image_path) if question.image_path else '' }}"
+                            class="question-image" id="questionImagePreview" alt="문제 이미지"
+                            {% if not question.image_path %}style="display:none"{% endif %}>
+                        <div class="image-actions">
+                            <button type="button" class="image-remove-btn" onclick="removeQuestionImage()">이미지 제거</button>
+                        </div>
                     </div>
                 </div>
-                {% endif %}
+                <input type="hidden" name="uploaded_image" id="uploadedImage" value="">
+                <input type="hidden" name="remove_image" id="removeImage" value="0">
 
                 <!-- 문제 유형 선택 -->
                 <div class="form-group">
@@ -556,6 +582,7 @@
         // 페이지 로드 시 선택지 번호 정리 (빈 번호가 있는 경우 대비)
         document.addEventListener('DOMContentLoaded', function () {
             renumberChoices();
+            bindImagePasteTargets();
         });
 
         // 이미지 접기/펼치기
@@ -672,45 +699,65 @@
             el.style.height = el.scrollHeight + 'px';
         }
 
-        // 클립보드 이미지 붙여넣기 기능
-        document.getElementById('content').addEventListener('paste', async function (e) {
-            const items = e.clipboardData.items;
-            for (let item of items) {
-                if (item.type.indexOf('image') !== -1) {
-                    e.preventDefault();
-                    const file = item.getAsFile();
-                    await uploadAndInsertImage(file, this);
-                    break;
-                }
-            }
-        });
+        function bindImagePasteTargets() {
+            const content = document.getElementById('content');
+            if (content) bindImagePaste(content, 'content-image');
+            document.querySelectorAll('#editForm textarea').forEach((target) => {
+                if (target === content) return;
+                bindImagePaste(target, 'inline');
+            });
+        }
 
-        // 해설 textarea에도 동일하게 적용
-        document.getElementById('explanation').addEventListener('paste', async function (e) {
-            const items = e.clipboardData.items;
-            for (let item of items) {
-                if (item.type.indexOf('image') !== -1) {
-                    e.preventDefault();
-                    const file = item.getAsFile();
+        function bindImagePaste(target, mode) {
+            if (!target) return;
+            target.addEventListener('paste', async function (e) {
+                const file = getClipboardImageFile(e);
+                if (!file) return;
+                e.preventDefault();
+                if (mode === 'content-image') {
+                    await uploadAndSetQuestionImage(file, this);
+                } else {
                     await uploadAndInsertImage(file, this);
-                    break;
+                }
+            });
+        }
+
+        function getClipboardImageFile(e) {
+            if (!e.clipboardData) return null;
+            const items = Array.from(e.clipboardData.items || []);
+            for (const item of items) {
+                if (item.type && item.type.startsWith('image/')) {
+                    const file = item.getAsFile();
+                    if (file) return file;
                 }
             }
-        });
+            const files = Array.from(e.clipboardData.files || []);
+            for (const file of files) {
+                if (file.type && file.type.startsWith('image/')) {
+                    return file;
+                }
+            }
+            return null;
+        }
+
+        async function uploadImageFile(file) {
+            const formData = new FormData();
+            formData.append('image', file, 'clipboard.png');
+
+            const response = await fetch('/manage/upload-image', {
+                method: 'POST',
+                body: formData
+            });
+
+            return response.json();
+        }
 
         async function uploadAndInsertImage(file, textarea) {
             const originalPlaceholder = textarea.placeholder;
             textarea.placeholder = '📤 이미지 업로드 중...';
 
-            const formData = new FormData();
-            formData.append('image', file, 'clipboard.png');
-
             try {
-                const response = await fetch('/manage/upload-image', {
-                    method: 'POST',
-                    body: formData
-                });
-                const result = await response.json();
+                const result = await uploadImageFile(file);
 
                 if (result.success) {
                     // 마크다운 형식으로 삽입
@@ -724,6 +771,77 @@
             } finally {
                 textarea.placeholder = originalPlaceholder;
             }
+        }
+
+        async function uploadAndSetQuestionImage(file, textarea) {
+            const originalPlaceholder = textarea.placeholder;
+            textarea.placeholder = '📤 이미지 업로드 중...';
+
+            try {
+                const result = await uploadImageFile(file);
+                if (result.success) {
+                    setQuestionImage(result.url, result.filename);
+                    document.getElementById('removeImage').value = '0';
+                    textarea.value = stripMarkdownImages(textarea.value);
+                } else {
+                    alert('이미지 업로드 실패: ' + result.error);
+                }
+            } catch (e) {
+                alert('업로드 오류: ' + e.message);
+            } finally {
+                textarea.placeholder = originalPlaceholder;
+            }
+        }
+
+        function setQuestionImage(url, filename) {
+            const preview = document.getElementById('questionImagePreview');
+            const toggleBtn = document.getElementById('imageToggleBtn');
+            const collapsible = document.getElementById('imageCollapsible');
+            const uploadedInput = document.getElementById('uploadedImage');
+
+            if (preview) {
+                preview.src = url;
+                preview.style.display = '';
+            }
+            if (toggleBtn) {
+                toggleBtn.style.display = '';
+            }
+            if (collapsible) {
+                collapsible.classList.add('open');
+            }
+            if (uploadedInput) {
+                uploadedInput.value = filename;
+            }
+        }
+
+        function removeQuestionImage() {
+            const preview = document.getElementById('questionImagePreview');
+            const toggleBtn = document.getElementById('imageToggleBtn');
+            const collapsible = document.getElementById('imageCollapsible');
+            const uploadedInput = document.getElementById('uploadedImage');
+            const removeInput = document.getElementById('removeImage');
+
+            if (preview) {
+                preview.src = '';
+                preview.style.display = 'none';
+            }
+            if (toggleBtn) {
+                toggleBtn.style.display = 'none';
+            }
+            if (collapsible) {
+                collapsible.classList.remove('open');
+            }
+            if (uploadedInput) {
+                uploadedInput.value = '';
+            }
+            if (removeInput) {
+                removeInput.value = '1';
+            }
+        }
+
+        function stripMarkdownImages(text) {
+            if (!text) return '';
+            return text.replace(/!\[[^\]]*\]\([^)]+\)/g, '').trim();
         }
 
         function insertAtCursor(textarea, text) {

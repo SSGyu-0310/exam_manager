@@ -90,6 +90,54 @@
             color: #666;
         }
 
+        .exam-filter {
+            background: #f8f9fb;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 1rem 1.2rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .exam-filter-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 0.8rem;
+        }
+
+        .exam-filter-title {
+            font-weight: bold;
+            color: #333;
+            font-size: 1rem;
+        }
+
+        .exam-filter-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem 1rem;
+        }
+
+        .exam-filter-option {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.9rem;
+            color: #444;
+        }
+
+        .exam-filter-option input {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+
+        .exam-filter-apply {
+            padding: 0.6rem 1.2rem;
+            font-size: 0.9rem;
+            border-radius: 8px;
+        }
+
         .grid-container {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(50px, 1fr));
@@ -282,6 +330,24 @@
         </div>
 
         <div class="main-card">
+            {% if exam_options %}
+            <form class="exam-filter" method="get" action="{{ url_for('practice.dashboard', lecture_id=lecture.id) }}">
+                <input type="hidden" name="filter" value="1">
+                <div class="exam-filter-header">
+                    <div class="exam-filter-title">시험지 필터</div>
+                    <button type="submit" class="btn btn-secondary exam-filter-apply">적용</button>
+                </div>
+                <div class="exam-filter-options">
+                    {% for exam in exam_options %}
+                    <label class="exam-filter-option">
+                        <input type="checkbox" name="exam_ids" value="{{ exam.id }}"
+                            {% if exam.id in selected_exam_ids %}checked{% endif %}>
+                        <span>{{ exam.title }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+            </form>
+            {% endif %}
             <div class="info-bar">
                 <div class="stats">
                     <div class="stat-item">
@@ -327,7 +393,7 @@
             </div>
             <div class="grid-container" id="objectiveGrid">
                 {% for q in objective_questions %}
-                <a href="{{ url_for('practice.question_by_id', lecture_id=lecture.id, question_id=q.id) }}"
+                <a href="{{ url_for('practice.question_by_id', lecture_id=lecture.id, question_id=q.id) }}{{ filter_query }}"
                     class="grid-item unanswered {% if q.is_multiple_response %}multiple{% endif %}"
                     data-question-id="{{ q.id }}" data-seq="{{ q.original_seq }}" data-type="objective"
                     data-is-short="{{ 'true' if q.is_short_answer else 'false' }}">
@@ -346,7 +412,7 @@
             </div>
             <div class="grid-container" id="subjectiveGrid">
                 {% for q in subjective_questions %}
-                <a href="{{ url_for('practice.question_by_id', lecture_id=lecture.id, question_id=q.id) }}"
+                <a href="{{ url_for('practice.question_by_id', lecture_id=lecture.id, question_id=q.id) }}{{ filter_query }}"
                     class="grid-item unanswered subjective-item" data-question-id="{{ q.id }}"
                     data-seq="{{ q.original_seq }}" data-type="subjective"
                     data-is-short="{{ 'true' if q.is_short_answer else 'false' }}">
@@ -367,6 +433,7 @@
     <script>
         const lectureId = {{ lecture.id }};
         const totalCount = {{ total_count }};
+        const filterQuery = {{ filter_query | tojson }};
         const questionMetaMap = buildQuestionMetaMap();
 
         // 페이지 로드 시 저장된 답안 체크
@@ -442,7 +509,7 @@
             }
 
             // 서버에 제출
-            fetch(`/practice/lecture/${lectureId}/submit`, {
+            fetch(`/practice/lecture/${lectureId}/submit${filterQuery}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -454,7 +521,7 @@
                     if (data.success) {
                         // 결과를 localStorage에 저장하고 결과 페이지로 이동
                         savePracticeResult(lectureId, data);
-                        window.location.href = `/practice/lecture/${lectureId}/result`;
+                        window.location.href = `/practice/lecture/${lectureId}/result${filterQuery}`;
                     } else {
                         alert('제출 중 오류가 발생했습니다: ' + data.error);
                     }

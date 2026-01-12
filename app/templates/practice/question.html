@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>문제 {{ seq }} - {{ lecture.title }}</title>
+    <title>{{ question_type_label }} {{ seq }} - {{ lecture.title }}</title>
     <style>
         * {
             margin: 0;
@@ -152,6 +152,13 @@
             color: #333;
             margin-bottom: 1rem;
             white-space: pre-wrap;
+        }
+
+        .question-content .markdown-image {
+            display: block;
+            max-width: 100%;
+            border-radius: 10px;
+            margin-top: 1rem;
         }
 
         /* 2열 레이아웃 */
@@ -382,20 +389,20 @@
 <body>
     <div class="container">
         <div class="nav-bar">
-            <a href="{{ url_for('practice.dashboard', lecture_id=lecture.id) }}" class="back-link">← 대시보드</a>
-            <span class="progress-info">{{ seq }} / {{ total_count }}</span>
+            <a href="{{ url_for('practice.dashboard', lecture_id=lecture.id) }}{{ filter_query }}" class="back-link">← 대시보드</a>
+            <span class="progress-info">{{ question_type_label }} {{ seq }} / {{ total_count }}</span>
         </div>
 
         <div class="main-card">
             <div class="question-header">
                 <div class="question-header-left">
-                    <span class="question-number">문제 {{ seq }}</span>
+                    <span class="question-number">{{ question_type_label }} {{ seq }}</span>
                     <span class="question-source">({{ question.exam.title }} {{ question.question_number }}번)</span>
                     {% if related_questions %}
                     <span class="related-questions">
                         <span class="related-label">&#51473;&#48373; &#47928;&#54637;:</span>
                         {% for related in related_questions %}
-                        <a href="{{ url_for('practice.question_by_id', lecture_id=lecture.id, question_id=related.id) }}"
+                        <a href="{{ url_for('practice.question_by_id', lecture_id=lecture.id, question_id=related.id) }}{{ filter_query }}"
                             title="{{ related.exam_title }} {{ related.question_number }}&#48264;">{{ related.exam_title }} {{ related.question_number }}&#48264;</a>{% if not loop.last %}, {% endif %}
                         {% endfor %}
                     </span>
@@ -413,7 +420,7 @@
 
             <div class="question-body">
                 <div class="question-left">
-                    <div class="question-content">{{ question.content or '(이미지로 출제된 문제입니다)' }}</div>
+                    <div class="question-content">{{- (question.content or '(이미지로 출제된 문제입니다)') | md_image -}}</div>
 
                     {% if question.image_path %}
                     <img src="{{ url_for('static', filename='uploads/' + question.image_path) }}" class="question-image"
@@ -446,8 +453,8 @@
 
             <div class="navigation">
                 {% if has_prev %}
-                <a href="{{ url_for('practice.question_by_id', lecture_id=lecture.id, question_id=prev_question_id) }}"
-                    class="nav-btn secondary" id="prevBtn" onclick="saveBeforeNav()">← 이전</a>
+                <a href="{{ url_for('practice.question_by_id', lecture_id=lecture.id, question_id=prev_question_id) }}{{ filter_query }}"
+                    class="nav-btn secondary" id="prevBtn" onclick="saveBeforeNav()">← {{ prev_label }}</a>
                 {% else %}
                 <button class="nav-btn secondary" disabled>← 이전</button>
                 {% endif %}
@@ -455,10 +462,10 @@
                 <span class="spacer"></span>
 
                 {% if has_next %}
-                <a href="{{ url_for('practice.question_by_id', lecture_id=lecture.id, question_id=next_question_id) }}"
-                    class="nav-btn primary" id="nextBtn" onclick="saveBeforeNav()">다음 →</a>
+                <a href="{{ url_for('practice.question_by_id', lecture_id=lecture.id, question_id=next_question_id) }}{{ filter_query }}"
+                    class="nav-btn primary" id="nextBtn" onclick="saveBeforeNav()">{{ next_label }} →</a>
                 {% else %}
-                <a href="{{ url_for('practice.dashboard', lecture_id=lecture.id) }}" class="nav-btn primary"
+                <a href="{{ url_for('practice.dashboard', lecture_id=lecture.id) }}{{ filter_query }}" class="nav-btn primary"
                     id="nextBtn" onclick="saveBeforeNav()">완료 →</a>
                 {% endif %}
             </div>

@@ -294,8 +294,9 @@ def build_legacy_results(questions, items, include_content=False):
     return results
 
 
-def grade_practice_submission(lecture_id, answers_v1):
-    questions = get_lecture_questions_ordered(lecture_id) or []
+def grade_practice_submission(lecture_id, answers_v1, questions=None):
+    if questions is None:
+        questions = get_lecture_questions_ordered(lecture_id) or []
     # Each submit creates a new session; repeated submissions are kept for history.
     session = PracticeSession(
         lecture_id=lecture_id,

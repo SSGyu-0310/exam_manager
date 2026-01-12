@@ -306,7 +306,10 @@ class PracticeAnswer(db.Model):
     time_spent = db.Column(db.Integer)
     answered_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    question = db.relationship('Question', backref=db.backref('practice_answers', lazy='dynamic'))
+    question = db.relationship(
+        'Question',
+        backref=db.backref('practice_answers', lazy='dynamic', cascade='all, delete-orphan'),
+    )
 
     def __repr__(self):
         return f'<PracticeAnswer S{self.session_id} Q{self.question_id}>'

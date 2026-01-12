@@ -93,6 +93,15 @@
             font-size: 1.1rem;
             line-height: 1.8;
             margin-bottom: 1.5rem;
+            white-space: pre-wrap;
+        }
+
+        .question-content .markdown-image,
+        .explanation-box .markdown-image {
+            display: block;
+            max-width: 100%;
+            border-radius: 10px;
+            margin-top: 1rem;
         }
 
         .question-image {
@@ -183,6 +192,7 @@
         .explanation-box p {
             line-height: 1.8;
             color: #ccc;
+            white-space: pre-wrap;
         }
 
         .classification-section {
@@ -314,9 +324,7 @@
                 alt="문제 이미지">
             {% endif %}
 
-            <div class="question-content">
-                {{ question.content or '(이미지로 출제된 문제입니다)' }}
-            </div>
+            <div class="question-content">{{- (question.content or '(이미지로 출제된 문제입니다)') | md_image -}}</div>
 
             {% if question.q_type == 'short_answer' %}
             <!-- 주관식 정답 -->
@@ -339,7 +347,7 @@
             {% if question.explanation %}
             <div class="explanation-box">
                 <h4>📝 해설</h4>
-                <p>{{ question.explanation }}</p>
+                <p>{{- question.explanation | md_image -}}</p>
             </div>
             {% endif %}
         </div>
