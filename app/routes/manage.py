@@ -4,11 +4,10 @@ from werkzeug.utils import secure_filename
 from datetime import datetime
 import os
 import shutil
-import re
-from urllib.parse import urlparse
 from app import db
 from app.models import Block, Lecture, PreviousExam, Question, Choice, LectureMaterial, LectureChunk
 from app.services.exam_cleanup import delete_exam_with_assets
+from app.services.markdown_images import strip_markdown_images
 from pathlib import Path
 from sqlalchemy import text
 
@@ -36,47 +35,6 @@ def _resolve_upload_folder() -> Path:
     if not upload_folder:
         upload_folder = Path(current_app.static_folder) / 'uploads'
     return Path(upload_folder)
-
-
-_MARKDOWN_IMAGE_PATTERN = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
-
-
-def _extract_upload_filename(url, upload_relative):
-    if not url:
-        return None
-    path = urlparse(url).path or url
-    path = path.strip()
-    if path.startswith('/'):
-        path = path[1:]
-    if path.startswith('static/'):
-        path = path[len('static/'):]
-    upload_relative = (upload_relative or '').strip('/')
-    if upload_relative:
-        prefix = f"{upload_relative}/"
-        if path.startswith(prefix):
-            filename = path[len(prefix):]
-            return filename or None
-    return None
-
-
-def _strip_markdown_images(content, upload_relative, keep_unmatched=True):
-    if not content:
-        return '', None
-    found_filename = None
-
-    def _replace(match):
-        nonlocal found_filename
-        url = match.group(1).strip()
-        filename = _extract_upload_filename(url, upload_relative)
-        if filename:
-            if found_filename is None:
-                found_filename = filename
-            return ''
-        return match.group(0) if keep_unmatched else ''
-
-    cleaned = _MARKDOWN_IMAGE_PATTERN.sub(_replace, content)
-    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned).strip()
-    return cleaned, found_filename
 
 
 # ===== 대시보드 =====
@@ -216,91 +174,6 @@ def update_lecture_keywords(lecture_id):
         return {'success': True}
     except Exception as e:
         db.session.rollback()
-        return {'success': False, 'error': str(e)}, 500
-
-
-@manage_bp.route('/lecture/<int:lecture_id>/extract-keywords', methods=['POST'])
-def extract_keywords_from_pdf(lecture_id):
-    """PDF 업로드 후 키워드 추출 API"""
-    import tempfile
-    
-    lecture = Lecture.query.get_or_404(lecture_id)
-    
-    if 'pdf_file' not in request.files:
-        return {'success': False, 'error': 'PDF 파일을 선택해주세요.'}, 400
-    
-    file = request.files['pdf_file']
-    if file.filename == '':
-        return {'success': False, 'error': '파일이 선택되지 않았습니다.'}, 400
-    
-    if not file.filename.lower().endswith('.pdf'):
-        return {'success': False, 'error': 'PDF 파일만 업로드 가능합니다.'}, 400
-    
-    try:
-        # 임시 파일로 저장
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
-            file.save(tmp.name)
-            tmp_path = tmp.name
-        
-        # 키워드 추출 서비스 호출
-        from app.services.keyword_extractor import process_pdf_and_extract_keywords
-        result = process_pdf_and_extract_keywords(tmp_path, lecture.title)
-        
-        # 임시 파일 삭제
-        import os
-        os.unlink(tmp_path)
-        
-        if result['success']:
-            return {
-                'success': True,
-                'keywords': result['keywords'],
-                'keywords_text': ', '.join(result['keywords']),
-                'text_length': result.get('text_length', 0)
-            }
-        else:
-            return {'success': False, 'error': result.get('error', '알 수 없는 오류')}, 500
-            
-    except Exception as e:
-        return {'success': False, 'error': str(e)}, 500
-
-
-@manage_bp.route('/extract-keywords-only', methods=['POST'])
-def extract_keywords_only():
-    """강의 ID 없이 PDF에서 키워드만 추출 (새 강의 생성용)"""
-    import tempfile
-    import os
-    
-    if 'pdf_file' not in request.files:
-        return {'success': False, 'error': 'PDF 파일을 선택해주세요.'}, 400
-    
-    file = request.files['pdf_file']
-    if file.filename == '':
-        return {'success': False, 'error': '파일이 선택되지 않았습니다.'}, 400
-    
-    if not file.filename.lower().endswith('.pdf'):
-        return {'success': False, 'error': 'PDF 파일만 업로드 가능합니다.'}, 400
-    
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
-            file.save(tmp.name)
-            tmp_path = tmp.name
-        
-        from app.services.keyword_extractor import process_pdf_and_extract_keywords
-        result = process_pdf_and_extract_keywords(tmp_path, '')
-        
-        os.unlink(tmp_path)
-        
-        if result['success']:
-            return {
-                'success': True,
-                'keywords': result['keywords'],
-                'keywords_text': ', '.join(result['keywords']),
-                'text_length': result.get('text_length', 0)
-            }
-        else:
-            return {'success': False, 'error': result.get('error', '알 수 없는 오류')}, 500
-            
-    except Exception as e:
         return {'success': False, 'error': str(e)}, 500
 
 
@@ -723,11 +596,11 @@ def edit_question(question_id):
             upload_relative = ''
 
         if uploaded_image:
-            cleaned_content, _markdown_filename = _strip_markdown_images(
+            cleaned_content, _markdown_filename = strip_markdown_images(
                 raw_content, upload_relative, keep_unmatched=False
             )
         else:
-            cleaned_content, _markdown_filename = _strip_markdown_images(
+            cleaned_content, _markdown_filename = strip_markdown_images(
                 raw_content, upload_relative, keep_unmatched=True
             )
 
