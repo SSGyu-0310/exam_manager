@@ -1,5 +1,55 @@
 # Exam Manager
 
+## Next.js admin migration status
+- Next.js Admin UI (App Router) is now the primary admin surface for blocks/lectures/exams, PDF upload, question edit, and unclassified/AI flows.
+- Flask Jinja UI is still available as legacy and should not be removed yet.
+- JSON APIs added under `/api/manage/*` and `/api/exam/*` are used by the Next.js frontend via `/api/proxy/*`.
+
+## Next.js admin routes
+- `/manage` (dashboard)
+- `/manage/blocks`, `/manage/blocks/new`, `/manage/blocks/[id]/edit`
+- `/manage/blocks/[id]/lectures`, `/manage/blocks/[id]/lectures/new`
+- `/manage/lectures/[id]` (edit)
+- `/manage/exams`, `/manage/exams/new`, `/manage/exams/[id]/edit`
+- `/manage/exams/[id]` (exam detail + question list)
+- `/manage/questions/[id]/edit` (question editor)
+- `/manage/upload-pdf` (PDF -> exam/questions)
+- `/exam` and `/exam/[id]` (read-only views)
+- `/exam/unclassified` (bulk classify + AI flow)
+
+## JSON API (Next.js Admin)
+- `/api/manage/summary`
+- `/api/manage/blocks`, `/api/manage/blocks/:id`
+- `/api/manage/blocks/:id/lectures`, `/api/manage/lectures`, `/api/manage/lectures/:id`
+- `/api/manage/exams`, `/api/manage/exams/:id`
+- `/api/manage/upload-pdf`
+- `/api/manage/questions/:id`
+- `/api/exam/unclassified`
+
+## Manual QA checklist
+- [ ] Blocks CRUD (create/edit/delete) from `/manage/blocks`
+- [ ] Lectures CRUD (create/edit/delete) from `/manage/blocks/:id/lectures`
+- [ ] Lecture keyword extract (PDF) from lecture edit
+- [ ] Exams CRUD (create/edit/delete) from `/manage/exams`
+- [ ] PDF upload -> exam/questions created from `/manage/upload-pdf`
+- [ ] Question edit: stem, choices, answer, explanation, image upload/remove
+- [ ] Unclassified queue: bulk classify/reset/move from `/exam/unclassified`
+- [ ] AI classify: start/status/result/apply from `/exam/unclassified`
+- [ ] Practice flow still works (`/lectures`, `/practice/start`, `/practice/session/:id`)
+
+## Lecture Note Indexing (Phase 1)
+- Run `python scripts/init_fts.py --sync` once to create the FTS5 table.
+- Upload lecture notes from the legacy lecture detail page: `/manage/lecture/<id>`.
+- Endpoint: POST `/manage/lecture/<id>/upload-note` with `pdf_file`.
+- Notes are stored under `app/static/uploads/lecture_notes/<lecture_id>/`.
+- Indexing creates `lecture_chunks` rows and FTS entries.
+- Check status via GET `/manage/lecture/<id>/note-status`.
+- Candidate retrieval uses BM25 over `lecture_chunks_fts`.
+- AI classification outputs evidence with page ranges + snippets.
+- Preview shows recommended pages, snippet, and study hint.
+- If no lecture matches, `no_match=true` and evidence is empty.
+
+
 ## 프로젝트 소개
 - 한 줄 요약: 기출 시험 PDF를 파싱해 문제를 저장하고, 강의/블록 단위로 분류하며, 연습/채점까지 연결하는 로컬 웹 앱.
 - 문제 정의: PDF 기반 기출 문제를 강의 단위로 정리/분류하고 연습 흐름을 한곳에서 처리해야 함.

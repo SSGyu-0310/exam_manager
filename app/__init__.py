@@ -62,16 +62,20 @@ def create_app(config_name='default'):
     from app.routes.main import main_bp
     from app.routes.exam import exam_bp
     from app.routes.manage import manage_bp
+    from app.routes.api_manage import api_manage_bp
     from app.routes.ai import ai_bp
     from app.routes.practice import practice_bp
     from app.routes.api_practice import api_practice_bp
+    from app.routes.api_exam import api_exam_bp
     
     app.register_blueprint(main_bp)
     app.register_blueprint(exam_bp, url_prefix='/exam')
     app.register_blueprint(manage_bp, url_prefix='/manage')
+    app.register_blueprint(api_manage_bp)
     app.register_blueprint(ai_bp)
     app.register_blueprint(practice_bp, url_prefix='/practice')
     app.register_blueprint(api_practice_bp, url_prefix='/api/practice')
+    app.register_blueprint(api_exam_bp)
 
     app.jinja_env.filters['md_image'] = render_markdown_images
     

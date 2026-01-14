@@ -11,7 +11,7 @@ export function ResultSummary({ total, answered, correct }: ResultSummaryProps) 
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <Card className="border border-slate-200 bg-white/80 shadow-sm">
+      <Card className="border border-border/70 bg-card/85 shadow-soft">
         <CardContent className="space-y-1 p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
             Score
@@ -19,7 +19,7 @@ export function ResultSummary({ total, answered, correct }: ResultSummaryProps) 
           <p className="text-2xl font-semibold text-foreground">{accuracy}%</p>
         </CardContent>
       </Card>
-      <Card className="border border-slate-200 bg-white/80 shadow-sm">
+      <Card className="border border-border/70 bg-card/85 shadow-soft">
         <CardContent className="space-y-1 p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
             Correct
@@ -27,7 +27,7 @@ export function ResultSummary({ total, answered, correct }: ResultSummaryProps) 
           <p className="text-2xl font-semibold text-foreground">{correct}</p>
         </CardContent>
       </Card>
-      <Card className="border border-slate-200 bg-white/80 shadow-sm">
+      <Card className="border border-border/70 bg-card/85 shadow-soft">
         <CardContent className="space-y-1 p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
             Answered
@@ -35,7 +35,7 @@ export function ResultSummary({ total, answered, correct }: ResultSummaryProps) 
           <p className="text-2xl font-semibold text-foreground">{answered}</p>
         </CardContent>
       </Card>
-      <Card className="border border-slate-200 bg-white/80 shadow-sm">
+      <Card className="border border-border/70 bg-card/85 shadow-soft">
         <CardContent className="space-y-1 p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
             Total

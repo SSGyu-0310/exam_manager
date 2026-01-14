@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 
 import { apiFetch } from "@/lib/http";
 import { ResultSummary } from "@/components/practice/ResultSummary";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -28,6 +29,8 @@ type StoredResult = {
   items?: unknown[];
   answers?: Record<string, AnswerPayload>;
   mode?: string;
+  examIds?: number[];
+  filterActive?: boolean;
 };
 
 type ResultItem = {
@@ -73,7 +76,20 @@ const formatAnswer = (value: unknown) => {
   if (typeof value === "number") {
     return String(value);
   }
-  return "—";
+  return "--";
+};
+
+const appendExamParams = (
+  params: URLSearchParams,
+  examIds?: number[],
+  filterActive?: boolean
+) => {
+  if (filterActive) {
+    params.set("filter", "1");
+    if (examIds && examIds.length > 0) {
+      examIds.forEach((id) => params.append("exam_ids", String(id)));
+    }
+  }
 };
 
 export default function PracticeResultPage() {
@@ -109,10 +125,13 @@ export default function PracticeResultPage() {
       }
 
       try {
+        const params = new URLSearchParams();
+        params.set("includeAnswer", "true");
+        appendExamParams(params, storedResult.examIds, storedResult.filterActive);
         const response = await apiFetch<unknown>(
           `/api/practice/lecture/${encodeURIComponent(
             storedResult.lectureId
-          )}/result?includeAnswer=true`,
+          )}/result?${params.toString()}`,
           { cache: "no-store" }
         );
         const parsed = lectureResultSchema.safeParse(response);
@@ -173,11 +192,11 @@ export default function PracticeResultPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 px-4 py-10">
+      <div className="min-h-screen px-4 py-10">
         <div className="mx-auto w-full max-w-5xl space-y-6">
-          <div className="h-10 w-40 animate-pulse rounded-full bg-slate-200" />
-          <div className="h-32 animate-pulse rounded-3xl bg-slate-200" />
-          <div className="h-64 animate-pulse rounded-3xl bg-slate-200" />
+          <div className="h-10 w-40 animate-pulse rounded-full bg-muted" />
+          <div className="h-32 animate-pulse rounded-3xl bg-muted" />
+          <div className="h-64 animate-pulse rounded-3xl bg-muted" />
         </div>
       </div>
     );
@@ -185,9 +204,9 @@ export default function PracticeResultPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 px-4 py-10">
+      <div className="min-h-screen px-4 py-10">
         <div className="mx-auto w-full max-w-3xl">
-          <Card className="border border-destructive/30 bg-destructive/10">
+          <Card className="border border-danger/30 bg-danger/10">
             <CardContent className="space-y-2 p-6">
               <p className="text-lg font-semibold text-foreground">Unable to load results</p>
               <p className="text-sm text-muted-foreground">{error}</p>
@@ -202,7 +221,7 @@ export default function PracticeResultPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 px-4 py-10">
+    <div className="min-h-screen px-4 py-10">
       <div className="mx-auto w-full max-w-5xl space-y-8">
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
@@ -217,10 +236,12 @@ export default function PracticeResultPage() {
         <ResultSummary total={total} answered={answered} correct={correct} />
 
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 text-sm">
+          <div className="inline-flex rounded-full border border-border/70 bg-muted/70 p-1 text-sm">
             <button
               className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                tab === "all" ? "bg-slate-900 text-white" : "text-slate-600"
+                tab === "all"
+                  ? "bg-primary text-primary-foreground shadow-soft"
+                  : "text-muted-foreground"
               }`}
               onClick={() => setTab("all")}
               type="button"
@@ -229,7 +250,9 @@ export default function PracticeResultPage() {
             </button>
             <button
               className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                tab === "wrong" ? "bg-slate-900 text-white" : "text-slate-600"
+                tab === "wrong"
+                  ? "bg-primary text-primary-foreground shadow-soft"
+                  : "text-muted-foreground"
               }`}
               onClick={() => setTab("wrong")}
               type="button"
@@ -251,41 +274,35 @@ export default function PracticeResultPage() {
                 : []);
             const correctAnswerText =
               question.correctAnswerText ?? result?.correctAnswerText ?? null;
+            const statusVariant =
+              isCorrect === true ? "success" : isCorrect === false ? "danger" : "neutral";
+            const statusLabel =
+              isCorrect === true ? "Correct" : isCorrect === false ? "Wrong" : "Pending";
             return (
-              <Card key={question.questionId} className="border border-slate-200 bg-white/90">
+              <Card key={question.questionId} className="border border-border/70 bg-card/90">
                 <CardContent className="space-y-4 p-6">
                   <div className="flex items-center justify-between text-sm text-muted-foreground">
                     <span>Question {index + 1}</span>
-                    <span
-                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                        isCorrect === true
-                          ? "bg-emerald-100 text-emerald-700"
-                          : isCorrect === false
-                            ? "bg-rose-100 text-rose-700"
-                            : "bg-slate-100 text-slate-600"
-                      }`}
-                    >
-                      {isCorrect === true
-                        ? "Correct"
-                        : isCorrect === false
-                          ? "Wrong"
-                          : "Pending"}
-                    </span>
+                    <Badge variant={statusVariant}>{statusLabel}</Badge>
                   </div>
-                  <p className="text-base text-slate-800">
+                  <p className="text-base text-foreground">
                     {question.stem ?? "No prompt available."}
                   </p>
 
                   {question.isShortAnswer ? (
                     <div className="space-y-2 text-sm">
-                      <p className="text-muted-foreground">Your answer: {formatAnswer(userAnswer)}</p>
+                      <p className="text-muted-foreground">
+                        Your answer: {formatAnswer(userAnswer)}
+                      </p>
                       <p className="text-muted-foreground">
                         Correct answer: {formatAnswer(correctAnswerText)}
                       </p>
                     </div>
                   ) : (
                     <div className="space-y-2 text-sm">
-                      <p className="text-muted-foreground">Your answer: {formatAnswer(userAnswer)}</p>
+                      <p className="text-muted-foreground">
+                        Your answer: {formatAnswer(userAnswer)}
+                      </p>
                       <p className="text-muted-foreground">
                         Correct answer: {formatAnswer(correctAnswers)}
                       </p>
@@ -304,16 +321,16 @@ export default function PracticeResultPage() {
                               key={choiceId}
                               className={`rounded-xl border px-4 py-3 ${
                                 isCorrectChoice
-                                  ? "border-emerald-400 bg-emerald-50"
+                                  ? "border-success/50 bg-success/10"
                                   : isUserChoice
-                                    ? "border-rose-300 bg-rose-50"
-                                    : "border-slate-200 bg-white"
+                                    ? "border-danger/40 bg-danger/10"
+                                    : "border-border/70 bg-card"
                               }`}
                             >
                               <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                                 {choiceId}
                               </div>
-                              <p className="text-sm text-slate-700">
+                              <p className="text-sm text-foreground">
                                 {choice.content ?? "Choice"}
                               </p>
                             </div>
@@ -324,11 +341,11 @@ export default function PracticeResultPage() {
                   )}
 
                   {question.explanation && (
-                    <details className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
-                      <summary className="cursor-pointer font-semibold text-slate-700">
+                    <details className="rounded-xl border border-border/70 bg-muted/60 px-4 py-3 text-sm">
+                      <summary className="cursor-pointer font-semibold text-foreground">
                         Explanation
                       </summary>
-                      <p className="mt-2 text-slate-600">{question.explanation}</p>
+                      <p className="mt-2 text-muted-foreground">{question.explanation}</p>
                     </details>
                   )}
                 </CardContent>

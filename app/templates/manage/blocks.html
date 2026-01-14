@@ -155,6 +155,18 @@
             padding: 3rem;
             color: #aaa;
         }
+
+        .more-link {
+            display: inline-block;
+            margin-top: 0.5rem;
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .more-link:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 
@@ -214,8 +226,10 @@
                     </a>
                     {% endfor %}
                     {% if block.lectures.count() > 5 %}
-                    <div style="text-align: center; padding-top: 0.5rem; color: #667eea;">
-                        + {{ block.lectures.count() - 5 }}개 더보기
+                    <div style="text-align: center; padding-top: 0.5rem;">
+                        <a class="more-link" href="{{ url_for('manage.list_lectures', block_id=block.id) }}">
+                            + {{ block.lectures.count() - 5 }}개 더보기
+                        </a>
                     </div>
                     {% endif %}
                 </div>

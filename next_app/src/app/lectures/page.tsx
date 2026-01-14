@@ -59,19 +59,21 @@ export default function LecturesPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100">
+    <div className="min-h-screen">
       <div className="mx-auto w-full max-w-6xl px-4 pb-16 pt-12">
-        {loading && <LectureSkeleton />}
-        {!loading && error && <LectureErrorState message={error} />}
-        {!loading && !error && (
-          <LectureGrid
-            blocks={blocks}
-            query={query}
-            onQueryChange={setQuery}
-            sort={sort}
-            onSortChange={setSort}
-          />
-        )}
+        <div className="rounded-3xl border border-border/60 bg-card/70 p-6 shadow-soft backdrop-blur sm:p-8">
+          {loading && <LectureSkeleton />}
+          {!loading && error && <LectureErrorState message={error} />}
+          {!loading && !error && (
+            <LectureGrid
+              blocks={blocks}
+              query={query}
+              onQueryChange={setQuery}
+              sort={sort}
+              onSortChange={setSort}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

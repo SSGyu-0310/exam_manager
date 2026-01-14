@@ -1,6 +1,7 @@
 import { Bookmark, BookmarkCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ChoiceList } from "@/components/practice/ChoiceList";
 import type { AnswerPayload, PracticeQuestion } from "@/components/practice/types";
@@ -51,20 +52,20 @@ export function QuestionView({
           </Button>
         )}
       </div>
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="space-y-4">
-          <p className="text-base leading-relaxed text-slate-800">
+      <Card className="border border-border/70 bg-card/90 shadow-soft">
+        <CardContent className="space-y-4 p-6">
+          <p className="text-base leading-relaxed text-foreground">
             {question.stem ?? "No prompt available for this question."}
           </p>
           {typeof image === "string" && image.length > 0 && (
             <img
               src={image}
               alt="Question visual"
-              className="max-h-64 rounded-xl border border-slate-200 object-contain"
+              className="max-h-64 rounded-xl border border-border/60 object-contain"
             />
           )}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
       {isShortAnswer ? (
         <div className="space-y-3">
           <p className="text-sm font-semibold text-foreground">Your answer</p>

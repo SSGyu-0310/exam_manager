@@ -918,7 +918,7 @@
                 const response = await fetch('/ai/classify/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question_ids: questionIds })
+                    body: JSON.stringify({ question_ids: questionIds, force: true })
                 });
 
                 const result = await response.json();

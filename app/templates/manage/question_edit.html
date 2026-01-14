@@ -336,6 +336,21 @@
             background: rgba(231, 76, 60, 0.35);
         }
 
+        .image-open-btn {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+            border: 1px solid rgba(46, 204, 113, 0.4);
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            text-decoration: none;
+        }
+
+        .image-open-btn:hover {
+            background: rgba(46, 204, 113, 0.35);
+        }
+
         /* AI 교정 모달 */
         .ai-modal-overlay {
             display: none;
@@ -453,6 +468,21 @@
                         </div>
                     </div>
                 </div>
+                {% if original_image_url %}
+                <div class="form-group">
+                    <button type="button" class="image-toggle-btn" id="originalImageToggleBtn"
+                        onclick="toggleOriginalImage()">
+                        원본 이미지 확인
+                    </button>
+                    <div class="image-collapsible" id="originalImageCollapsible">
+                        <img src="{{ original_image_url }}" class="question-image" alt="원본 이미지">
+                        <div class="image-actions">
+                            <a class="image-open-btn" href="{{ original_image_url }}" target="_blank"
+                                rel="noopener">새 창에서 열기</a>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
                 <input type="hidden" name="uploaded_image" id="uploadedImage" value="">
                 <input type="hidden" name="remove_image" id="removeImage" value="0">
 
@@ -588,6 +618,13 @@
         // 이미지 접기/펼치기
         function toggleImage() {
             const container = document.getElementById('imageCollapsible');
+            if (container) {
+                container.classList.toggle('open');
+            }
+        }
+
+        function toggleOriginalImage() {
+            const container = document.getElementById('originalImageCollapsible');
             if (container) {
                 container.classList.toggle('open');
             }

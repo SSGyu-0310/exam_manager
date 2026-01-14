@@ -4,6 +4,7 @@ pandas
 python-dotenv
 Pillow
 pdfplumber
+PyMuPDF
 google-genai
 tenacity
 scikit-learn

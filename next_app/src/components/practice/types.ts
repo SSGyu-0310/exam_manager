@@ -11,6 +11,13 @@ export const choiceSchema = z
 
 export type PracticeChoice = z.infer<typeof choiceSchema>;
 
+export const examOptionSchema = z
+  .object({
+    id: z.number(),
+    title: z.string(),
+  })
+  .passthrough();
+
 export const questionSchema = z
   .object({
     questionId: z.union([z.number(), z.string()]),
@@ -18,6 +25,8 @@ export const questionSchema = z
     choices: z.array(choiceSchema).optional(),
     isShortAnswer: z.boolean().optional(),
     isMultipleResponse: z.boolean().optional(),
+    examId: z.number().nullable().optional(),
+    examTitle: z.string().nullable().optional(),
     image: z.string().optional(),
     imageUrl: z.string().optional(),
   })
@@ -31,7 +40,14 @@ export const lectureDetailSchema = z
   .object({
     lectureId: z.union([z.number(), z.string()]).optional(),
     title: z.string().optional(),
-    questions: z.array(z.any()).optional(),
+    questions: z.array(questionSchema).optional(),
+    totalCount: z.number().optional(),
+    objectiveCount: z.number().optional(),
+    subjectiveCount: z.number().optional(),
+    multipleResponseCount: z.number().optional(),
+    examOptions: z.array(examOptionSchema).optional(),
+    selectedExamIds: z.array(z.number()).optional(),
+    filterActive: z.boolean().optional(),
   })
   .passthrough();
 

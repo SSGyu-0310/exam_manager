@@ -50,6 +50,51 @@ def _parse_pagination_args():
     return limit, offset, None
 
 
+def _parse_exam_filter_args():
+    raw_ids = request.args.getlist('exam_ids')
+    exam_ids = []
+    for raw in raw_ids:
+        for part in str(raw).split(','):
+            part = part.strip()
+            if not part:
+                continue
+            if part.isdigit():
+                exam_ids.append(int(part))
+    seen = set()
+    ordered = []
+    for exam_id in exam_ids:
+        if exam_id in seen:
+            continue
+        seen.add(exam_id)
+        ordered.append(exam_id)
+    filter_requested = request.args.get('filter')
+    filter_active = filter_requested is not None or bool(ordered)
+    return ordered, filter_active
+
+
+def _apply_exam_filter(questions, exam_ids, filter_active):
+    if not questions:
+        return []
+    if not filter_active:
+        return questions
+    if not exam_ids:
+        return []
+    exam_set = set(exam_ids)
+    return [question for question in questions if question.exam_id in exam_set]
+
+
+def _build_exam_options(questions):
+    options = []
+    seen = set()
+    for question in questions:
+        exam = question.exam
+        if not exam or exam.id in seen:
+            continue
+        seen.add(exam.id)
+        options.append({'id': exam.id, 'title': exam.title})
+    return options
+
+
 def _load_choices_for_questions(question_ids):
     if not question_ids:
         return {}
@@ -128,27 +173,47 @@ def lecture_questions(lecture_id):
     if lecture is None:
         return error_response('Lecture not found.', 'LECTURE_NOT_FOUND', 404)
 
-    questions = get_lecture_questions_ordered(lecture_id) or []
+    exam_ids, filter_active = _parse_exam_filter_args()
+    all_questions = get_lecture_questions_ordered(lecture_id) or []
+    exam_options = _build_exam_options(all_questions)
+    questions = _apply_exam_filter(all_questions, exam_ids, filter_active)
     groups = build_question_groups(questions)
     question_meta = groups['question_meta']
+    question_map = {question.id: question for question in questions}
+    selected_exam_ids = exam_ids if filter_active else [option['id'] for option in exam_options]
 
-    questions_payload = [
-        {
-            'questionId': meta['id'],
-            'originalSeq': meta['original_seq'],
-            'typeSeq': meta['type_seq'],
-            'type': meta['type'],
-            'isShortAnswer': meta['is_short_answer'],
-            'isMultipleResponse': meta['is_multiple_response'],
-        }
-        for meta in question_meta
-    ]
+    questions_payload = []
+    for meta in question_meta:
+        question = question_map.get(meta['id'])
+        exam = question.exam if question else None
+        questions_payload.append(
+            {
+                'questionId': meta['id'],
+                'originalSeq': meta['original_seq'],
+                'typeSeq': meta['type_seq'],
+                'type': meta['type'],
+                'isShortAnswer': meta['is_short_answer'],
+                'isMultipleResponse': meta['is_multiple_response'],
+                'examId': question.exam_id if question else None,
+                'examTitle': exam.title if exam else None,
+            }
+        )
+    multiple_response_count = sum(
+        1 for meta in question_meta if meta.get('is_multiple_response')
+    )
 
     return jsonify(
         {
             'lectureId': lecture.id,
             'title': lecture.title,
             'questions': questions_payload,
+            'totalCount': len(question_meta),
+            'objectiveCount': len(groups['objective_questions']),
+            'subjectiveCount': len(groups['subjective_questions']),
+            'multipleResponseCount': multiple_response_count,
+            'examOptions': exam_options,
+            'selectedExamIds': selected_exam_ids,
+            'filterActive': filter_active,
         }
     )
 
@@ -191,7 +256,22 @@ def lecture_question_list(lecture_id):
         message, code = error
         return error_response(message, code, 400)
 
-    query = Question.query.filter_by(lecture_id=lecture_id).order_by(Question.question_number)
+    exam_ids, filter_active = _parse_exam_filter_args()
+    query = Question.query.filter_by(lecture_id=lecture_id)
+    if filter_active:
+        if not exam_ids:
+            response_payload = {
+                'lectureId': lecture.id,
+                'title': lecture.title,
+                'total': 0,
+                'offset': offset,
+                'questions': [],
+            }
+            if limit is not None:
+                response_payload['limit'] = limit
+            return jsonify(response_payload)
+        query = query.filter(Question.exam_id.in_(exam_ids))
+    query = query.order_by(Question.question_number)
     total = query.count()
     if offset:
         query = query.offset(offset)
@@ -215,6 +295,8 @@ def lecture_question_list(lecture_id):
                 ],
                 'isShortAnswer': question.is_short_answer,
                 'isMultipleResponse': question.is_multiple_response,
+                'examId': question.exam_id,
+                'examTitle': question.exam.title if question.exam else None,
             }
         )
 
@@ -244,7 +326,15 @@ def submit_answers(lecture_id):
             return error_response('Invalid JSON.', 'INVALID_JSON', 400)
         return error_response('Invalid request payload.', 'INVALID_PAYLOAD', 400)
 
-    questions = get_lecture_questions_ordered(lecture_id) or []
+    exam_ids, filter_active = _parse_exam_filter_args()
+    all_questions = get_lecture_questions_ordered(lecture_id) or []
+    questions = _apply_exam_filter(all_questions, exam_ids, filter_active)
+    if filter_active and not questions:
+        return error_response(
+            'No questions for the selected exams.',
+            'NO_QUESTIONS',
+            400,
+        )
     question_meta = {str(q.id): q.is_short_answer for q in questions}
 
     answers_v1, deprecated_input, error_code, error_message = normalize_practice_answers_payload(
@@ -402,7 +492,22 @@ def lecture_result(lecture_id):
         message, code = error
         return error_response(message, code, 400)
 
-    query = Question.query.filter_by(lecture_id=lecture_id).order_by(Question.question_number)
+    exam_ids, filter_active = _parse_exam_filter_args()
+    query = Question.query.filter_by(lecture_id=lecture_id)
+    if filter_active:
+        if not exam_ids:
+            response_payload = {
+                'lectureId': lecture.id,
+                'title': lecture.title,
+                'total': 0,
+                'offset': offset,
+                'questions': [],
+            }
+            if limit is not None:
+                response_payload['limit'] = limit
+            return jsonify(response_payload)
+        query = query.filter(Question.exam_id.in_(exam_ids))
+    query = query.order_by(Question.question_number)
     total = query.count()
     if offset:
         query = query.offset(offset)

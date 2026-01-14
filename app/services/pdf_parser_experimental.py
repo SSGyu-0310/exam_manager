@@ -21,11 +21,13 @@ EMBEDDED_OPT_RE = re.compile(r"^(?P<prefix>.*)\s+(?P<num>[1-9]|1[0-6])[)\.](?P<s
 ANSWER_LABEL_RE = re.compile(r"^(?:\uC815\uB2F5|\uB2F5|answer)\s*[:\uFF1A]\s*(.*)$", re.IGNORECASE)
 
 INDENT_TOL = 6.0
+WORD_X_TOL = 0.5
 
 
 def clean_text(s: str) -> str:
     s = s.replace("\u00A0", " ")
-    s = CID_RE.sub("", s)
+    s = CID_RE.sub(" ", s)
+    s = re.sub(r"[\x00-\x1F\x7F]", " ", s)
     s = re.sub(r"[ \t]+", " ", s)
     return s.strip()
 
@@ -62,7 +64,12 @@ def extract_events(pdf, answer_color, y_tol=3, min_image_area=2000):
     events = []
 
     for pno, page in enumerate(pdf.pages, start=1):
-        words = page.extract_words(extra_attrs=["non_stroking_color"]) or []
+        words = page.extract_words(
+            extra_attrs=["non_stroking_color"],
+            x_tolerance=WORD_X_TOL,
+            y_tolerance=y_tol,
+            keep_blank_chars=True,
+        ) or []
         for w in words:
             col = w.get("non_stroking_color")
             if isinstance(col, (list, tuple)) and len(col) == 3:

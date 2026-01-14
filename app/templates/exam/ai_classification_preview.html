@@ -279,6 +279,217 @@
             color: #f39c12;
         }
 
+        .ai-evidence {
+            margin-top: 0.6rem;
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 8px;
+            padding: 0.6rem 0.8rem;
+            font-size: 0.85rem;
+            color: #ccc;
+            line-height: 1.5;
+        }
+
+        .ai-evidence .label {
+            color: #2ecc71;
+            font-weight: bold;
+        }
+
+        .ai-evidence .snippet {
+            color: #ddd;
+            margin-top: 0.3rem;
+        }
+
+        .ai-evidence .hint {
+            color: #aaa;
+            margin-top: 0.3rem;
+        }
+
+        .card-view {
+            width: 100%;
+            max-width: 960px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .card-nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .card-index {
+            color: #aaa;
+            font-size: 0.9rem;
+        }
+
+        .card-btn {
+            padding: 0.5rem 1.1rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(0, 0, 0, 0.2);
+            color: #ddd;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+
+        .card-btn:hover:not(:disabled) {
+            background: rgba(102, 126, 234, 0.2);
+            border-color: rgba(102, 126, 234, 0.6);
+            color: #fff;
+        }
+
+        .card-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .card-panel {
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            padding: 1.6rem;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+
+        .card-title {
+            font-size: 1.25rem;
+            color: #667eea;
+            font-weight: 700;
+        }
+
+        .exam-tag {
+            display: inline-block;
+            margin-left: 0.5rem;
+            color: #aaa;
+            font-size: 0.85rem;
+            font-weight: 400;
+        }
+
+        .card-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.4rem;
+            align-items: center;
+        }
+
+        .lecture-tag {
+            background: rgba(102, 126, 234, 0.15);
+            color: #cdd4ff;
+            padding: 0.2rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+        }
+
+        .lecture-tag.no-match {
+            background: rgba(231, 76, 60, 0.15);
+            color: #e74c3c;
+        }
+
+        .card-badge {
+            padding: 0.3rem 0.7rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-match {
+            background: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+        }
+
+        .badge-no-match {
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+        }
+
+        .card-question {
+            margin-top: 1.2rem;
+            background: rgba(0, 0, 0, 0.25);
+            padding: 1rem;
+            border-radius: 12px;
+        }
+
+        .card-question-text {
+            color: #eee;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            margin-top: 0.4rem;
+        }
+
+        .choice-list {
+            margin-top: 0.8rem;
+            padding-left: 1.2rem;
+            color: #ddd;
+            font-size: 0.9rem;
+        }
+
+        .choice-list li {
+            margin-bottom: 0.4rem;
+        }
+
+        .card-section {
+            margin-top: 1rem;
+            background: rgba(0, 0, 0, 0.22);
+            border-radius: 12px;
+            padding: 1rem;
+        }
+
+        .card-section-title {
+            font-size: 0.85rem;
+            color: #2ecc71;
+            font-weight: 600;
+            margin-bottom: 0.4rem;
+        }
+
+        .card-section-body {
+            color: #ddd;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .card-actions-row {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.6rem;
+        }
+
+        .card-actions-row .card-btn {
+            border-radius: 10px;
+        }
+
+        .card-btn.card-apply {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+        }
+
+        .card-btn.card-select {
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .empty-card {
+            padding: 2rem;
+            text-align: center;
+            color: #aaa;
+        }
+
+        .muted {
+            color: #888;
+        }
+
         .question-actions {
             display: flex;
             gap: 0.5rem;
@@ -691,157 +902,247 @@
                 document.getElementById('actionBar').style.display = 'flex';
 
             } catch (error) {
-                showError('결과 로드 실패: ' + error.message);
+                showError('\uACB0\uACFC \uB85C\uB4DC \uC2E4\uD328: ' + error.message);
             }
         }
+
+        let allItems = [];
+        let filteredItems = [];
+        let currentIndex = 0;
+        let activeFilter = 'all';
 
         function renderResults(data) {
             const container = document.getElementById('resultsContainer');
-            container.innerHTML = '';
+            container.innerHTML = `
+                <div class="card-view" id="cardView">
+                    <div class="card-nav">
+                        <button class="card-btn" id="prevBtn" onclick="goPrev()">\uC774\uC804</button>
+                        <div class="card-index" id="cardIndex"></div>
+                        <button class="card-btn" id="nextBtn" onclick="goNext()">\uB2E4\uC74C</button>
+                    </div>
+                    <div class="card-panel" id="cardPanel"></div>
+                    <div class="card-actions-row">
+                        <button class="card-btn card-select" id="cardSelectBtn" onclick="toggleCurrentSelection()">\uC774 \uBB38\uC81C \uC120\uD0DD</button>
+                        <button class="card-btn card-apply" id="cardApplyBtn" onclick="applyCurrent()">\uC774 \uBB38\uC81C \uC801\uC6A9</button>
+                    </div>
+                </div>
+            `;
 
-            // 그룹화된 결과 렌더링
-            data.grouped_results.forEach(block => {
-                const blockHtml = createBlockSection(block);
-                container.innerHTML += blockHtml;
-            });
-
-            // No Match 섹션
-            if (data.no_match_list.length > 0) {
-                container.innerHTML += createNoMatchSection(data.no_match_list);
-            }
-
-            // 필터 정보 업데이트
-            updateFilterInfo(data);
+            allItems = buildFlatItems(data);
+            filteredItems = allItems.slice();
+            currentIndex = 0;
+            initSelectedFromConfidence();
+            renderCard();
+            updateFilterInfo();
         }
 
-        function createBlockSection(block) {
-            let lecturesHtml = '';
-            block.lectures.forEach(lecture => {
-                let questionsHtml = '';
-                lecture.questions.forEach(q => {
-                    questionsHtml += createQuestionItem(q);
+        function buildFlatItems(data) {
+            const items = [];
+            (data.grouped_results || []).forEach(block => {
+                (block.lectures || []).forEach(lecture => {
+                    (lecture.questions || []).forEach(q => {
+                        items.push({
+                            ...q,
+                            block_name: block.block_name,
+                            lecture_title: lecture.lecture_title,
+                            lecture_id: lecture.lecture_id,
+                            no_match: false
+                        });
+                    });
                 });
-
-                lecturesHtml += `
-                    <div class="lecture-group" data-lecture-id="${lecture.lecture_id}">
-                        <div class="lecture-header">
-                            <span class="lecture-title">
-                                <input type="checkbox" class="lecture-checkbox" 
-                                       data-lecture-id="${lecture.lecture_id}"
-                                       onchange="toggleLectureSelection(${lecture.lecture_id}, this.checked)">
-                                📖 ${lecture.lecture_title}
-                            </span>
-                            <span style="color: #888; font-size: 0.85rem;">${lecture.questions.length}개 문제</span>
-                        </div>
-                        ${questionsHtml}
-                    </div>
-                `;
             });
 
+            (data.no_match_list || []).forEach(q => {
+                items.push({
+                    ...q,
+                    block_name: q.block_name || '',
+                    lecture_title: q.lecture_title || '\uBD84\uB958 \uBD88\uAC00',
+                    lecture_id: null,
+                    no_match: true
+                });
+            });
+
+            items.sort((a, b) => (a.question_id || 0) - (b.question_id || 0));
+            return items;
+        }
+
+        function initSelectedFromConfidence() {
+            selectedIds = new Set();
+            allItems.forEach(item => {
+                const confidence = item.confidence || 0;
+                if (item.lecture_id && confidence >= CONFIDENCE_THRESHOLD) {
+                    selectedIds.add(item.question_id);
+                }
+            });
+            updateSelectedCount();
+        }
+
+        function escapeHtml(value) {
+            if (value === null || value === undefined) return '';
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function formatPageRange(evidence) {
+            if (!evidence) return '';
+            const start = evidence.page_start;
+            const end = evidence.page_end;
+            if (start === null || start === undefined) return '';
+            if (end === null || end === undefined || start === end) {
+                return `p.${start}`;
+            }
+            return `p.${start}-${end}`;
+        }
+
+        function buildEvidenceHtml(q) {
+            const evidence = Array.isArray(q.evidence) ? q.evidence : [];
+            const hint = q.study_hint || '';
+            if (!evidence.length && !hint) {
+                return '';
+            }
+
+            const pageLabels = evidence.slice(0, 2).map(formatPageRange).filter(Boolean);
+            const pageText = pageLabels.length ? `\uCD94\uCC9C \uD398\uC774\uC9C0: ${pageLabels.join(', ')}` : '';
+            const snippet = evidence.length ? (evidence[0].quote || '') : '';
+            const snippetHtml = snippet ? `<div class="snippet">${escapeHtml(snippet)}</div>` : '';
+            const hintHtml = hint ? `<div class="hint">\uACF5\uBD80 \uD3EC\uC778\uD2B8: ${escapeHtml(hint)}</div>` : '';
+
             return `
-                <div class="block-section">
-                    <div class="block-header" onclick="toggleBlock(this.parentElement)">
-                        <span class="icon">▼</span>
-                        📁 ${block.block_name}
-                    </div>
-                    <div class="block-content">
-                        ${lecturesHtml}
-                    </div>
+                <div class="ai-evidence">
+                    ${pageText ? `<div class="label">${pageText}</div>` : ''}
+                    ${snippetHtml}
+                    ${hintHtml}
                 </div>
             `;
         }
 
-        function createQuestionItem(q) {
-            const confidence = q.confidence || 0;
-            const confidenceClass = confidence >= 0.8 ? 'high' : (confidence >= 0.6 ? 'medium' : 'low');
-            const confidenceLabel = confidence >= 0.8 ? '높음' : (confidence >= 0.6 ? '보통' : '낮음');
-            const checked = confidence >= CONFIDENCE_THRESHOLD ? 'checked' : '';
+        function renderCard() {
+            const panel = document.getElementById('cardPanel');
+            const indexEl = document.getElementById('cardIndex');
+            const prevBtn = document.getElementById('prevBtn');
+            const nextBtn = document.getElementById('nextBtn');
+            const selectBtn = document.getElementById('cardSelectBtn');
+            const applyBtn = document.getElementById('cardApplyBtn');
 
-            return `
-                <div class="question-item ${checked ? 'selected' : ''}" 
-                     data-question-id="${q.question_id}"
-                     data-confidence="${confidence}"
-                     data-lecture-id="${q.lecture_id || ''}">
-                    <input type="checkbox" class="question-checkbox" 
-                           data-id="${q.question_id}" 
-                           ${checked}
-                           onchange="updateSelection(this)">
-                    <div class="question-info">
-                        <div class="question-header">
-                            <div>
-                                <span class="question-number">Q${q.question_number}</span>
-                                <span class="exam-name">${q.exam_title || ''}</span>
-                            </div>
+            if (!filteredItems.length) {
+                panel.innerHTML = '<div class="empty-card">\uC870\uAC74\uC5D0 \uB9DE\uB294 \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.</div>';
+                indexEl.textContent = '0 / 0';
+                if (prevBtn) prevBtn.disabled = true;
+                if (nextBtn) nextBtn.disabled = true;
+                if (selectBtn) {
+                    selectBtn.disabled = true;
+                    selectBtn.textContent = '\uC774 \uBB38\uC81C \uC120\uD0DD';
+                }
+                if (applyBtn) applyBtn.disabled = true;
+                return;
+            }
+
+            const item = filteredItems[currentIndex];
+            const confidence = item.confidence || 0;
+            const confidenceClass = confidence >= 0.8 ? 'high' : (confidence >= 0.6 ? 'medium' : 'low');
+            const confidenceLabel = confidence >= 0.8 ? '\uB192\uC74C' : (confidence >= 0.6 ? '\uBCF4\uD1B5' : '\uB0AE\uC74C');
+            const isSelected = selectedIds.has(item.question_id);
+            const blockName = item.block_name ? `${item.block_name} > ` : '';
+            const lectureLabel = item.lecture_id ? `${blockName}${item.lecture_title || ''}`.trim() : '\uBD84\uB958 \uBD88\uAC00';
+            const questionText = item.question_content || item.question_text || '';
+            const questionHtml = questionText
+                ? escapeHtml(questionText).replace(/\n/g, '<br>')
+                : '<span class="muted">\uBB38\uD56D \uD14D\uC2A4\uD2B8 \uC5C6\uC74C</span>';
+            const choices = Array.isArray(item.question_choices) ? item.question_choices : [];
+            const choicesHtml = choices.length
+                ? `<ol class="choice-list">${choices.map(c => `<li>${escapeHtml(c)}</li>`).join('')}</ol>`
+                : '';
+            const reasonText = item.reason || '\uBD84\uB958 \uADFC\uAC70 \uC5C6\uC74C';
+            const evidenceHtml = buildEvidenceHtml(item);
+
+            panel.innerHTML = `
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Q${item.question_number}
+                            <span class="exam-tag">${escapeHtml(item.exam_title || '')}</span>
+                        </div>
+                        <div class="card-meta">
+                            <span class="lecture-tag ${item.lecture_id ? '' : 'no-match'}">${escapeHtml(lectureLabel)}</span>
                             <span class="confidence-badge confidence-${confidenceClass}">
                                 ${Math.round(confidence * 100)}% ${confidenceLabel}
                             </span>
                         </div>
-                        <div class="ai-reason">
-                            <span class="icon">💡</span>
-                            <span>${q.reason || '근거 없음'}</span>
-                        </div>
+                    </div>
+                    <div class="card-badge ${item.no_match ? 'badge-no-match' : 'badge-match'}">
+                        ${item.no_match ? '\uBD84\uB958 \uBD88\uAC00' : '\uBD84\uB958\uB428'}
                     </div>
                 </div>
-            `;
-        }
-
-        function createNoMatchSection(noMatchList) {
-            let questionsHtml = '';
-            noMatchList.forEach(q => {
-                questionsHtml += `
-                    <div class="question-item" data-question-id="${q.question_id}">
-                        <div class="question-info">
-                            <div class="question-header">
-                                <div>
-                                    <span class="question-number">Q${q.question_number}</span>
-                                    <span class="exam-name">${q.exam_title || ''}</span>
-                                </div>
-                            </div>
-                            <div class="ai-reason">
-                                <span class="icon">⚠️</span>
-                                <span>${q.reason || '적합한 강의를 찾지 못했습니다.'}</span>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-
-            return `
-                <div class="block-section no-match-section">
-                    <div class="block-header" onclick="toggleBlock(this.parentElement)">
-                        <span class="icon">▼</span>
-                        ⚠️ 분류 불가 (${noMatchList.length}개)
-                    </div>
-                    <div class="block-content">
-                        ${questionsHtml}
-                    </div>
+                <div class="card-question">
+                    <div class="card-section-title">\uBB38\uC81C</div>
+                    <div class="card-question-text">${questionHtml}</div>
+                    ${choicesHtml}
+                </div>
+                <div class="card-section">
+                    <div class="card-section-title">AI \uBD84\uB958 \uAE30\uC900</div>
+                    <div class="card-section-body">${escapeHtml(reasonText)}</div>
+                </div>
+                <div class="card-section">
+                    <div class="card-section-title">\uACF5\uBD80 \uB808\uD37C\uB7F0\uC2A4</div>
+                    ${evidenceHtml || '<div class="card-section-body muted">\uC81C\uACF5\uB41C \uADFC\uAC70\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.</div>'}
                 </div>
             `;
+
+            indexEl.textContent = `${currentIndex + 1} / ${filteredItems.length}`;
+            if (prevBtn) prevBtn.disabled = currentIndex === 0;
+            if (nextBtn) nextBtn.disabled = currentIndex >= filteredItems.length - 1;
+            if (selectBtn) {
+                selectBtn.disabled = !item.lecture_id;
+                selectBtn.textContent = isSelected ? '\uC120\uD0DD \uD574\uC81C' : '\uC774 \uBB38\uC81C \uC120\uD0DD';
+            }
+            if (applyBtn) applyBtn.disabled = !item.lecture_id;
         }
 
-        function toggleBlock(element) {
-            element.classList.toggle('collapsed');
+        function goPrev() {
+            if (currentIndex > 0) {
+                currentIndex -= 1;
+                renderCard();
+            }
         }
 
-        function updateSelection(checkbox) {
-            const qid = parseInt(checkbox.dataset.id);
-            const item = checkbox.closest('.question-item');
-            const lectureId = item.dataset.lectureId;
+        function goNext() {
+            if (currentIndex < filteredItems.length - 1) {
+                currentIndex += 1;
+                renderCard();
+            }
+        }
 
-            if (checkbox.checked) {
-                selectedIds.add(qid);
-                item.classList.add('selected');
+        function toggleCurrentSelection() {
+            const item = filteredItems[currentIndex];
+            if (!item || !item.lecture_id) {
+                showToast('\uC801\uC6A9 \uAC00\uB2A5\uD55C \uAC15\uC758\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.');
+                return;
+            }
+            if (selectedIds.has(item.question_id)) {
+                selectedIds.delete(item.question_id);
             } else {
-                selectedIds.delete(qid);
-                item.classList.remove('selected');
+                selectedIds.add(item.question_id);
             }
-
             updateSelectedCount();
+            renderCard();
+        }
 
-            // 강의 체크박스 상태도 업데이트
-            if (lectureId) {
-                updateLectureCheckboxState(lectureId);
+        function applyCurrent() {
+            const item = filteredItems[currentIndex];
+            if (!item || !item.lecture_id) {
+                showToast('\uC801\uC6A9 \uAC00\uB2A5\uD55C \uAC15\uC758\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.');
+                return;
             }
+            pendingIds = [item.question_id];
+            showConfirmModal(
+                '\uD604\uC7AC \uBB38\uC81C \uC801\uC6A9',
+                '\uC774 \uBB38\uC81C\uC758 \uBD84\uB958 \uACB0\uACFC\uB97C \uC801\uC6A9\uD560\uAE4C\uC694?',
+                'confirm-modal-btn-primary',
+                applyClassification
+            );
         }
 
         function updateSelectedCount() {
@@ -849,54 +1150,12 @@
             document.getElementById('applySelectedBtn').disabled = selectedIds.size === 0;
         }
 
-        // 강의 전체 선택/해제
-        function toggleLectureSelection(lectureId, isSelected) {
-            const lectureGroup = document.querySelector(`.lecture-group[data-lecture-id="${lectureId}"]`);
-            if (!lectureGroup) return;
-
-            const checkboxes = lectureGroup.querySelectorAll('.question-checkbox');
-            checkboxes.forEach(checkbox => {
-                const qid = parseInt(checkbox.dataset.id);
-                const item = checkbox.closest('.question-item');
-
-                checkbox.checked = isSelected;
-                if (isSelected) {
-                    selectedIds.add(qid);
-                    item.classList.add('selected');
-                } else {
-                    selectedIds.delete(qid);
-                    item.classList.remove('selected');
-                }
-            });
-
-            updateSelectedCount();
+        function updateFilterInfo() {
+            const highCount = allItems.filter(item => (item.confidence || 0) >= 0.7 && item.lecture_id).length;
+            document.getElementById('filterInfo').textContent = `\uD655\uC2E4 \uCD94\uCC9C: ${highCount}\uAC1C`;
         }
 
-        // 문제 체크박스 변경 시 강의 체크박스 상태도 업데이트
-        function updateLectureCheckboxState(lectureId) {
-            const lectureGroup = document.querySelector(`.lecture-group[data-lecture-id="${lectureId}"]`);
-            if (!lectureGroup) return;
-
-            const checkboxes = lectureGroup.querySelectorAll('.question-checkbox');
-            const lectureCheckbox = lectureGroup.querySelector('.lecture-checkbox');
-            if (!lectureCheckbox) return;
-
-            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-            const someChecked = Array.from(checkboxes).some(cb => cb.checked);
-
-            lectureCheckbox.checked = allChecked;
-            lectureCheckbox.indeterminate = someChecked && !allChecked;
-        }
-
-        function updateFilterInfo(data) {
-            const highCount = data.grouped_results.reduce((sum, b) =>
-                sum + b.lectures.reduce((s, l) =>
-                    s + l.questions.filter(q => q.confidence >= 0.7).length, 0), 0);
-            document.getElementById('filterInfo').textContent =
-                `확실한 제안: ${highCount}개`;
-        }
-
-        // 필터 버튼 처리
+        // \uD544\uD130 \uBC84\uD2BC \uCC98\uB9AC
         document.querySelectorAll('.filter-bar button').forEach(btn => {
             btn.addEventListener('click', () => {
                 document.querySelectorAll('.filter-bar button').forEach(b => b.classList.remove('active'));
@@ -906,26 +1165,24 @@
         });
 
         function applyFilter(filter) {
-            document.querySelectorAll('.question-item').forEach(item => {
-                const confidence = parseFloat(item.dataset.confidence) || 0;
-                const lectureId = item.dataset.lectureId;
-                let show = true;
-
+            activeFilter = filter;
+            filteredItems = allItems.filter(item => {
+                const confidence = item.confidence || 0;
+                const hasLecture = Boolean(item.lecture_id);
                 if (filter === 'high') {
-                    show = confidence >= 0.7 && lectureId;
-                } else if (filter === 'low') {
-                    show = confidence < 0.7 && confidence > 0 && lectureId;
-                } else if (filter === 'nomatch') {
-                    show = !lectureId;
+                    return confidence >= 0.7 && hasLecture;
                 }
-
-                item.style.display = show ? '' : 'none';
+                if (filter === 'low') {
+                    return confidence < 0.7 && confidence > 0 && hasLecture;
+                }
+                if (filter === 'nomatch') {
+                    return !hasLecture;
+                }
+                return true;
             });
+            currentIndex = 0;
+            renderCard();
         }
-
-        // 커스텀 모달 관련
-        let pendingAction = null;
-        let pendingIds = [];
 
         function showConfirmModal(title, message, buttonClass, onConfirm) {
             document.getElementById('confirmModalTitle').textContent = title;
@@ -960,25 +1217,19 @@
         }
 
         async function applyHighConfidence() {
-            // 높은 신뢰도 문제만 선택
-            const highConfidenceIds = [];
-            document.querySelectorAll('.question-item').forEach(item => {
-                const confidence = parseFloat(item.dataset.confidence) || 0;
-                const lectureId = item.dataset.lectureId;
-                if (confidence >= CONFIDENCE_THRESHOLD && lectureId) {
-                    highConfidenceIds.push(parseInt(item.dataset.questionId));
-                }
-            });
+            const highConfidenceIds = allItems
+                .filter(item => (item.confidence || 0) >= CONFIDENCE_THRESHOLD && item.lecture_id)
+                .map(item => item.question_id);
 
             if (highConfidenceIds.length === 0) {
-                showToast('적용할 확실한 제안이 없습니다.');
+                showToast('\uC801\uC6A9\uD560 \uD655\uC2E4\uD55C \uC81C\uC548\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.');
                 return;
             }
 
             pendingIds = highConfidenceIds;
             showConfirmModal(
-                '✅ 확실한 제안 적용',
-                `${highConfidenceIds.length}개의 확실한 제안을 적용하시겠습니까?`,
+                '\uD655\uC2E4\uD55C \uC81C\uC548 \uC801\uC6A9',
+                `${highConfidenceIds.length}\uAC1C\uC758 \uD655\uC2E4\uD55C \uC81C\uC548\uC744 \uC801\uC6A9\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?`,
                 'confirm-modal-btn-success',
                 applyClassification
             );
@@ -986,14 +1237,14 @@
 
         async function applySelected() {
             if (selectedIds.size === 0) {
-                showToast('선택된 항목이 없습니다.');
+                showToast('\uC120\uD0DD\uB41C \uD56D\uBAA9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.');
                 return;
             }
 
             pendingIds = Array.from(selectedIds);
             showConfirmModal(
-                '📋 선택 항목 적용',
-                `${selectedIds.size}개 항목을 적용하시겠습니까?`,
+                '\uC120\uD0DD \uD56D\uBAA9 \uC801\uC6A9',
+                `${selectedIds.size}\uAC1C \uD56D\uBAA9\uC744 \uC801\uC6A9\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?`,
                 'confirm-modal-btn-primary',
                 applyClassification
             );

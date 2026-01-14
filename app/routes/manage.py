@@ -1,12 +1,16 @@
 """관리 Blueprint - 블록, 강의, 시험 CRUD"""
-from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, abort
+from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, abort, jsonify
 from werkzeug.utils import secure_filename
 from datetime import datetime
 import os
+import shutil
 import re
 from urllib.parse import urlparse
 from app import db
-from app.models import Block, Lecture, PreviousExam, Question, Choice
+from app.models import Block, Lecture, PreviousExam, Question, Choice, LectureMaterial, LectureChunk
+from app.services.exam_cleanup import delete_exam_with_assets
+from pathlib import Path
+from sqlalchemy import text
 
 manage_bp = Blueprint('manage', __name__)
 
@@ -25,6 +29,13 @@ def allowed_file(filename, allowed_extensions):
     """허용된 파일 확장자 확인"""
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in allowed_extensions
+
+
+def _resolve_upload_folder() -> Path:
+    upload_folder = current_app.config.get('UPLOAD_FOLDER')
+    if not upload_folder:
+        upload_folder = Path(current_app.static_folder) / 'uploads'
+    return Path(upload_folder)
 
 
 _MARKDOWN_IMAGE_PATTERN = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
@@ -293,6 +304,126 @@ def extract_keywords_only():
         return {'success': False, 'error': str(e)}, 500
 
 
+@manage_bp.route('/lecture/<int:lecture_id>/upload-note', methods=['POST'])
+def upload_lecture_note(lecture_id):
+    """강의 노트 PDF 업로드 및 인덱싱"""
+    lecture = Lecture.query.get_or_404(lecture_id)
+
+    if 'pdf_file' not in request.files:
+        return jsonify({'success': False, 'error': 'PDF 파일이 필요합니다.'}), 400
+
+    file = request.files['pdf_file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': '파일명이 없습니다.'}), 400
+
+    if not file.filename.lower().endswith('.pdf'):
+        return jsonify({'success': False, 'error': 'PDF 파일만 업로드 가능합니다.'}), 400
+
+    try:
+        upload_folder = _resolve_upload_folder()
+        target_dir = upload_folder / 'lecture_notes' / str(lecture.id)
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        original_name = Path(file.filename).name
+        safe_name = secure_filename(original_name)
+        timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
+        stored_name = f"{timestamp}_{safe_name}"
+        stored_path = target_dir / stored_name
+        file.save(stored_path)
+
+        relative_path = os.path.relpath(stored_path, upload_folder)
+        relative_path = Path(relative_path).as_posix()
+
+        material = LectureMaterial(
+            lecture_id=lecture.id,
+            file_path=relative_path,
+            original_filename=original_name,
+            status=LectureMaterial.STATUS_UPLOADED,
+        )
+        db.session.add(material)
+        db.session.commit()
+
+        from app.services.lecture_indexer import index_material
+        index_result = index_material(material)
+
+        return jsonify(
+            {
+                'success': True,
+                'material_id': material.id,
+                'chunks': index_result.get('chunks', 0),
+                'pages': index_result.get('pages', 0),
+            }
+        )
+    except Exception as e:
+        current_app.logger.exception('Lecture note indexing failed')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@manage_bp.route('/lecture/<int:lecture_id>/note-status')
+def lecture_note_status(lecture_id):
+    """강의 노트 업로드 상태 조회"""
+    lecture = Lecture.query.get_or_404(lecture_id)
+    materials = (
+        LectureMaterial.query.filter_by(lecture_id=lecture.id)
+        .order_by(LectureMaterial.uploaded_at.desc())
+        .all()
+    )
+    payload = []
+    for material in materials:
+        chunk_count = LectureChunk.query.filter_by(material_id=material.id).count()
+        payload.append(
+            {
+                'id': material.id,
+                'originalFilename': material.original_filename,
+                'filePath': material.file_path,
+                'status': material.status,
+                'uploadedAt': material.uploaded_at.isoformat() if material.uploaded_at else None,
+                'indexedAt': material.indexed_at.isoformat() if material.indexed_at else None,
+                'chunks': chunk_count,
+            }
+        )
+
+    return jsonify({'success': True, 'materials': payload})
+
+
+@manage_bp.route('/lecture/<int:lecture_id>/note/<int:material_id>/delete', methods=['POST'])
+def delete_lecture_note(lecture_id, material_id):
+    """Delete an uploaded lecture note and related chunks/FTS rows."""
+    lecture = Lecture.query.get_or_404(lecture_id)
+    material = LectureMaterial.query.filter_by(id=material_id, lecture_id=lecture.id).first_or_404()
+
+    try:
+        chunk_ids = [
+            row.id for row in LectureChunk.query.filter_by(material_id=material.id).all()
+        ]
+        if chunk_ids:
+            placeholders = ", ".join([f":id_{idx}" for idx in range(len(chunk_ids))])
+            params = {f"id_{idx}": cid for idx, cid in enumerate(chunk_ids)}
+            try:
+                db.session.execute(
+                    text(f"DELETE FROM lecture_chunks_fts WHERE chunk_id IN ({placeholders})"),
+                    params,
+                )
+            except Exception:
+                current_app.logger.warning("FTS delete failed for material %s", material.id)
+
+        file_path = Path(material.file_path)
+        if not file_path.is_absolute():
+            file_path = _resolve_upload_folder() / file_path
+        try:
+            file_path.unlink(missing_ok=True)
+        except Exception:
+            current_app.logger.warning("Lecture note file delete failed: %s", file_path)
+
+        db.session.delete(material)
+        db.session.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("Failed to delete lecture note %s", material.id)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @manage_bp.route('/lecture/<int:lecture_id>')
 def view_lecture(lecture_id):
     """강의 상세보기 - 분류된 문제 목록"""
@@ -374,8 +505,7 @@ def edit_exam(exam_id):
 def delete_exam(exam_id):
     """기출 시험 삭제"""
     exam = PreviousExam.query.get_or_404(exam_id)
-    db.session.delete(exam)
-    db.session.commit()
+    delete_exam_with_assets(exam)
     flash('기출 시험이 삭제되었습니다.', 'success')
     return redirect(url_for('manage.list_exams'))
 
@@ -448,6 +578,10 @@ def upload_pdf():
                 from app.services.pdf_parser import parse_pdf_to_questions
             
             # PDF 파일 임시 저장
+            tmp_path = None
+            crop_dir = None
+            crop_question_count = 0
+            crop_image_count = 0
             import tempfile
             with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
                 file.save(tmp.name)
@@ -461,8 +595,6 @@ def upload_pdf():
             questions_data = parse_pdf_to_questions(tmp_path, upload_folder, exam_prefix)
             
             # 임시 파일 삭제
-            os.unlink(tmp_path)
-            
             if not questions_data:
                 flash('문제를 추출할 수 없습니다. PDF 형식을 확인해주세요.', 'error')
                 return redirect(request.url)
@@ -477,6 +609,13 @@ def upload_pdf():
             )
             db.session.add(exam)
             db.session.flush()
+
+            from app.services.pdf_cropper import crop_pdf_to_questions, get_exam_crop_dir
+            crop_dir = get_exam_crop_dir(exam.id, upload_folder)
+            crop_result = crop_pdf_to_questions(tmp_path, exam.id, upload_folder=upload_folder)
+            crop_meta = crop_result.get('meta') or {}
+            crop_question_count = len(crop_meta.get('questions', []))
+            crop_image_count = len(crop_result.get('question_images', {}))
             
             question_count = 0
             choice_count = 0
@@ -526,16 +665,35 @@ def upload_pdf():
             
             db.session.commit()
             flash(f'PDF 파싱 완료! {question_count}개 문제, {choice_count}개 선택지가 저장되었습니다.', 'success')
+            if crop_image_count:
+                flash(f'Original images created: {crop_image_count}', 'success')
+            if crop_question_count and crop_question_count != question_count:
+                flash('Crop count differs from parsed question count. Verify the exam.', 'error')
             return redirect(url_for('manage.list_exams'))
             
         except ImportError as e:
+            db.session.rollback()
+            if crop_dir:
+                shutil.rmtree(crop_dir, ignore_errors=True)
             flash(f'PDF 파서를 불러올 수 없습니다. pdfplumber 설치가 필요합니다: {str(e)}', 'error')
+            return redirect(request.url)
+        except RuntimeError as e:
+            db.session.rollback()
+            if crop_dir:
+                shutil.rmtree(crop_dir, ignore_errors=True)
+            flash(f'PDF crop error: {str(e)}', 'error')
             return redirect(request.url)
         except Exception as e:
             db.session.rollback()
+            if crop_dir:
+                shutil.rmtree(crop_dir, ignore_errors=True)
             flash(f'PDF 파싱 오류: {str(e)}', 'error')
             return redirect(request.url)
     
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
     return render_template('manage/pdf_upload.html')
 
 
@@ -665,7 +823,24 @@ def edit_question(question_id):
         return redirect(url_for('exam.view_question', exam_id=exam.id, question_number=question.question_number))
     
     blocks = Block.query.order_by(Block.order).all()
-    return render_template('manage/question_edit.html', question=question, exam=exam, blocks=blocks, from_practice=from_practice)
+    original_image_url = None
+    upload_folder = current_app.config.get('UPLOAD_FOLDER') or os.path.join(
+        current_app.static_folder, 'uploads'
+    )
+    from app.services.pdf_cropper import find_question_crop_image, to_static_relative
+    crop_path = find_question_crop_image(exam.id, question.question_number, upload_folder=upload_folder)
+    if crop_path:
+        relative_path = to_static_relative(crop_path, static_root=current_app.static_folder)
+        if relative_path:
+            original_image_url = url_for('static', filename=relative_path)
+    return render_template(
+        'manage/question_edit.html',
+        question=question,
+        exam=exam,
+        blocks=blocks,
+        from_practice=from_practice,
+        original_image_url=original_image_url,
+    )
 
 
 # ===== 문제 일괄 관리 =====

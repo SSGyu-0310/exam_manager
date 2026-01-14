@@ -15,7 +15,16 @@ export class HttpError extends Error {
 
 function buildProxyUrl(path: string) {
   const normalized = path.startsWith("/") ? path : `/${path}`;
-  return `/api/proxy${normalized}`;
+  const proxyPath = `/api/proxy${normalized}`;
+  if (typeof window === "undefined") {
+    const baseUrl = (
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      "http://localhost:3000"
+    ).replace(/\/$/, "");
+    return `${baseUrl}${proxyPath}`;
+  }
+  return proxyPath;
 }
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}) {

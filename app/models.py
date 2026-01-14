@@ -53,6 +53,21 @@ class Lecture(db.Model):
                                backref='lecture', 
                                lazy='dynamic')
     
+    materials = db.relationship(
+        'LectureMaterial',
+        backref='lecture',
+        lazy='dynamic',
+        cascade='all, delete-orphan',
+        order_by='LectureMaterial.uploaded_at'
+    )
+    chunks = db.relationship(
+        'LectureChunk',
+        backref='lecture',
+        lazy='dynamic',
+        cascade='all, delete-orphan',
+        order_by='LectureChunk.page_start'
+    )
+    
     def __repr__(self):
         return f'<Lecture {self.order}. {self.title}>'
     
@@ -63,6 +78,50 @@ class Lecture(db.Model):
     @property
     def classified_question_count(self):
         return self.questions.filter_by(is_classified=True).count()
+
+
+class LectureMaterial(db.Model):
+    """강의 노트 업로드 자료"""
+    __tablename__ = 'lecture_materials'
+    
+    STATUS_UPLOADED = 'uploaded'
+    STATUS_INDEXED = 'indexed'
+    STATUS_FAILED = 'failed'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    lecture_id = db.Column(db.Integer, db.ForeignKey('lectures.id'), nullable=False)
+    file_path = db.Column(db.String(500), nullable=False)
+    original_filename = db.Column(db.String(300))
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    indexed_at = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(20), default=STATUS_UPLOADED)
+    
+    chunks = db.relationship(
+        'LectureChunk',
+        backref='material',
+        lazy='dynamic',
+        cascade='all, delete-orphan',
+        order_by='LectureChunk.page_start'
+    )
+    
+    def __repr__(self):
+        return f'<LectureMaterial {self.lecture_id}:{self.id} ({self.status})>'
+
+
+class LectureChunk(db.Model):
+    """강의 노트 페이지 청크"""
+    __tablename__ = 'lecture_chunks'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    lecture_id = db.Column(db.Integer, db.ForeignKey('lectures.id'), nullable=False)
+    material_id = db.Column(db.Integer, db.ForeignKey('lecture_materials.id'), nullable=False)
+    page_start = db.Column(db.Integer, nullable=False)
+    page_end = db.Column(db.Integer, nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    char_len = db.Column(db.Integer)
+    
+    def __repr__(self):
+        return f'<LectureChunk {self.lecture_id}:{self.page_start}-{self.page_end}>'
 
 
 class PreviousExam(db.Model):

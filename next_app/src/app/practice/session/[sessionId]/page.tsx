@@ -5,6 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { Flag, Timer } from "lucide-react";
 
 import { apiFetch } from "@/lib/http";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { QuestionView } from "@/components/practice/QuestionView";
@@ -28,6 +30,8 @@ type SessionContext = {
   warning?: string | null;
   source?: string;
   questionOrder?: number[];
+  examIds?: number[];
+  filterActive?: boolean;
 };
 
 type SubmitResult = {
@@ -47,6 +51,38 @@ const formatTime = (seconds: number) => {
 
 const getChoiceId = (choice: { number?: number }, index: number) =>
   typeof choice.number === "number" ? choice.number : index + 1;
+
+const isAnswerComplete = (payload?: AnswerPayload) => {
+  if (!payload) return false;
+  if (payload.type === "mcq") return payload.value.length > 0;
+  if (payload.type === "short") return payload.value.trim().length > 0;
+  return false;
+};
+
+const formatMode = (value?: string) => {
+  if (!value) return "Practice";
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+};
+
+const appendExamParams = (
+  params: URLSearchParams,
+  examIds?: number[],
+  filterActive?: boolean
+) => {
+  if (filterActive) {
+    params.set("filter", "1");
+    if (examIds && examIds.length > 0) {
+      examIds.forEach((id) => params.append("exam_ids", String(id)));
+    }
+  }
+};
+
+const buildExamQuery = (examIds?: number[], filterActive?: boolean) => {
+  const params = new URLSearchParams();
+  appendExamParams(params, examIds, filterActive);
+  const query = params.toString();
+  return query ? `?${query}` : "";
+};
 
 export default function PracticeSessionPage() {
   const router = useRouter();
@@ -73,6 +109,8 @@ export default function PracticeSessionPage() {
     hasMore: false,
   });
 
+  const isTimed = sessionContext.mode === "timed";
+
   const fallbackLectureId = useMemo(() => {
     if (sessionId?.startsWith("lecture-")) {
       return decodeURIComponent(sessionId.replace("lecture-", ""));
@@ -93,18 +131,31 @@ export default function PracticeSessionPage() {
   }, [sessionId]);
 
   useEffect(() => {
+    if (!isTimed) {
+      setTimerSeconds(0);
+      return;
+    }
     const timerId = setInterval(() => {
       setTimerSeconds((prev) => prev + 1);
     }, 1000);
     return () => clearInterval(timerId);
-  }, []);
+  }, [isTimed]);
 
   const fetchQuestions = useCallback(
-    async (lectureId: string, offset = 0) => {
+    async (
+      lectureId: string,
+      offset = 0,
+      examIds?: number[],
+      filterActive?: boolean
+    ) => {
+      const params = new URLSearchParams();
+      params.set("limit", String(PAGE_SIZE));
+      params.set("offset", String(offset));
+      appendExamParams(params, examIds, filterActive);
       const response = await apiFetch<unknown>(
         `/api/practice/lecture/${encodeURIComponent(
           lectureId
-        )}/questions?limit=${PAGE_SIZE}&offset=${offset}`,
+        )}/questions?${params.toString()}`,
         { cache: "no-store" }
       );
       const parsed = lectureQuestionsResponseSchema.safeParse(response);
@@ -132,6 +183,8 @@ export default function PracticeSessionPage() {
 
       let lectureId = sessionContext.lectureId ?? fallbackLectureId ?? undefined;
       let order = sessionContext.questionOrder ?? [];
+      const examIds = sessionContext.examIds;
+      const filterActive = sessionContext.filterActive;
 
       if (!lectureId && sessionId && !sessionId.startsWith("lecture-")) {
         try {
@@ -166,7 +219,7 @@ export default function PracticeSessionPage() {
       }
 
       try {
-        const page = await fetchQuestions(lectureId, 0);
+        const page = await fetchQuestions(lectureId, 0, examIds, filterActive);
         if (!active) return;
         setQuestions(page.questions);
         setQuestionOrder(order);
@@ -189,7 +242,15 @@ export default function PracticeSessionPage() {
     return () => {
       active = false;
     };
-  }, [fetchQuestions, fallbackLectureId, sessionContext.lectureId, sessionId, sessionContext.questionOrder]);
+  }, [
+    fetchQuestions,
+    fallbackLectureId,
+    sessionContext.lectureId,
+    sessionId,
+    sessionContext.questionOrder,
+    sessionContext.examIds,
+    sessionContext.filterActive,
+  ]);
 
   const orderedQuestions = useMemo(() => {
     if (!questionOrder.length) return questions;
@@ -210,19 +271,52 @@ export default function PracticeSessionPage() {
   }, [currentIndex, orderedQuestions.length]);
 
   const currentQuestion = orderedQuestions[currentIndex];
-  const progress = orderedQuestions.length
-    ? Math.round(((currentIndex + 1) / orderedQuestions.length) * 100)
-    : 0;
-
-  const unansweredCount = useMemo(() => {
+  const answeredCount = useMemo(() => {
     return orderedQuestions.reduce((count, question) => {
       const answer = answers[String(question.questionId)];
-      if (!answer) return count + 1;
-      if (answer.type === "mcq" && answer.value.length === 0) return count + 1;
-      if (answer.type === "short" && answer.value.trim().length === 0) return count + 1;
-      return count;
+      return count + (isAnswerComplete(answer) ? 1 : 0);
     }, 0);
   }, [answers, orderedQuestions]);
+
+  const unansweredCount = orderedQuestions.length - answeredCount;
+
+  const bookmarkedCount = useMemo(
+    () => Object.values(bookmarks).filter(Boolean).length,
+    [bookmarks]
+  );
+
+  const shortAnswerCount = useMemo(
+    () => orderedQuestions.filter((question) => question.isShortAnswer).length,
+    [orderedQuestions]
+  );
+
+  const multipleResponseCount = useMemo(
+    () =>
+      orderedQuestions.filter(
+        (question) => !question.isShortAnswer && question.isMultipleResponse
+      ).length,
+    [orderedQuestions]
+  );
+
+  const singleChoiceCount =
+    orderedQuestions.length - shortAnswerCount - multipleResponseCount;
+
+  const answeredIds = useMemo(() => {
+    const set = new Set<string>();
+    orderedQuestions.forEach((question) => {
+      if (isAnswerComplete(answers[String(question.questionId)])) {
+        set.add(String(question.questionId));
+      }
+    });
+    return set;
+  }, [answers, orderedQuestions]);
+
+  const totalLoaded = orderedQuestions.length;
+  const totalQuestions = pagination.total || totalLoaded;
+  const hasUnloaded = totalQuestions > totalLoaded;
+  const completion = totalLoaded
+    ? Math.round((answeredCount / totalLoaded) * 100)
+    : 0;
 
   const handleAnswerChange = useCallback(
     (questionId: string, payload?: AnswerPayload) => {
@@ -328,9 +422,13 @@ export default function PracticeSessionPage() {
         { method: "POST", headers, body }
       );
 
+    const filterQuery = buildExamQuery(
+      sessionContext.examIds,
+      sessionContext.filterActive
+    );
     const submitViaLecture = async () =>
       apiFetch<unknown>(
-        `/api/practice/lecture/${encodeURIComponent(lectureId)}/submit`,
+        `/api/practice/lecture/${encodeURIComponent(lectureId)}/submit${filterQuery}`,
         { method: "POST", headers, body }
       );
 
@@ -376,6 +474,8 @@ export default function PracticeSessionPage() {
           lectureId,
           answers: answersPayload,
           mode: sessionContext.mode,
+          examIds: sessionContext.examIds,
+          filterActive: sessionContext.filterActive,
         })
       );
     }
@@ -390,7 +490,12 @@ export default function PracticeSessionPage() {
     setLoadMoreLoading(true);
     try {
       const nextOffset = pagination.offset + pagination.limit;
-      const page = await fetchQuestions(lectureId, nextOffset);
+      const page = await fetchQuestions(
+        lectureId,
+        nextOffset,
+        sessionContext.examIds,
+        sessionContext.filterActive
+      );
       setQuestions((prev) => [...prev, ...page.questions]);
       setPagination({
         total: page.total,
@@ -407,11 +512,11 @@ export default function PracticeSessionPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 px-4 py-10">
+      <div className="min-h-screen px-4 py-10">
         <div className="mx-auto w-full max-w-5xl space-y-6">
-          <div className="h-8 w-48 animate-pulse rounded-full bg-slate-200" />
-          <div className="h-48 animate-pulse rounded-3xl bg-slate-200" />
-          <div className="h-56 animate-pulse rounded-3xl bg-slate-200" />
+          <div className="h-8 w-48 animate-pulse rounded-full bg-muted" />
+          <div className="h-48 animate-pulse rounded-3xl bg-muted" />
+          <div className="h-56 animate-pulse rounded-3xl bg-muted" />
         </div>
       </div>
     );
@@ -419,9 +524,9 @@ export default function PracticeSessionPage() {
 
   if (error || !currentQuestion) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 px-4 py-10">
+      <div className="min-h-screen px-4 py-10">
         <div className="mx-auto w-full max-w-3xl">
-          <Card className="border border-destructive/30 bg-destructive/10">
+          <Card className="border border-danger/30 bg-danger/10">
             <CardContent className="space-y-2 p-6">
               <p className="text-lg font-semibold text-foreground">Unable to load session</p>
               <p className="text-sm text-muted-foreground">
@@ -437,92 +542,207 @@ export default function PracticeSessionPage() {
   const answerForCurrent = answers[String(currentQuestion.questionId)];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 px-4 py-10">
+    <div className="min-h-screen px-4 py-10">
       <div className="mx-auto w-full max-w-5xl space-y-6">
-        <div className="space-y-4 rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
-                {sessionContext.mode ?? "practice"}
-              </p>
-              <h1 className="text-2xl font-semibold text-foreground">
-                {sessionContext.lectureTitle ?? "Practice Session"}
-              </h1>
-            </div>
-            <div className="flex items-center gap-4 text-sm text-muted-foreground">
-              <div className="flex items-center gap-2">
-                <Timer className="h-4 w-4" />
-                <span>{formatTime(timerSeconds)}</span>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="space-y-6">
+            {sessionContext.warning && (
+              <div className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
+                {sessionContext.warning}
               </div>
-              <Button variant="outline" size="sm" onClick={() => setShowSubmitDialog(true)}>
-                Submit
+            )}
+            {submitError && (
+              <div className="rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
+                {submitError}
+              </div>
+            )}
+            <QuestionView
+              question={currentQuestion}
+              index={currentIndex}
+              total={orderedQuestions.length}
+              answer={answerForCurrent}
+              onAnswerChange={(payload) =>
+                handleAnswerChange(String(currentQuestion.questionId), payload)
+              }
+              bookmarked={Boolean(bookmarks[String(currentQuestion.questionId)])}
+              onToggleBookmark={() => toggleBookmark(String(currentQuestion.questionId))}
+            />
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <Button
+                variant="outline"
+                onClick={() => setCurrentIndex((prev) => Math.max(prev - 1, 0))}
+                disabled={currentIndex === 0}
+              >
+                Previous
+              </Button>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Flag className="h-4 w-4" />
+                {bookmarks[String(currentQuestion.questionId)]
+                  ? "Bookmarked"
+                  : "Not bookmarked"}
+              </div>
+              <Button
+                onClick={() =>
+                  setCurrentIndex((prev) =>
+                    Math.min(prev + 1, orderedQuestions.length - 1)
+                  )
+                }
+                disabled={currentIndex >= orderedQuestions.length - 1}
+              >
+                Next
               </Button>
             </div>
+
+            {pagination.hasMore && (
+              <div className="flex flex-col items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={handleLoadMore}
+                  disabled={loadMoreLoading}
+                >
+                  {loadMoreLoading ? "Loading more..." : "Load more questions"}
+                </Button>
+                {hasUnloaded && (
+                  <span className="text-xs text-muted-foreground">
+                    Showing {totalLoaded} of {totalQuestions} questions
+                  </span>
+                )}
+              </div>
+            )}
           </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>
-                {currentIndex + 1} / {orderedQuestions.length} questions
-              </span>
-              <span>{progress}%</span>
-            </div>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
-              <div className="h-full bg-slate-900" style={{ width: `${progress}%` }} />
-            </div>
-          </div>
-          {sessionContext.warning && (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              {sessionContext.warning}
-            </div>
-          )}
-          {submitError && (
-            <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-              {submitError}
-            </div>
-          )}
+
+          <aside className="space-y-4 lg:sticky lg:top-24">
+            <Card className="border border-border/70 bg-card/85 shadow-soft">
+              <CardContent className="space-y-4 p-5">
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    Session
+                  </p>
+                  <p className="text-sm font-semibold text-foreground">
+                    {sessionContext.lectureTitle ?? "Practice Session"}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <Badge variant="neutral">{formatMode(sessionContext.mode)}</Badge>
+                    <span>{totalLoaded} questions</span>
+                    {hasUnloaded && (
+                      <Badge variant="neutral">
+                        Loaded {totalLoaded} / {totalQuestions}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+                {isTimed && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Timer className="h-4 w-4" />
+                    <span>{formatTime(timerSeconds)}</span>
+                  </div>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => setShowSubmitDialog(true)}
+                >
+                  Submit
+                </Button>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Progress</span>
+                    <span>{completion}%</span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full bg-primary"
+                      style={{ width: `${completion}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-xl border border-border/60 bg-muted/60 px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Total</p>
+                    <p className="text-lg font-semibold text-foreground">
+                      {totalLoaded}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-border/60 bg-muted/60 px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Answered</p>
+                    <p className="text-lg font-semibold text-foreground">
+                      {answeredCount}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-border/60 bg-muted/60 px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Unanswered</p>
+                    <p className="text-lg font-semibold text-foreground">
+                      {unansweredCount}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-border/60 bg-muted/60 px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Bookmarked</p>
+                    <p className="text-lg font-semibold text-foreground">
+                      {bookmarkedCount}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <Badge variant="neutral">MCQ {Math.max(singleChoiceCount, 0)}</Badge>
+                  <Badge variant="neutral">Multi {Math.max(multipleResponseCount, 0)}</Badge>
+                  <Badge variant="neutral">Short {Math.max(shortAnswerCount, 0)}</Badge>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-muted-foreground/60" />
+                    Unanswered
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-success" />
+                    Answered
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-warning" />
+                    Bookmarked
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border border-border/70 bg-card/85 shadow-soft">
+              <CardContent className="space-y-4 p-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                  Question Navigator
+                </p>
+                <div className="grid grid-cols-6 gap-2">
+                  {orderedQuestions.map((question, index) => {
+                    const id = String(question.questionId);
+                    const isActive = index === currentIndex;
+                    const isAnswered = answeredIds.has(id);
+                    const isBookmarked = Boolean(bookmarks[id]);
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setCurrentIndex(index)}
+                        className={cn(
+                          "relative flex h-10 w-10 items-center justify-center rounded-xl border text-sm font-semibold transition",
+                          isActive
+                            ? "border-primary bg-primary text-primary-foreground shadow-soft"
+                            : isAnswered
+                            ? "border-success/40 bg-success/20 text-success"
+                            : "border-border/70 bg-card text-muted-foreground hover:bg-muted"
+                        )}
+                      >
+                        {index + 1}
+                        {isBookmarked && (
+                          <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-warning" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          </aside>
         </div>
-
-        <QuestionView
-          question={currentQuestion}
-          index={currentIndex}
-          total={orderedQuestions.length}
-          answer={answerForCurrent}
-          onAnswerChange={(payload) =>
-            handleAnswerChange(String(currentQuestion.questionId), payload)
-          }
-          bookmarked={Boolean(bookmarks[String(currentQuestion.questionId)])}
-          onToggleBookmark={() => toggleBookmark(String(currentQuestion.questionId))}
-        />
-
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <Button
-            variant="outline"
-            onClick={() => setCurrentIndex((prev) => Math.max(prev - 1, 0))}
-            disabled={currentIndex === 0}
-          >
-            Previous
-          </Button>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Flag className="h-4 w-4" />
-            {bookmarks[String(currentQuestion.questionId)] ? "Bookmarked" : "Not bookmarked"}
-          </div>
-          <Button
-            onClick={() =>
-              setCurrentIndex((prev) => Math.min(prev + 1, orderedQuestions.length - 1))
-            }
-            disabled={currentIndex >= orderedQuestions.length - 1}
-          >
-            Next
-          </Button>
-        </div>
-
-        {pagination.hasMore && (
-          <div className="flex justify-center">
-            <Button variant="outline" onClick={handleLoadMore} disabled={loadMoreLoading}>
-              {loadMoreLoading ? "Loading more..." : "Load more questions"}
-            </Button>
-          </div>
-        )}
       </div>
 
       <SubmitDialog

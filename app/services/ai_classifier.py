@@ -4,6 +4,7 @@ Google Gemini API를 활용한 문제-강의 자동 분류 서비스.
 2단계 분류 프로세스: 1) 키워드 기반 후보 추출 2) LLM 정밀 분류
 """
 import json
+import os
 import re
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
@@ -23,6 +24,7 @@ except ImportError:
 
 from app import db
 from app.models import Question, Lecture, Block, ClassificationJob
+from app.services import retrieval
 
 # ============================================================
 # Job payload helpers (idempotency + compatibility)
@@ -49,6 +51,88 @@ def parse_job_payload(result_json: Optional[str]) -> Tuple[Dict, List[Dict]]:
             return payload.get('request', {}) or {}, results
         return payload.get('request', {}) or {}, []
     return {}, []
+
+
+def _extract_first_json_object(text: str) -> Optional[str]:
+    start = text.find('{')
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == '\\':
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
+def _sanitize_json_text(text: str) -> str:
+    if not text:
+        return text
+    text = re.sub(r'```(?:json)?', '', text, flags=re.IGNORECASE)
+    text = text.replace('```', '')
+    text = re.sub(r'[\x00-\x1F\x7F]', ' ', text)
+    text = (
+        text.replace('\u201c', '"')
+            .replace('\u201d', '"')
+            .replace('\u2018', "'")
+            .replace('\u2019', "'")
+    )
+    text = re.sub(r',\s*([}\]])', r'\1', text)
+    return text.strip()
+
+
+def _fallback_parse_result(text: str) -> Dict:
+    cleaned = _sanitize_json_text(text)
+    data: Dict = {}
+
+    m = re.search(r'lecture_id\s*[:=]\s*(null|\d+)', cleaned, re.IGNORECASE)
+    if m:
+        raw = m.group(1).lower()
+        data['lecture_id'] = None if raw == 'null' else int(raw)
+
+    m = re.search(r'no_match\s*[:=]\s*(true|false)', cleaned, re.IGNORECASE)
+    if m:
+        data['no_match'] = m.group(1).lower() == 'true'
+
+    m = re.search(r'confidence\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)', cleaned, re.IGNORECASE)
+    if m:
+        try:
+            data['confidence'] = float(m.group(1))
+        except ValueError:
+            pass
+
+    for key in ('reason', 'study_hint'):
+        m = re.search(rf'"?{key}"?\s*[:=]\s*"(.*?)"', cleaned, re.IGNORECASE | re.DOTALL)
+        if not m:
+            m = re.search(rf'"?{key}"?\s*[:=]\s*([^\n\r]+)', cleaned, re.IGNORECASE)
+        if m:
+            data[key] = m.group(1).strip().strip('"').strip()
+
+    data.setdefault('lecture_id', None)
+    if 'no_match' not in data:
+        data['no_match'] = data['lecture_id'] is None
+    data.setdefault('confidence', 0.0)
+    data.setdefault('reason', '')
+    data.setdefault('study_hint', '')
+    data.setdefault('evidence', [])
+    return data
 
 
 # ============================================================
@@ -85,57 +169,13 @@ class LectureRetriever:
                 'id': lecture.id,
                 'title': lecture.title,
                 'block_name': lecture.block.name,
-                'full_path': f"{lecture.block.name} > {lecture.title}",
-                'keywords_text': lecture.keywords or '',  # 사용자가 입력한 키워드 (LLM 제공용)
-                'keywords': self._extract_keywords(f"{lecture.block.name} {lecture.title} {lecture.keywords or ''}")
+                'full_path': f"{lecture.block.name} > {lecture.title}"
             })
     
-    def _extract_keywords(self, text: str) -> set:
-        """텍스트에서 키워드 추출 (간단한 토큰화)"""
-        # 한글, 영문, 숫자만 추출
-        tokens = re.findall(r'[가-힣a-zA-Z0-9]+', text.lower())
-        # 불용어 제거 (간단 버전)
-        stopwords = {'및', '의', '에', '를', '을', '이', '가', 'the', 'a', 'an', 'and', 'or'}
-        return set(t for t in tokens if t not in stopwords and len(t) > 1)
-    
-    def find_candidates(self, question_text: str, top_k: int = 15) -> List[Dict]:
-        """
-        문제 텍스트와 가장 관련 있는 강의 후보 Top-K 추출
-        
-        Args:
-            question_text: 문제 내용 텍스트
-            top_k: 반환할 후보 수
-        
-        Returns:
-            [{'id': 1, 'title': '...', 'block_name': '...', 'score': 0.5}, ...]
-        """
-        if not self._lectures_cache:
-            self.refresh_cache()
-        
-        if not self._lectures_cache:
-            return []
-        
-        question_keywords = self._extract_keywords(question_text)
-        
-        scored = []
-        for lecture in self._lectures_cache:
-            # Jaccard 유사도 계산
-            intersection = len(question_keywords & lecture['keywords'])
-            union = len(question_keywords | lecture['keywords'])
-            score = intersection / union if union > 0 else 0
-            
-            if score > 0 or len(scored) < top_k:
-                scored.append({
-                    'id': lecture['id'],
-                    'title': lecture['title'],
-                    'block_name': lecture['block_name'],
-                    'full_path': lecture['full_path'],
-                    'score': score
-                })
-        
-        # 점수 내림차순 정렬
-        scored.sort(key=lambda x: x['score'], reverse=True)
-        return scored[:top_k]
+    def find_candidates(self, question_text: str, top_k: int = 8) -> List[Dict]:
+        """FTS5 BM25 기반 후보 강의 검색"""
+        chunks = retrieval.search_chunks_bm25(question_text, top_n=80)
+        return retrieval.aggregate_candidates(chunks, top_k_lectures=top_k, evidence_per_lecture=3)
 
 
 # ============================================================
@@ -159,52 +199,136 @@ class GeminiClassifier:
         self.auto_apply_margin = current_app.config.get('AI_AUTO_APPLY_MARGIN', 0.2)
     
     def _build_classification_prompt(self, question_content: str, choices: List[str], candidates: List[Dict]) -> str:
-        """분류 프롬프트 생성"""
-        candidates_text = "\n".join([
-            f"- ID: {c['id']}, 강의명: {c['full_path']}" + (f", 키워드: {c['keywords_text']}" if c.get('keywords_text') else "")
-            for c in candidates
-        ])
-        
-        choices_text = "\n".join([f"  {i+1}. {c}" for i, c in enumerate(choices)]) if choices else "(선택지 없음)"
-        
-        prompt = f"""당신은 의학 교육 전문가입니다. 아래 시험 문제를 분석하여 가장 적합한 강의를 선택해주세요.
+        """Build the classification prompt."""
+        candidate_lines = []
+        for c in candidates:
+            evidence_lines = []
+            for e in c.get('evidence', []) or []:
+                page_start = e.get('page_start')
+                page_end = e.get('page_end')
+                if page_start is None or page_end is None:
+                    page_label = "p.?"
+                else:
+                    page_label = f"p.{page_start}" if page_start == page_end else f"p.{page_start}-{page_end}"
+                snippet = e.get('snippet') or ''
+                evidence_lines.append(
+                    f'  - {page_label}: "{snippet}" (chunk_id: {e.get("chunk_id")})'
+                )
+            if not evidence_lines:
+                evidence_lines.append("  - evidence: none")
+            candidate_lines.append(
+                f"- ID: {c['id']}, Lecture: {c['full_path']}\n" + "\n".join(evidence_lines)
+            )
+        candidates_text = "\n".join(candidate_lines) if candidate_lines else "(no candidates)"
 
-## 문제 내용
+        choices_text = "\n".join([f"  {i + 1}. {c}" for i, c in enumerate(choices)]) if choices else "(no choices)"
+
+        prompt = f"""You are a medical education expert. Analyze the exam question and choose the most relevant lecture.
+
+## Question
 {question_content}
 
-## 선택지
+## Choices
 {choices_text}
 
-## 후보 강의 목록
+## Candidate Lectures (with evidence)
 {candidates_text}
 
-## 중요 지시사항
-1. 문제의 핵심 주제와 개념을 파악하세요.
-2. **반드시 정확하게 매칭되는 강의만 선택하세요.**
-3. **강의 목록에 적합한 강의가 없다면, 억지로 분류하지 마세요!**
-   - 주제가 명확히 일치하지 않으면 no_match = true로 설정
-   - 애매하거나 확신이 없으면 no_match = true로 설정
-   - 주제가 명확히 일치하지 않으면 no_match = true로 설정
-   - 애매하거나 확신이 없으면 no_match = true로 설정
-   - 이 문제는 일부 강의만 등록된 상태이므로, 미분류가 많아도 괜찮습니다.
-4. **강의에 '키워드'가 명시되어 있다면, 이를 가장 중요한 판단 기준으로 삼으세요.**
-   - 키워드에 포함된 내용이라면 제목이 조금 달라도 해당 강의일 확률이 높습니다.
-5. 확신도(confidence)는 솔직하게 평가하세요:
-   - 0.9 이상: 확실히 이 강의 내용
-   - 0.7-0.9: 관련성 높음
-   - 0.5-0.7: 관련 있을 수 있음
-   - 0.5 미만: 확신 없음 (이 경우 no_match = true 권장)
-5. 반드시 아래 JSON 형식으로만 응답하세요.
+## Instructions
+1. Identify the key concept of the question.
+2. Select only a lecture that clearly matches.
+3. If none match, set no_match = true and lecture_id = null.
+4. evidence.quote must be copied from the provided snippets only.
+5. study_hint must point to the exact pages to review.
+6. Output JSON only, following the schema below.
 
-## 응답 형식 (JSON)
+## Response JSON
 {{
-    "lecture_id": (선택한 강의 ID, 정수. 적합한 강의가 없으면 null),
-    "confidence": (확신도 0.0~1.0),
-    "reason": "(한국어로 1-2문장 분류 근거 또는 분류하지 않은 이유)",
-    "no_match": (적합한 강의가 없거나 확신이 없으면 true, 확실히 매칭되면 false)
+    "lecture_id": (selected lecture ID or null),
+    "confidence": (0.0~1.0),
+    "reason": "short reason in Korean",
+    "study_hint": "e.g., Review p.12-13 for the definition and compare with related concepts.",
+    "no_match": (true/false),
+    "evidence": [
+        {{
+            "lecture_id": 123,
+            "page_start": 12,
+            "page_end": 13,
+            "quote": "copied snippet text",
+            "chunk_id": 991
+        }}
+    ]
 }}
 """
         return prompt
+
+    def _normalize_evidence(self, lecture_id: int, candidates: List[Dict], evidence_raw: List[Dict]) -> List[Dict]:
+        selected = next((c for c in candidates if c.get('id') == lecture_id), None)
+        if not selected:
+            return []
+        candidate_evidence = {
+            e.get('chunk_id'): e for e in (selected.get('evidence', []) or []) if e.get('chunk_id') is not None
+        }
+        cleaned = []
+        for item in evidence_raw or []:
+            if not isinstance(item, dict):
+                continue
+            item_lecture_id = item.get('lecture_id')
+            if item_lecture_id is not None:
+                try:
+                    if int(item_lecture_id) != lecture_id:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+            chunk_id = item.get('chunk_id')
+            try:
+                chunk_id = int(chunk_id)
+            except (TypeError, ValueError):
+                continue
+            candidate_item = candidate_evidence.get(chunk_id)
+            if not candidate_item:
+                continue
+            snippet = candidate_item.get('snippet') or ''
+            quote = str(item.get('quote') or '').strip()
+            if quote and quote in snippet:
+                cleaned.append(
+                    {
+                        'lecture_id': lecture_id,
+                        'page_start': candidate_item.get('page_start'),
+                        'page_end': candidate_item.get('page_end'),
+                        'quote': quote,
+                        'chunk_id': chunk_id,
+                    }
+                )
+            elif snippet:
+                cleaned.append(
+                    {
+                        'lecture_id': lecture_id,
+                        'page_start': candidate_item.get('page_start'),
+                        'page_end': candidate_item.get('page_end'),
+                        'quote': snippet,
+                        'chunk_id': chunk_id,
+                    }
+                )
+
+        if cleaned:
+            return cleaned
+
+        fallback = []
+        for candidate_item in (selected.get('evidence', []) or [])[:2]:
+            snippet = candidate_item.get('snippet') or ''
+            if not snippet:
+                continue
+            fallback.append(
+                {
+                    'lecture_id': lecture_id,
+                    'page_start': candidate_item.get('page_start'),
+                    'page_end': candidate_item.get('page_end'),
+                    'quote': snippet,
+                    'chunk_id': candidate_item.get('chunk_id'),
+                }
+            )
+        return fallback
     
     @retry(
         stop=stop_after_attempt(3),
@@ -213,25 +337,35 @@ class GeminiClassifier:
     )
     def classify_single(self, question: Question, candidates: List[Dict]) -> Dict:
         """
-        단일 문제 분류
-        
+        ?? ?? ??
+
         Returns:
             {
                 'lecture_id': int or None,
                 'confidence': float,
                 'reason': str,
+                'study_hint': str,
+                'evidence': list,
                 'no_match': bool,
                 'model_name': str
             }
         """
-        # 선택지 텍스트 추출
         choices = [c.content for c in question.choices.order_by('choice_number').all()]
-        
-        # 문제 내용 (이미지 문제의 경우 빈 문자열일 수 있음)
-        content = question.content or "(이미지 문제)"
-        
+        content = question.content or "(image-only question)"
+
+        if not candidates:
+            return {
+                'lecture_id': None,
+                'confidence': 0.0,
+                'reason': 'No lecture candidates available.',
+                'study_hint': '',
+                'evidence': [],
+                'no_match': True,
+                'model_name': self.model_name
+            }
+
         prompt = self._build_classification_prompt(content, choices, candidates)
-        
+
         try:
             response = self.client.models.generate_content(
                 model=self.model_name,
@@ -239,41 +373,57 @@ class GeminiClassifier:
                 config=types.GenerateContentConfig(
                     temperature=0.2,
                     top_p=0.8,
-                    max_output_tokens=500,
+                    max_output_tokens=650,
+                    response_mime_type="application/json",
                 )
             )
-            
-            # JSON 파싱
-            result_text = response.text.strip()
-            # JSON 블록 추출 (markdown 코드 블록 처리)
-            json_match = re.search(r'\{[^{}]*\}', result_text, re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group())
-            else:
-                result = json.loads(result_text)
-            
-            # 유효성 검증
+
+            result_text = (response.text or '').strip()
+            json_text = _extract_first_json_object(result_text) or result_text
+            json_text = _sanitize_json_text(json_text)
+            try:
+                result = json.loads(json_text)
+            except json.JSONDecodeError:
+                result = _fallback_parse_result(result_text)
+
             lecture_id = result.get('lecture_id')
+            no_match = bool(result.get('no_match', False))
+            if no_match:
+                lecture_id = None
             if lecture_id is not None:
-                # 후보 목록에 있는지 확인
                 valid_ids = {c['id'] for c in candidates}
                 if lecture_id not in valid_ids:
                     lecture_id = None
-                    result['no_match'] = True
-            
+                    no_match = True
+
+            confidence = float(result.get('confidence', 0.0))
+            reason = result.get('reason', '')
+            study_hint = result.get('study_hint', '')
+            evidence_raw = result.get('evidence') if isinstance(result.get('evidence'), list) else []
+            evidence = []
+            if lecture_id and not no_match:
+                evidence = self._normalize_evidence(lecture_id, candidates, evidence_raw)
+
+            if no_match:
+                evidence = []
+
             return {
                 'lecture_id': lecture_id,
-                'confidence': float(result.get('confidence', 0.0)),
-                'reason': result.get('reason', ''),
-                'no_match': result.get('no_match', False),
+                'confidence': confidence,
+                'reason': reason,
+                'study_hint': study_hint,
+                'evidence': evidence,
+                'no_match': no_match,
                 'model_name': self.model_name
             }
-            
+
         except json.JSONDecodeError as e:
             return {
                 'lecture_id': None,
                 'confidence': 0.0,
-                'reason': f'JSON 파싱 오류: {str(e)}',
+                'reason': f'JSON parse error: {str(e)}',
+                'study_hint': '',
+                'evidence': [],
                 'no_match': True,
                 'model_name': self.model_name
             }
@@ -324,7 +474,8 @@ class AsyncBatchProcessor:
     def _process_job(cls, job_id: int, question_ids: List[int]):
         """백그라운드에서 분류 작업 수행"""
         from app import create_app
-        app = create_app()
+        config_name = os.environ.get('FLASK_CONFIG') or 'default'
+        app = create_app(config_name)
         
         with app.app_context():
             job = ClassificationJob.query.get(job_id)
@@ -351,18 +502,23 @@ class AsyncBatchProcessor:
                         continue
                     
                     try:
-                        # 1단계: 후보 추출
+                        choices = [c.content for c in question.choices.order_by('choice_number').all()]
+                        question_text = (question.content or '')
+                        if choices:
+                            question_text = f"{question_text}\n" + " ".join(choices)
+                        question_text = question_text.strip()
+                        if len(question_text) > 4000:
+                            question_text = question_text[:4000]
+
                         candidates = retriever.find_candidates(
-                            question.content or '', 
-                            top_k=15
+                            question_text,
+                            top_k=8
                         )
-                        
-                        if not candidates:
-                            # 후보가 없으면 전체 강의 중 앞 15개
-                            candidates = retriever._lectures_cache[:15]
-                        
-                        # 2단계: LLM 분류
+
                         result = classifier.classify_single(question, candidates)
+                        result['question_content'] = question.content or ''
+                        result['question_choices'] = choices
+
                         
                         # 결과 저장 (DB에는 아직 반영하지 않음 - preview용)
                         result['question_id'] = qid
@@ -386,9 +542,13 @@ class AsyncBatchProcessor:
                             'question_id': qid,
                             'question_number': question.question_number,
                             'exam_title': question.exam.title if question.exam else '',
+                            'question_content': question.content or '',
+                            'question_choices': choices,
                             'lecture_id': None,
                             'confidence': 0.0,
-                            'reason': f'오류: {str(e)}',
+                            'reason': f'Error: {str(e)}',
+                            'study_hint': '',
+                            'evidence': [],
                             'no_match': True,
                             'error': True
                         })

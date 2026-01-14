@@ -20,7 +20,7 @@ export function SubmitDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <Card className="w-full max-w-md border border-slate-200 bg-white">
+      <Card className="w-full max-w-md border border-border/70 bg-card/95 shadow-float backdrop-blur">
         <CardHeader className="space-y-2">
           <CardTitle className="text-lg">Submit your answers?</CardTitle>
           <p className="text-sm text-muted-foreground">
