@@ -116,7 +116,16 @@ FLASK_BASE_URL=http://127.0.0.1:5000
 EOT
 ```
 
-### 4) 서버 실행
+### 4) DB 초기화/마이그레이션 (처음 1회)
+```bash
+python scripts/init_db.py --db data/exam.db
+python scripts/run_migrations.py --db data/exam.db
+python scripts/init_fts.py --db data/exam.db --sync
+```
+- 강의 노트 인덱싱/AI 분류를 안 쓰면 `init_fts.py`는 나중에 실행해도 됩니다.
+- local admin DB를 쓸 경우 `data/admin_local.db`를 대상으로 동일하게 실행하세요.
+
+### 5) 서버 실행
 Flask (관리 UI + API):
 ```bash
 python run.py
@@ -131,7 +140,7 @@ npm run dev
 ```
 접속: http://localhost:3000/lectures
 
-### 5) Local admin (실험용)
+### 6) Local admin (실험용)
 ```bash
 python run_local_admin.py
 ```
@@ -163,7 +172,16 @@ Next.js용 `.env.local` 생성:
 Set-Content -Path next_app\.env.local -Value "FLASK_BASE_URL=http://127.0.0.1:5000"
 ```
 
-### 4) 서버 실행
+### 4) DB 초기화/마이그레이션 (처음 1회)
+```powershell
+python scripts\init_db.py --db data\exam.db
+python scripts\run_migrations.py --db data\exam.db
+python scripts\init_fts.py --db data\exam.db --sync
+```
+- 강의 노트 인덱싱/AI 분류를 안 쓰면 `init_fts.py`는 나중에 실행해도 됩니다.
+- local admin DB를 쓸 경우 `data\admin_local.db`를 대상으로 동일하게 실행하세요.
+
+### 5) 서버 실행
 Flask (관리 UI + API):
 ```powershell
 python run.py
@@ -178,13 +196,13 @@ npm run dev
 ```
 접속: http://localhost:3000/lectures
 
-### 5) Local admin (실험용)
+### 6) Local admin (실험용)
 ```powershell
 python run_local_admin.py
 ```
 접속: http://127.0.0.1:5001/manage
 
-### 6) Windows 실행 스크립트
+### 7) Windows 실행 스크립트
 - `launch_exam_manager.bat`
 - `launch_exam_manager_local_admin.bat`
 

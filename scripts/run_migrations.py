@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import sys
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -15,6 +16,8 @@ from urllib.parse import urlparse
 import sqlite3
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 MIGRATIONS_DIR = ROOT_DIR / "migrations"
 
 
