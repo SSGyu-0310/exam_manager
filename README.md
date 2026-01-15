@@ -24,6 +24,15 @@
 - AI auto apply: `AI_AUTO_APPLY=false` / `AI_AUTO_APPLY=true`
 - Ops playbook: `docs/ops.md`
 
+## Example Commands (5)
+```bash
+python scripts/clone_db.py --db data/exam.db --out data/dev.db
+python scripts/run_migrations.py --db data/dev.db
+python scripts/init_fts.py --db data/dev.db --rebuild
+python scripts/backup_db.py --db data/exam.db --keep 30
+DB_READ_ONLY=1 python run.py
+```
+
 ## 데이터 손상 방지 원칙
 - 모든 변경 전 백업
 - migrations만으로 스키마 변경

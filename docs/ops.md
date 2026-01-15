@@ -81,3 +81,12 @@ sqlite3 data/exam.db "SELECT count(*) FROM lecture_chunks_fts;"
 - [ ] Open `/manage` and confirm CRUD still works (dev only).
 - [ ] Run a known FTS query and check candidate results.
 - [ ] Start an AI classification job and ensure apply respects `AI_AUTO_APPLY`.
+
+## Example Commands (5)
+```bash
+python scripts/clone_db.py --db data/exam.db --out data/dev.db
+python scripts/run_migrations.py --db data/dev.db
+python scripts/init_fts.py --db data/dev.db --rebuild
+python scripts/backup_db.py --db data/exam.db --keep 30
+DB_READ_ONLY=1 python run.py
+```
