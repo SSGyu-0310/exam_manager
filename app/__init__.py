@@ -30,7 +30,7 @@ def render_markdown_images(value):
     return Markup(''.join(parts))
 
 
-def create_app(config_name='default'):
+def create_app(config_name='default', db_uri_override: str | None = None):
     """
     Flask 애플리케이션 팩토리
     
@@ -44,6 +44,8 @@ def create_app(config_name='default'):
     
     # 설정 로드
     app.config.from_object(config[config_name])
+    if db_uri_override:
+        app.config['SQLALCHEMY_DATABASE_URI'] = db_uri_override
     
     # SQLAlchemy 초기화
     db.init_app(app)
@@ -78,10 +80,5 @@ def create_app(config_name='default'):
     app.register_blueprint(api_exam_bp)
 
     app.jinja_env.filters['md_image'] = render_markdown_images
-    
-    # 앱 컨텍스트에서 DB 테이블 생성
-    if app.config.get('AUTO_CREATE_DB'):
-        with app.app_context():
-            db.create_all()
     
     return app
