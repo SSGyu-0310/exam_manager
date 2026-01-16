@@ -1,6 +1,11 @@
 """데이터베이스 스키마 마이그레이션 - AI 분류 필드 추가"""
 from pathlib import Path
 import argparse
+import sys
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 
 from app import create_app, db
 from sqlalchemy import text
