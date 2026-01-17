@@ -1,0 +1,9 @@
+Commands executed:
+1) .\.venv\Scripts\python.exe -m pip uninstall -y torch (cleanup)
+2) .\.venv\Scripts\python.exe -m pip install torch==2.3.1+cpu --index-url https://download.pytorch.org/whl/cpu
+3) .\.venv\Scripts\python.exe -m pip install "numpy<2"
+4) .\.venv\Scripts\python.exe scripts\run_migrations.py --db data\dev.db
+5) .\.venv\Scripts\python.exe scripts\build_embeddings.py --db data\dev.db --rebuild
+6) .\.venv\Scripts\python.exe scripts\init_fts.py --db data\dev.db --rebuild
+7) .\.venv\Scripts\python.exe scripts\evaluate_evalset.py --db data\dev.db --retrieval-mode bm25
+8) .\.venv\Scripts\python.exe scripts\evaluate_evalset.py --db data\dev.db --retrieval-mode hybrid_rrf

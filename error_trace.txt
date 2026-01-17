@@ -1,0 +1,29 @@
+﻿.\.venv\Scripts\python
+.exe : Traceback (most
+ recent call last):
+위치 줄:1 문자:1
++ .\.venv\Scripts\pyth
+on.exe -c "import trac
+eback; exec(open('run.
+py'). ...
++ ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
+~~~~~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: (Traceback    
+ (most recent call    
+ last)::String) [    ]
+, RemoteExceptio    n
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+  File "<string>", lin
+e 1, in <module>
+UnicodeDecodeError: 'c
+p949' codec can't deco
+de byte 0xec in positi
+on 3: illegal multibyt
+e sequence

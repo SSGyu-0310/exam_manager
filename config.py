@@ -1,12 +1,3 @@
-<<<<<<< HEAD
-"""Flask 애플리케이션 설정"""
-import os
-from pathlib import Path
-
-# 프로젝트 루트 디렉토리
-BASE_DIR = Path(__file__).parent.absolute()
-
-=======
 """Flask 애플리케이션 설정"""
 import os
 from pathlib import Path
@@ -27,7 +18,6 @@ def _resolve_sqlite_uri(value: str | None, fallback: Path) -> str:
         return _sqlite_uri(candidate)
     return _sqlite_uri(fallback)
 
->>>>>>> 56f8c31 (WIP: Ai classifier update)
 def _env_flag(name, default=False):
     value = os.environ.get(name)
     if value is None:
@@ -45,15 +35,6 @@ def _env_int(name, default):
 
 
 class Config:
-<<<<<<< HEAD
-    """기본 설정 클래스"""
-    
-    # 보안 키 (환경변수 또는 기본값)
-    SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
-    
-    # 데이터베이스 설정
-    SQLALCHEMY_DATABASE_URI = f"sqlite:///{BASE_DIR / 'data' / 'exam.db'}"
-=======
     """기본 설정 클래스"""
     
     # 보안 키 (환경변수 또는 기본값)
@@ -61,7 +42,6 @@ class Config:
     
     # 데이터베이스 설정
     SQLALCHEMY_DATABASE_URI = _resolve_sqlite_uri(None, BASE_DIR / 'data' / 'exam.db')
->>>>>>> 56f8c31 (WIP: Ai classifier update)
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # Optional hot-backup hook before write operations.
@@ -103,9 +83,6 @@ class Config:
     SEMANTIC_EXPANSION_QUERY_MAX_CHARS = _env_int('SEMANTIC_EXPANSION_QUERY_MAX_CHARS', default=1200)
 
     # Retrieval mode: bm25|off (future: hybrid/rerank)
-<<<<<<< HEAD
-    RETRIEVAL_MODE = os.environ.get('RETRIEVAL_MODE', 'bm25')
-=======
     RETRIEVAL_MODE = os.environ.get('RETRIEVAL_MODE', 'hybrid_rrf')
     GEMINI_MAX_OUTPUT_TOKENS = _env_int('GEMINI_MAX_OUTPUT_TOKENS', default=2048)  # Increased for Gemini 3.0
     RRF_K = _env_int('RRF_K', default=60)
@@ -126,7 +103,6 @@ class Config:
     HYDE_MAX_NEGATIVE = _env_int('HYDE_MAX_NEGATIVE', default=6)
     HYDE_EMBED_WEIGHT = float(os.environ.get('HYDE_EMBED_WEIGHT', '0.7'))
     HYDE_EMBED_WEIGHT_ORIG = float(os.environ.get('HYDE_EMBED_WEIGHT_ORIG', '0.3'))
->>>>>>> 56f8c31 (WIP: Ai classifier update)
 
     # Read-only guard for write paths.
     DB_READ_ONLY = _env_flag('DB_READ_ONLY', default=False)

@@ -373,9 +373,6 @@ def delete_exam(exam_id):
     exam = PreviousExam.query.get_or_404(exam_id)
     delete_exam_with_assets(exam)
     flash('기출 시험이 삭제되었습니다.', 'success')
-<<<<<<< HEAD
-    return redirect(url_for('manage.list_exams'))
-=======
     return redirect(url_for('manage.list_exams'))
 
 
@@ -527,7 +524,6 @@ def search_lectures():
         for lecture in lectures
     ]
     return jsonify({'items': items})
->>>>>>> 56f8c31 (WIP: Ai classifier update)
 
 
 # ===== 문제 관리 =====
