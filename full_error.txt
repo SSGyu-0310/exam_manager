@@ -1,0 +1,73 @@
+﻿.\.venv\Scripts\python
+.exe : [2026-01-17 17:
+54:51,274] WARNING in 
+migrations: Pending mi
+grations detected: 202
+60115_1930_question_qu
+eries.sql, 20260120_09
+00_add_folder_chunk_ma
+tches.sql
+위치 줄:1 문자:32
++ $env:PYTHONIOENCODIN
+G='utf-8'; .\.venv\Scr
+ipts\python.exe -c @"
++                     
+           ~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: ([2026-01-1   
+ 7 17:...unk_match    
+es.sql:String) []    ,
+ RemoteException
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+Traceback (most recent
+ call last):
+  File "<string>", lin
+e 6, in <module>
+  File "D:\02_Non-Medi
+cine\01_Coding\01_stud
+yagent\exam_manager\ap
+p\__init__.py", line 8
+5, in create_app
+    from app.routes.ai
+ import ai_bp
+  File "D:\02_Non-Medi
+cine\01_Coding\01_stud
+yagent\exam_manager\ap
+p\routes\ai.py", line 
+9, in <module>
+    from app.services.
+ai_classifier import (
+  File "D:\02_Non-Medi
+cine\01_Coding\01_stud
+yagent\exam_manager\ap
+p\services\ai_classifi
+er.py", line 34, in <m
+odule>
+    from app.services 
+import retrieval
+  File "D:\02_Non-Medi
+cine\01_Coding\01_stud
+yagent\exam_manager\ap
+p\services\retrieval.p
+y", line 220, in <modu
+le>
+    class EmbeddingInd
+ex:
+  File "D:\02_Non-Medi
+cine\01_Coding\01_stud
+yagent\exam_manager\ap
+p\services\retrieval.p
+y", line 224, in Embed
+dingIndex
+    _lock = threading.
+Lock()
+            ^^^^^^^^^
+NameError: name 'threa
+ding' is not defined. 
+Did you forget to impo
+rt 'threading'

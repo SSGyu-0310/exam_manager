@@ -1,0 +1,16 @@
+question_id,gold_lecture_id,predicted_lecture_id,top_candidates
+576,1,1,"[{""id"": 6, ""full_path"": ""생리학1차 > 소화"", ""evidence"": [{""page_start"": 31, ""page_end"": 35, ""snippet"": ""...생산에 사용, before it is transported into the cells  receptor mediated endocytosis Absorption of Water KNU 물의..."", ""chunk_id"": 106}]}]"
+577,5,5,[]
+578,5,3,[]
+579,1,1,[]
+580,5,5,[]
+581,1,1,[]
+582,5,11,[]
+583,5,12,[]
+593,6,13,[]
+594,13,13,[]
+595,13,13,[]
+596,11,11,[]
+598,13,13,[]
+599,18,18,[]
+600,18,18,[]

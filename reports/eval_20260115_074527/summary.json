@@ -1,0 +1,64 @@
+{
+  "generated_at": "20260115_074527",
+  "db": "data/dev.db",
+  "pred_field": "ai_final_lecture_id",
+  "retrieval_mode": "hybrid_rrf",
+  "total": 240,
+  "skipped_no_gold": 10,
+  "skipped_ambiguous": 0,
+  "metrics": {
+    "top1": 60,
+    "top3": 158,
+    "top5": 197,
+    "top10": 233,
+    "mrr_sum": 114.46388888888882,
+    "final_correct": 177,
+    "final_total": 240,
+    "out_of_candidate": 33,
+    "out_of_candidate_final": 28
+  },
+  "out_of_candidate_rate_raw": 0.1375,
+  "out_of_candidate_rate_final": 0.11666666666666667,
+  "auto_current": {
+    "total": 171,
+    "correct": 150
+  },
+  "auto_sweep": {
+    "0.6+0.0": {
+      "total": 206,
+      "correct": 169
+    },
+    "0.6+0.1": {
+      "total": 206,
+      "correct": 169
+    },
+    "0.6+0.2": {
+      "total": 206,
+      "correct": 169
+    },
+    "0.7+0.0": {
+      "total": 206,
+      "correct": 169
+    },
+    "0.7+0.1": {
+      "total": 206,
+      "correct": 169
+    },
+    "0.7+0.2": {
+      "total": 171,
+      "correct": 150
+    },
+    "0.8+0.0": {
+      "total": 206,
+      "correct": 169
+    },
+    "0.8+0.1": {
+      "total": 171,
+      "correct": 150
+    },
+    "0.8+0.2": {
+      "total": 11,
+      "correct": 11
+    }
+  }
+}

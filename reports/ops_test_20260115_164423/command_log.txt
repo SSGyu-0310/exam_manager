@@ -1,0 +1,9 @@
+Commands executed:
+1) python -m pip install -r requirements.txt
+2) python scripts/run_migrations.py --db data/dev.db
+3) python scripts/build_embeddings.py --db data/dev.db --rebuild (FAILED: torch DLL)
+4) python scripts/init_fts.py --db data/dev.db --rebuild
+5) python scripts/evaluate_evalset.py --db data/dev.db --retrieval-mode bm25
+6) python scripts/evaluate_evalset.py --db data/dev.db --retrieval-mode hybrid_rrf (TIMEOUT: torch DLL spam)
+7) EMBEDDING_MODEL_NAME=hashing-512-v1 EMBEDDING_DIM=512 python scripts/evaluate_evalset.py --db data/dev.db --retrieval-mode hybrid_rrf
+8) retrieval smoke + guard checks executed via ad-hoc python scripts
