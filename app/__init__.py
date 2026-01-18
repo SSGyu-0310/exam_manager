@@ -57,6 +57,8 @@ def create_app(
     app.config["ENV_NAME"] = config_name
     app.config["SQLALCHEMY_DATABASE_URI"] = cfg.runtime.db_uri
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    app.config["SECRET_KEY"] = cfg.secret_key
+    app.secret_key = cfg.secret_key
 
     # Legacy config mirror: get_config() is now the single source of truth.
     # Services migrated to use get_config() directly, no full mirror needed.
