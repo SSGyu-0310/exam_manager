@@ -1,9 +1,10 @@
 """AI 분류 관련 API Blueprint"""
 import json
+import os
 import hashlib
 from datetime import datetime, timedelta
 import re
-from flask import Blueprint, request, jsonify, render_template, current_app
+from flask import Blueprint, request, jsonify, render_template
 from app import db
 from app.models import Question, Block, ClassificationJob
 from app.services.ai_classifier import (
@@ -15,6 +16,7 @@ from app.services.ai_classifier import (
 )
 from app.services.folder_scope import parse_bool, resolve_lecture_ids
 from app.services.db_guard import guard_write_request
+from config import get_config
 
 # Google GenAI SDK (for text correction)
 try:
@@ -355,16 +357,17 @@ def correct_text():
     original_text = data['text']
     
     # Gemini API 초기화
-    api_key = current_app.config.get('GEMINI_API_KEY')
+    cfg = get_config()
+    api_key = cfg.runtime.gemini_api_key or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         return jsonify({
-            'success': False, 
-            'error': 'GEMINI_API_KEY가 설정되지 않았습니다.'
+            'success': False,
+            'error': 'GEMINI_API_KEY 또는 GOOGLE_API_KEY가 설정되지 않았습니다.'
         }), 500
     
     try:
         client = genai.Client(api_key=api_key)
-        model_name = current_app.config.get('GEMINI_MODEL_NAME', 'gemini-1.5-flash-002')
+        model_name = "gemini-2.5-flash-lite"
         
         prompt = f"""당신은 의학 시험 문제 전문 교정사입니다. 아래 텍스트의 띄어쓰기와 맞춤법 오류를 수정해주세요.
 
