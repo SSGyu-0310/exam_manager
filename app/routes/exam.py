@@ -1,6 +1,7 @@
 """시험 관련 Blueprint - 기출 시험 및 문제 조회"""
 import time
 import logging
+from urllib.parse import urlencode
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 from app import db
 from app.models import PreviousExam, Question, Block, Lecture
@@ -9,6 +10,35 @@ from app.services.db_guard import guard_write_request
 logger = logging.getLogger(__name__)
 
 exam_bp = Blueprint('exam', __name__)
+
+VALID_STATUS_FILTERS = {'unclassified', 'classified', 'all'}
+
+
+def _parse_question_filters():
+    status = request.args.get('status', 'unclassified')
+    if status not in VALID_STATUS_FILTERS:
+        status = 'unclassified'
+    exam_id_raw = (request.args.get('exam_id') or '').strip()
+    exam_id = None
+    if exam_id_raw and exam_id_raw != 'all':
+        try:
+            exam_id = int(exam_id_raw)
+        except ValueError:
+            exam_id = None
+    search_query = (request.args.get('query') or '').strip()
+    return status, exam_id, search_query
+
+
+def _apply_question_filters(query, status, exam_id, search_query):
+    if status == 'unclassified':
+        query = query.filter_by(is_classified=False)
+    elif status == 'classified':
+        query = query.filter_by(is_classified=True)
+    if exam_id is not None:
+        query = query.filter(Question.exam_id == exam_id)
+    if search_query:
+        query = query.filter(Question.content.ilike(f"%{search_query}%"))
+    return query
 
 
 @exam_bp.before_request
@@ -63,17 +93,20 @@ def view_question(exam_id, question_number):
 
 @exam_bp.route('/unclassified')
 def unclassified_questions():
-    """분류 대기소 페이지 - 미분류/분류된 문제 모두 표시 (paginated)"""
+    """분류 대기소 페이지 - 필터/페이지네이션"""
     t_start = time.perf_counter()
-    
+
     # Pagination parameters
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 50, type=int)
     per_page = min(per_page, 100)  # Cap at 100
+
+    status, exam_id, search_query = _parse_question_filters()
     
     # 문제 조회 (기본적으로 미분류 우선) - 페이지네이션
     t_db_start = time.perf_counter()
-    pagination = Question.query.order_by(
+    query = _apply_question_filters(Question.query, status, exam_id, search_query)
+    pagination = query.order_by(
         Question.is_classified,  # False(미분류)가 먼저
         Question.exam_id,
         Question.question_number
@@ -89,6 +122,15 @@ def unclassified_questions():
     
     # 미분류 문제 수
     unclassified_count = Question.query.filter_by(is_classified=False).count()
+
+    filter_params = {'status': status}
+    if exam_id is not None:
+        filter_params['exam_id'] = exam_id
+    if search_query:
+        filter_params['query'] = search_query
+    if request.args.get('per_page'):
+        filter_params['per_page'] = per_page
+    filter_query = f"&{urlencode(filter_params)}" if filter_params else ''
     
     t_render_start = time.perf_counter()
     result = render_template('exam/unclassified.html', 
@@ -96,7 +138,12 @@ def unclassified_questions():
                          pagination=pagination,
                          blocks=blocks,
                          exams=exams,
-                         unclassified_count=unclassified_count)
+                         unclassified_count=unclassified_count,
+                         selected_status=status,
+                         selected_exam_id=exam_id,
+                         search_query=search_query,
+                         filter_query=filter_query,
+                         filtered_total=pagination.total)
     t_render = time.perf_counter() - t_render_start
     
     t_total = time.perf_counter() - t_start
@@ -106,6 +153,14 @@ def unclassified_questions():
     )
     
     return result
+
+
+@exam_bp.route('/questions/ids')
+def list_question_ids():
+    status, exam_id, search_query = _parse_question_filters()
+    query = _apply_question_filters(Question.query, status, exam_id, search_query)
+    ids = [row[0] for row in query.with_entities(Question.id).all()]
+    return jsonify({'success': True, 'ids': ids, 'total': len(ids)})
 
 
 @exam_bp.route('/question/<int:question_id>/classify', methods=['POST'])
@@ -124,10 +179,12 @@ def classify_question(question_id):
             db.session.commit()
             
             if is_ajax:
+                unclassified_count = Question.query.filter_by(is_classified=False).count()
                 return jsonify({
                     'success': True,
                     'lecture_name': f"{lecture.block.name} > {lecture.title}",
-                    'lecture_id': lecture_id
+                    'lecture_id': lecture_id,
+                    'unclassified_count': unclassified_count
                 })
             
             flash('문제가 분류되었습니다.', 'success')
@@ -192,10 +249,12 @@ def bulk_classify():
             updated_count += 1
     
     db.session.commit()
+    unclassified_count = Question.query.filter_by(is_classified=False).count()
     
     return jsonify({
         'success': True,
         'updated_count': updated_count,
-        'lecture_name': f"{lecture.block.name} > {lecture.title}"
+        'lecture_name': f"{lecture.block.name} > {lecture.title}",
+        'unclassified_count': unclassified_count
     })
 

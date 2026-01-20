@@ -586,21 +586,21 @@
 
             <main>
                 <div class="filter-bar">
-                    <input type="text" id="searchInput" placeholder="🔍 문제 내용 검색..."
+                    <input type="text" id="searchInput" placeholder="🔍 문제 내용 검색..." value="{{ search_query|e }}"
                         style="flex: 1; padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.3); color: #fff;"
-                        oninput="filterQuestions()">
+                        oninput="scheduleFilterApply()">
                     <label>시험:</label>
-                    <select id="examFilter" onchange="filterQuestions()">
-                        <option value="all">전체</option>
+                    <select id="examFilter" onchange="applyFilters()">
+                        <option value="all" {{ 'selected' if selected_exam_id is none }}>전체</option>
                         {% for exam in exams %}
-                        <option value="{{ exam.id }}">{{ exam.title }}</option>
+                        <option value="{{ exam.id }}" {{ 'selected' if selected_exam_id == exam.id }}>{{ exam.title }}</option>
                         {% endfor %}
                     </select>
                     <label>상태:</label>
-                    <select id="statusFilter" onchange="filterQuestions()">
-                        <option value="unclassified">미분류만</option>
-                        <option value="classified">분류됨</option>
-                        <option value="all">전체</option>
+                    <select id="statusFilter" onchange="applyFilters()">
+                        <option value="unclassified" {{ 'selected' if selected_status == 'unclassified' }}>미분류만</option>
+                        <option value="classified" {{ 'selected' if selected_status == 'classified' }}>분류됨</option>
+                        <option value="all" {{ 'selected' if selected_status == 'all' }}>전체</option>
                     </select>
                     <span class="stats-badge">
                         📊 미분류: <strong id="unclassifiedCount">{{ unclassified_count }}</strong>개
@@ -696,9 +696,9 @@
                 {% if pagination and pagination.pages > 1 %}
                 <nav class="pagination-nav" style="margin-top: 2rem; display: flex; justify-content: center; gap: 0.5rem; flex-wrap: wrap;">
                     {% if pagination.has_prev %}
-                    <a href="{{ url_for('exam.unclassified_questions', page=1) }}" 
+                    <a href="{{ url_for('exam.unclassified_questions', page=1) }}{{ filter_query }}" 
                        style="padding: 0.5rem 1rem; border-radius: 8px; background: rgba(255,255,255,0.1); color: #ccc; text-decoration: none;">« 처음</a>
-                    <a href="{{ url_for('exam.unclassified_questions', page=pagination.prev_num) }}"
+                    <a href="{{ url_for('exam.unclassified_questions', page=pagination.prev_num) }}{{ filter_query }}"
                        style="padding: 0.5rem 1rem; border-radius: 8px; background: rgba(255,255,255,0.1); color: #ccc; text-decoration: none;">‹ 이전</a>
                     {% endif %}
                     
@@ -707,9 +707,9 @@
                     </span>
                     
                     {% if pagination.has_next %}
-                    <a href="{{ url_for('exam.unclassified_questions', page=pagination.next_num) }}"
+                    <a href="{{ url_for('exam.unclassified_questions', page=pagination.next_num) }}{{ filter_query }}"
                        style="padding: 0.5rem 1rem; border-radius: 8px; background: rgba(255,255,255,0.1); color: #ccc; text-decoration: none;">다음 ›</a>
-                    <a href="{{ url_for('exam.unclassified_questions', page=pagination.pages) }}"
+                    <a href="{{ url_for('exam.unclassified_questions', page=pagination.pages) }}{{ filter_query }}"
                        style="padding: 0.5rem 1rem; border-radius: 8px; background: rgba(255,255,255,0.1); color: #ccc; text-decoration: none;">마지막 »</a>
                     {% endif %}
                 </nav>
@@ -742,6 +742,9 @@
     <script>
         let selectedLectureId = null;
         let selectedIds = new Set();
+        let filterDebounceId = null;
+        let unclassifiedTotal = {{ unclassified_count }};
+        let filteredTotal = {{ filtered_total }};
 
         function toggleBlock(blockElement) {
             blockElement.classList.toggle('collapsed');
@@ -757,59 +760,133 @@
             document.getElementById('bulkLectureSelect').value = lectureId;
         }
 
-        function filterQuestions() {
+        function getActiveFilters() {
             const examFilter = document.getElementById('examFilter').value;
-            const statusFilter = document.getElementById('statusFilter').value;
-            const searchQuery = document.getElementById('searchInput').value.toLowerCase();
+            const statusFilter = document.getElementById('statusFilter').value || 'unclassified';
+            const searchQuery = document.getElementById('searchInput').value.trim();
+            return {
+                examId: examFilter !== 'all' ? examFilter : '',
+                status: statusFilter,
+                query: searchQuery
+            };
+        }
 
-            document.querySelectorAll('.question-card').forEach(card => {
-                const examId = card.dataset.examId;
-                const isClassified = card.dataset.classified === 'true';
-                const content = card.dataset.content || '';
-                let show = true;
+        function applyFilters() {
+            const filters = getActiveFilters();
+            const params = new URLSearchParams(window.location.search);
+            params.set('status', filters.status);
+            if (filters.examId) {
+                params.set('exam_id', filters.examId);
+            } else {
+                params.delete('exam_id');
+            }
+            if (filters.query) {
+                params.set('query', filters.query);
+            } else {
+                params.delete('query');
+            }
+            params.delete('page');
+            const query = params.toString();
+            const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+            window.location.assign(nextUrl);
+        }
 
-                // 시험 필터
-                if (examFilter !== 'all' && examId !== examFilter) show = false;
+        function scheduleFilterApply() {
+            if (filterDebounceId) {
+                clearTimeout(filterDebounceId);
+            }
+            filterDebounceId = setTimeout(applyFilters, 400);
+        }
 
-                // 상태 필터
-                if (statusFilter === 'unclassified' && isClassified) show = false;
-                else if (statusFilter === 'classified' && !isClassified) show = false;
+        async function fetchFilteredQuestionIds() {
+            const filters = getActiveFilters();
+            const params = new URLSearchParams();
+            params.set('status', filters.status);
+            if (filters.examId) {
+                params.set('exam_id', filters.examId);
+            }
+            if (filters.query) {
+                params.set('query', filters.query);
+            }
+            const response = await fetch(`/exam/questions/ids?${params.toString()}`);
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.error || '선택 목록을 불러오지 못했습니다.');
+            }
+            return result.ids || [];
+        }
 
-                // 검색어 필터
-                if (searchQuery && !content.includes(searchQuery)) show = false;
-
-                card.style.display = show ? '' : 'none';
+        function syncVisibleSelections() {
+            document.querySelectorAll('.card-checkbox').forEach(cb => {
+                const id = parseInt(cb.dataset.id);
+                const isSelected = selectedIds.has(id);
+                cb.checked = isSelected;
+                cb.closest('.question-card').classList.toggle('selected', isSelected);
             });
         }
 
-        function toggleSelectAll() {
-            const checked = document.getElementById('selectAll').checked;
-            document.querySelectorAll('.question-card:not([style*="display: none"]) .card-checkbox').forEach(cb => {
-                cb.checked = checked;
-            });
-            updateSelection();
-        }
-
-        function updateSelection() {
-            selectedIds.clear();
-            document.querySelectorAll('.card-checkbox:checked').forEach(cb => {
-                selectedIds.add(parseInt(cb.dataset.id));
-                cb.closest('.question-card').classList.add('selected');
-            });
-            document.querySelectorAll('.card-checkbox:not(:checked)').forEach(cb => {
-                cb.closest('.question-card').classList.remove('selected');
-            });
-
+        function updateSelectionUI() {
             const count = selectedIds.size;
             document.getElementById('bulkCount').textContent = count;
             document.getElementById('selectedInfo').textContent = count > 0 ? `${count}개 선택됨` : '';
             document.getElementById('bulkActionBar').classList.toggle('visible', count > 0);
+
+            const selectAll = document.getElementById('selectAll');
+            if (filteredTotal > 0) {
+                selectAll.checked = count === filteredTotal;
+                selectAll.indeterminate = count > 0 && count < filteredTotal;
+            } else {
+                selectAll.checked = false;
+                selectAll.indeterminate = false;
+            }
+        }
+
+        async function toggleSelectAll() {
+            const selectAll = document.getElementById('selectAll');
+            if (!selectAll.checked) {
+                clearSelection();
+                return;
+            }
+
+            selectAll.disabled = true;
+            try {
+                const ids = await fetchFilteredQuestionIds();
+                selectedIds = new Set(ids);
+                syncVisibleSelections();
+                updateSelectionUI();
+            } catch (error) {
+                console.error('Error:', error);
+                showAlert('전체 선택을 불러오는 중 오류가 발생했습니다.');
+                updateSelectionUI();
+            } finally {
+                selectAll.disabled = false;
+            }
+        }
+
+        function updateSelection() {
+            document.querySelectorAll('.card-checkbox').forEach(cb => {
+                const id = parseInt(cb.dataset.id);
+                if (cb.checked) {
+                    selectedIds.add(id);
+                    cb.closest('.question-card').classList.add('selected');
+                } else {
+                    selectedIds.delete(id);
+                    cb.closest('.question-card').classList.remove('selected');
+                }
+            });
+            updateSelectionUI();
         }
 
         function clearSelection() {
-            document.querySelectorAll('.card-checkbox').forEach(cb => cb.checked = false);
-            document.getElementById('selectAll').checked = false;
-            updateSelection();
+            selectedIds = new Set();
+            document.querySelectorAll('.card-checkbox').forEach(cb => {
+                cb.checked = false;
+                cb.closest('.question-card').classList.remove('selected');
+            });
+            const selectAll = document.getElementById('selectAll');
+            selectAll.checked = false;
+            selectAll.indeterminate = false;
+            updateSelectionUI();
         }
 
         async function bulkClassify() {
@@ -850,8 +927,16 @@
                         }
                     });
 
+                    if (statusFilter === 'unclassified') {
+                        filteredTotal = Math.max(0, filteredTotal - result.updated_count);
+                    }
+
                     clearSelection();
-                    updateUnclassifiedCount();
+                    if (typeof result.unclassified_count === 'number') {
+                        updateUnclassifiedCount(result.unclassified_count);
+                    } else if (statusFilter === 'unclassified') {
+                        updateUnclassifiedCount(unclassifiedTotal - result.updated_count);
+                    }
                 } else {
                     alert('분류 실패: ' + result.error);
                 }
@@ -867,6 +952,7 @@
             if (!lectureId) { alert('강의를 선택해주세요.'); return; }
 
             const card = document.querySelector(`.question-card[data-question-id="${questionId}"]`);
+            const wasUnclassified = card.dataset.classified === 'false';
             card.classList.add('assigning');
 
             try {
@@ -880,13 +966,23 @@
                 const result = await response.json();
 
                 if (result.success) {
+                    const statusFilter = document.getElementById('statusFilter').value;
                     card.dataset.classified = 'true';
                     card.classList.remove('assigning');
-                    if (document.getElementById('statusFilter').value === 'unclassified') {
+                    if (statusFilter === 'unclassified') {
+                        filteredTotal = Math.max(0, filteredTotal - 1);
                         card.classList.add('assigned');
                         setTimeout(() => card.remove(), 500);
+                        if (selectedIds.has(questionId)) {
+                            selectedIds.delete(questionId);
+                            updateSelectionUI();
+                        }
                     }
-                    updateUnclassifiedCount();
+                    if (typeof result.unclassified_count === 'number') {
+                        updateUnclassifiedCount(result.unclassified_count);
+                    } else if (wasUnclassified) {
+                        updateUnclassifiedCount(unclassifiedTotal - 1);
+                    }
                 } else {
                     alert('분류 실패: ' + result.error);
                     card.classList.remove('assigning');
@@ -897,24 +993,28 @@
             }
         }
 
-        function updateUnclassifiedCount() {
-            const count = document.querySelectorAll('.question-card[data-classified="false"]').length;
-            document.getElementById('unclassifiedCount').textContent = count;
+        function updateUnclassifiedCount(nextValue) {
+            if (typeof nextValue === 'number') {
+                unclassifiedTotal = Math.max(0, nextValue);
+            }
+            document.getElementById('unclassifiedCount').textContent = unclassifiedTotal;
         }
-
-        filterQuestions();
 
         // AI 자동 분류 - 모달 관련 변수
         let pendingQuestionIds = [];
 
-        function startAIClassification() {
-            // 선택된 문제가 없으면 미분류 문제 전체 선택
+        async function startAIClassification() {
+            // 선택된 문제가 없으면 현재 필터 기준 전체 선택
             let questionIds = Array.from(selectedIds);
 
             if (questionIds.length === 0) {
-                // 미분류 문제만 선택
-                questionIds = Array.from(document.querySelectorAll('.question-card[data-classified="false"]'))
-                    .map(card => parseInt(card.dataset.questionId));
+                try {
+                    questionIds = await fetchFilteredQuestionIds();
+                } catch (error) {
+                    console.error('Error:', error);
+                    showAlert('문제 목록을 불러오지 못했습니다.');
+                    return;
+                }
             }
 
             if (questionIds.length === 0) {
