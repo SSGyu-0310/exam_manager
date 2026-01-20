@@ -9,6 +9,7 @@ from flask import current_app
 from app import db
 from app.models import Question, Choice, PreviousExam
 from app.services.pdf_cropper import get_exam_crop_dir
+from app.services.transaction import transactional
 
 
 def _resolve_upload_folder() -> Path:
@@ -68,7 +69,9 @@ def _collect_shared_image_paths(exam_id: int) -> Set[str]:
     return other_question_paths | other_choice_paths
 
 
-def _delete_files(paths: Iterable[str], shared_paths: Set[str], upload_root: Path) -> None:
+def _delete_files(
+    paths: Iterable[str], shared_paths: Set[str], upload_root: Path
+) -> None:
     for path_value in paths:
         if path_value in shared_paths:
             continue
@@ -87,6 +90,7 @@ def _delete_crop_dir(exam_id: int, upload_root: Path) -> None:
         shutil.rmtree(crop_dir, ignore_errors=True)
 
 
+@transactional
 def delete_exam_with_assets(exam: PreviousExam) -> None:
     exam_id = exam.id
     upload_root = _resolve_upload_folder()
@@ -94,7 +98,6 @@ def delete_exam_with_assets(exam: PreviousExam) -> None:
     shared_paths = _collect_shared_image_paths(exam_id)
 
     db.session.delete(exam)
-    db.session.commit()
 
     _delete_files(exam_paths, shared_paths, upload_root)
     _delete_crop_dir(exam_id, upload_root)
