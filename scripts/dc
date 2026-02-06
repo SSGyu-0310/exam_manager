@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+ENV_FILE="${ENV_FILE:-.env.docker}"
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "[dc] env file not found: $ENV_FILE" >&2
+  echo "[dc] create it first: cp .env.docker.example .env.docker" >&2
+  exit 1
+fi
+
+exec docker compose --env-file "$ENV_FILE" "$@"

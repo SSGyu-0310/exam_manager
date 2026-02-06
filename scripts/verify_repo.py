@@ -33,7 +33,6 @@ def _compile_check() -> bool:
         ROOT_DIR / "app",
         ROOT_DIR / "scripts",
         ROOT_DIR / "run.py",
-        ROOT_DIR / "run_local_admin.py",
     ]
 
     for target in targets:

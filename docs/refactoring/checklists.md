@@ -31,7 +31,6 @@
 - [ ] Practice 흐름 정상 (Legacy `/practice/*`, Next `/lectures`)
 - [ ] `PDF_PARSER_MODE=experimental`/`legacy` 동일 PDF 결과 비교(샘플 1건)
 - [ ] Next.js `/manage`, `/lectures` 렌더링 정상
-- [ ] Local admin 실행 가능 (`run_local_admin.py`)
 - [ ] 문서/README 반영 완료
 
 ## 4) 위험 신호

@@ -94,5 +94,5 @@ python scripts/clone_db.py --db data/exam.db --out data/dev.db
 python scripts/run_migrations.py --db data/dev.db
 python scripts/init_fts.py --db data/dev.db --rebuild
 python scripts/backup_db.py --db data/exam.db --keep 30
-DB_READ_ONLY=1 python run.py
+./scripts/dc up -d
 ```
