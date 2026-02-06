@@ -112,7 +112,8 @@ export function UnclassifiedQueue() {
     const flat: { id: number; label: string }[] = [];
     blocks.forEach((block) => {
       block.lectures.forEach((lecture) => {
-        flat.push({ id: lecture.id, label: `${block.name} · ${lecture.title}` });
+        const subject = block.subject ?? "Unassigned";
+        flat.push({ id: lecture.id, label: `${subject} · ${block.name} · ${lecture.title}` });
       });
     });
     return flat;

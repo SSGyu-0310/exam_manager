@@ -4,10 +4,11 @@ Reads environment variables and applies defaults for production runtime.
 """
 
 import os
+import socket
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .base import (
-    DEFAULT_SECRET_KEY,
     DEFAULT_DB_URI,
     LOCAL_ADMIN_DB_URI,
     DEFAULT_UPLOAD_FOLDER,
@@ -46,6 +47,33 @@ def _env_int(name, default):
         return default
 
 
+def _resolve_db_uri(db_env: str | None, default_uri: str) -> str:
+    """Resolve DB URI from env value or fallback to default."""
+    if not db_env:
+        return default_uri
+    if "://" in db_env:
+        if db_env.startswith("postgres://"):
+            return db_env.replace("postgres://", "postgresql+psycopg://", 1)
+        if db_env.startswith("postgresql://"):
+            return db_env.replace("postgresql://", "postgresql+psycopg://", 1)
+        return db_env
+    return _sqlite_uri(Path(db_env))
+
+
+def _postgres_host_reachable(db_uri: str, timeout: float = 0.25) -> bool:
+    """Best-effort reachability check for Postgres host/port."""
+    try:
+        parsed = urlparse(db_uri)
+        host = parsed.hostname
+        port = parsed.port or 5432
+        if not host:
+            return True
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def get_runtime_config(flask_config_name="default") -> RuntimeConfig:
     """
     Build runtime configuration from environment variables.
@@ -59,15 +87,50 @@ def get_runtime_config(flask_config_name="default") -> RuntimeConfig:
     """
     # Database selection based on Flask profile
     if flask_config_name == "local_admin":
-        db_env = os.environ.get("LOCAL_ADMIN_DB")
-        db_uri = f"sqlite:///{db_env}" if db_env else LOCAL_ADMIN_DB_URI
+        db_env = (
+            os.environ.get("LOCAL_ADMIN_DATABASE_URL")
+            or os.environ.get("LOCAL_ADMIN_DB")
+            or os.environ.get("DATABASE_URL")
+        )
+        db_uri = _resolve_db_uri(db_env, LOCAL_ADMIN_DB_URI)
         upload_folder = DEFAULT_LOCAL_ADMIN_UPLOAD_FOLDER
         local_admin_only = True
+        default_cors_origins = DEFAULT_CORS_ALLOWED_ORIGINS
+    elif flask_config_name == "production":
+        db_env = os.environ.get("DATABASE_URL") or os.environ.get(
+            "DB_PATH"
+        )  # Optional explicit override
+        db_uri = _resolve_db_uri(db_env, DEFAULT_DB_URI)
+        upload_folder = DEFAULT_UPLOAD_FOLDER
+        local_admin_only = False
+        default_cors_origins = DEFAULT_CORS_ALLOWED_ORIGINS_PROD
     else:
-        db_env = os.environ.get("DB_PATH")  # Optional explicit override
-        db_uri = _sqlite_uri(Path(db_env)) if db_env else DEFAULT_DB_URI
+        db_path_env = os.environ.get("DB_PATH")
+        db_url_env = os.environ.get("DATABASE_URL")
+        if db_path_env:
+            db_uri = _resolve_db_uri(db_path_env, DEFAULT_DB_URI)
+        elif db_url_env:
+            candidate = _resolve_db_uri(db_url_env, DEFAULT_DB_URI)
+            fallback_enabled = _env_flag(
+                "DEV_FALLBACK_TO_SQLITE_ON_DB_DOWN", default=True
+            )
+            if (
+                fallback_enabled
+                and candidate.startswith("postgresql+psycopg://")
+                and not _postgres_host_reachable(candidate)
+            ):
+                db_uri = DEFAULT_DB_URI
+            else:
+                db_uri = candidate
+        else:
+            db_uri = DEFAULT_DB_URI
         upload_folder = DEFAULT_UPLOAD_FOLDER
         local_admin_only = _env_flag("LOCAL_ADMIN_ONLY", default=False)
+        default_cors_origins = DEFAULT_CORS_ALLOWED_ORIGINS
+
+    upload_folder_env = os.environ.get("UPLOAD_FOLDER")
+    if upload_folder_env:
+        upload_folder = Path(upload_folder_env)
 
     return RuntimeConfig(
         db_uri=db_uri,
@@ -85,9 +148,12 @@ def get_runtime_config(flask_config_name="default") -> RuntimeConfig:
             "FAIL_ON_PENDING_MIGRATIONS", default=False
         ),
         auto_create_db=_env_flag("AUTO_CREATE_DB", default=DEFAULT_AUTO_CREATE_DB),
-        upload_folder=Path(os.environ.get("UPLOAD_FOLDER", str(DEFAULT_UPLOAD_FOLDER))),
-        max_content_length=DEFAULT_MAX_CONTENT_LENGTH,
+        upload_folder=Path(upload_folder),
+        max_content_length=_env_int(
+            "MAX_CONTENT_LENGTH", default=DEFAULT_MAX_CONTENT_LENGTH
+        ),
         allowed_extensions={"png", "jpg", "jpeg", "gif"},
+        jwt_secret_key=os.environ.get("JWT_SECRET_KEY", "dev-jwt-secret-key"),
         gemini_api_key=os.environ.get("GEMINI_API_KEY"),
         gemini_model_name=os.environ.get(
             "GEMINI_MODEL_NAME", DEFAULT_GEMINI_MODEL_NAME
@@ -100,9 +166,9 @@ def get_runtime_config(flask_config_name="default") -> RuntimeConfig:
         ),
         data_cache_dir=Path(os.environ.get("DATA_CACHE_DIR", str(DEFAULT_CACHE_DIR))),
         reports_dir=Path(os.environ.get("REPORTS_DIR", str(DEFAULT_REPORTS_DIR))),
-        local_admin_only=_env_flag("LOCAL_ADMIN_ONLY", default=False),
+        local_admin_only=local_admin_only,
         cors_allowed_origins=os.environ.get(
-            "CORS_ALLOWED_ORIGINS", DEFAULT_CORS_ALLOWED_ORIGINS
+            "CORS_ALLOWED_ORIGINS", default_cors_origins
         ),
     )
 

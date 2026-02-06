@@ -11,6 +11,7 @@ from sqlalchemy import text, bindparam
 from config import get_config
 from app import db
 from app.models import Lecture, Block
+from app.services.db_utils import is_postgres
 from app.services.embedding_utils import (
     DEFAULT_EMBEDDING_DIM,
     DEFAULT_EMBEDDING_MODEL_NAME,
@@ -61,6 +62,9 @@ _TOKEN_RE = re.compile(
     """,
     re.VERBOSE,
 )
+
+
+_PG_TOKEN_CLEAN_RE = re.compile(r"[^0-9A-Za-z가-힣]")
 
 
 def _needs_quote(token: str) -> bool:
@@ -125,6 +129,41 @@ def _build_fts_query(tokens_or_str, max_terms: int = 16, mode: str = "OR") -> st
     return joiner.join(quoted_tokens)
 
 
+def _sanitize_pg_token(token: str) -> str:
+    return _PG_TOKEN_CLEAN_RE.sub("", token or "").strip()
+
+
+def _build_pg_tsquery(tokens_or_str, max_terms: int = 16, mode: str = "OR") -> str:
+    if isinstance(tokens_or_str, str):
+        tokens = [t for t in tokens_or_str.split() if t]
+    else:
+        tokens = list(tokens_or_str) if tokens_or_str else []
+    if not tokens:
+        return ""
+
+    seen = set()
+    cleaned = []
+    for token in tokens:
+        sanitized = _sanitize_pg_token(token)
+        if not sanitized or sanitized in seen:
+            continue
+        seen.add(sanitized)
+        cleaned.append(sanitized)
+        if len(cleaned) >= max_terms:
+            break
+    if not cleaned:
+        return ""
+
+    joiner = " | " if str(mode).upper() == "OR" else " & "
+    return joiner.join(cleaned)
+
+
+def _build_match_query(tokens_or_str, max_terms: int = 16, mode: str = "OR") -> str:
+    if is_postgres():
+        return _build_pg_tsquery(tokens_or_str, max_terms=max_terms, mode=mode)
+    return _build_fts_query(tokens_or_str, max_terms=max_terms, mode=mode)
+
+
 def _filter_negative_terms(tokens: List[str], negatives: List[str]) -> List[str]:
     if not tokens or not negatives:
         return tokens
@@ -140,7 +179,7 @@ def _clean_tokens(tokens: List[str]) -> List[str]:
 
 def make_bm25_match_query(raw_question_text: str) -> str:
     tokens = _normalize_query(raw_question_text)
-    return _build_fts_query(tokens, max_terms=16, mode="OR")
+    return _build_match_query(tokens, max_terms=16, mode="OR")
 
 
 def safe_match_query_variants(raw_question_text: str) -> List[str]:
@@ -148,9 +187,9 @@ def safe_match_query_variants(raw_question_text: str) -> List[str]:
     if not tokens:
         return []
     return [
-        _build_fts_query(tokens, max_terms=16, mode="OR"),
-        _build_fts_query(tokens, max_terms=8, mode="OR"),
-        _build_fts_query(tokens, max_terms=4, mode="OR"),
+        _build_match_query(tokens, max_terms=16, mode="OR"),
+        _build_match_query(tokens, max_terms=8, mode="OR"),
+        _build_match_query(tokens, max_terms=4, mode="OR"),
     ]
 
 
@@ -185,7 +224,7 @@ def search_chunks_bm25(
     lecture_ids: List[int] | None = None,
 ) -> List[Dict]:
     tokens = _normalize_query(query)
-    fts_query = _build_fts_query(tokens, max_terms=16, mode="OR")
+    fts_query = _build_match_query(tokens, max_terms=16, mode="OR")
     payload = _get_hyde_payload(question_id, query)
     if payload:
         variant = get_config().experiment.hyde_bm25_variant
@@ -201,13 +240,46 @@ def search_chunks_bm25(
             positive = _filter_negative_terms(positive, payload.negative_keywords)
 
         if positive:
-            fts_query = _build_fts_query(positive, max_terms=16)
+            fts_query = _build_match_query(positive, max_terms=16)
     if not fts_query:
         return []
 
     if lecture_ids is not None and not lecture_ids:
         return []
 
+    if is_postgres():
+        rows = _search_chunks_bm25_postgres(fts_query, top_n=top_n, lecture_ids=lecture_ids)
+    else:
+        rows = _search_chunks_bm25_sqlite(fts_query, top_n=top_n, lecture_ids=lecture_ids)
+
+    results = []
+    for row in rows:
+        snippet_text = (
+            (row.get("snippet") or "")
+            .replace("\n", " ")
+            .replace("<b>", "")
+            .replace("</b>", "")
+            .strip()
+        )
+        results.append(
+            {
+                "chunk_id": row.get("chunk_id"),
+                "lecture_id": row.get("lecture_id"),
+                "page_start": row.get("page_start"),
+                "page_end": row.get("page_end"),
+                "snippet": snippet_text,
+                "bm25_score": float(row.get("bm25_score") or 0.0),
+            }
+        )
+    return results
+
+
+def _search_chunks_bm25_sqlite(
+    fts_query: str,
+    *,
+    top_n: int,
+    lecture_ids: List[int] | None,
+) -> List[Dict]:
     where_clause = "WHERE lecture_chunks_fts MATCH :query"
     params: Dict[str, object] = {"query": fts_query, "top_n": top_n}
 
@@ -234,21 +306,47 @@ def search_chunks_bm25(
         LIMIT :top_n
         """
     )
-    rows = db.session.execute(sql, params).mappings().all()
-    results = []
-    for row in rows:
-        snippet_text = (row.get("snippet") or "").replace("\n", " ").strip()
-        results.append(
-            {
-                "chunk_id": row.get("chunk_id"),
-                "lecture_id": row.get("lecture_id"),
-                "page_start": row.get("page_start"),
-                "page_end": row.get("page_end"),
-                "snippet": snippet_text,
-                "bm25_score": float(row.get("bm25_score") or 0.0),
-            }
-        )
-    return results
+    return db.session.execute(sql, params).mappings().all()
+
+
+def _search_chunks_bm25_postgres(
+    ts_query: str,
+    *,
+    top_n: int,
+    lecture_ids: List[int] | None,
+) -> List[Dict]:
+    where_clause = "WHERE c.content_tsv @@ to_tsquery('simple', :query)"
+    params: Dict[str, object] = {"query": ts_query, "top_n": top_n}
+
+    if lecture_ids is not None:
+        placeholders = []
+        for idx, lecture_id in enumerate(lecture_ids):
+            key = f"lecture_id_{idx}"
+            placeholders.append(f":{key}")
+            params[key] = lecture_id
+        where_clause += f" AND c.lecture_id IN ({', '.join(placeholders)})"
+
+    sql = text(
+        f"""
+        SELECT
+            c.id AS chunk_id,
+            c.lecture_id,
+            c.page_start,
+            c.page_end,
+            ts_headline(
+                'simple',
+                c.content,
+                to_tsquery('simple', :query),
+                'MaxFragments=1, MaxWords=24, MinWords=8, ShortWord=2'
+            ) AS snippet,
+            ts_rank_cd(c.content_tsv, to_tsquery('simple', :query)) AS bm25_score
+        FROM lecture_chunks c
+        {where_clause}
+        ORDER BY bm25_score DESC
+        LIMIT :top_n
+        """
+    )
+    return db.session.execute(sql, params).mappings().all()
 
 
 def _fetch_embeddings_for_chunks(

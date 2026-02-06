@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -65,6 +66,24 @@ def get_exam_crop_dir(exam_id: int, upload_folder: Optional[os.PathLike] = None)
     return upload_root / "exam_crops" / f"exam_{exam_id}"
 
 
+def _ensure_fitz() -> None:
+    try:
+        import fitz  # noqa: F401
+        return
+    except Exception as exc:
+        sys.modules.pop("fitz", None)
+        venv_site = Path(__file__).resolve().parents[2] / ".venv" / "Lib" / "site-packages"
+        if venv_site.exists():
+            sys.path.insert(0, str(venv_site))
+            try:
+                import fitz  # noqa: F401
+                return
+            except Exception:
+                sys.modules.pop("fitz", None)
+                sys.path = [p for p in sys.path if p != str(venv_site)]
+        raise RuntimeError(f"PyMuPDF import failed: {exc}") from exc
+
+
 def crop_pdf_to_questions(
     pdf_path: os.PathLike,
     exam_id: int,
@@ -76,9 +95,10 @@ def crop_pdf_to_questions(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
+        _ensure_fitz()
         from app.routes.crop import crop_with_merge_contentaware
     except Exception as exc:  # pragma: no cover - import-time error surface
-        raise RuntimeError("PyMuPDF is required for PDF cropping.") from exc
+        raise RuntimeError(f"PDF crop failed: {exc}") from exc
 
     crop_with_merge_contentaware(pdf_path=str(pdf_path), out_dir=str(output_dir), dpi=dpi, **kwargs)
 

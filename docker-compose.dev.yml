@@ -1,0 +1,88 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-exam}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-exam_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-exam_manager_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-exam} -d ${POSTGRES_DB:-exam_manager_dev}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      FLASK_CONFIG: development
+      FLASK_DEBUG: "1"
+      APP_MODE: full
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-exam}:${POSTGRES_PASSWORD:-exam_dev_password}@db:5432/${POSTGRES_DB:-exam_manager_dev}
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-me}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-change-me}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:4000}
+      MAX_CONTENT_LENGTH: ${MAX_CONTENT_LENGTH:-104857600}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL_NAME: ${GEMINI_MODEL_NAME:-gemini-2.0-flash-lite}
+    command: ["python", "run.py"]
+    ports:
+      - "5000:5000"
+    volumes:
+      - .:/app
+      - app_data_dev:/app/data
+      - app_uploads_dev:/app/app/static/uploads
+      - app_uploads_admin_dev:/app/app/static/uploads_admin
+      - app_backups_dev:/app/backups
+      - app_reports_dev:/app/reports
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      target: dev
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      FLASK_BASE_URL: http://api:5000
+      NEXT_PUBLIC_SITE_URL: http://localhost:4000
+      NEXT_PUBLIC_APP_URL: http://localhost:4000
+      NODE_ENV: development
+    command: ["npm", "run", "dev"]
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./next_app:/app/next_app
+      - web_node_modules_dev:/app/next_app/node_modules
+      - web_next_cache_dev:/app/next_app/.next
+
+volumes:
+  pg_data_dev:
+  app_data_dev:
+  app_uploads_dev:
+  app_uploads_admin_dev:
+  app_backups_dev:
+  app_reports_dev:
+  web_node_modules_dev:
+  web_next_cache_dev:

@@ -1,4 +1,5 @@
 import { getExamDetail } from "@/lib/api/manage";
+import { composeExamTitle } from "@/lib/examTitle";
 import { ExamQuestionTable } from "@/components/exam/ExamQuestionTable";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,7 +23,11 @@ export default async function ExamDetailPage({ params }: PageProps) {
             </p>
             <h2 className="text-2xl font-semibold text-foreground">{exam.title}</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              {[exam.subject, exam.term, exam.examDate].filter(Boolean).join(" · ")}
+              {composeExamTitle({
+                subject: exam.subject,
+                year: exam.year,
+                term: exam.term,
+              })}
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs">

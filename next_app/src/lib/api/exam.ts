@@ -17,6 +17,7 @@ const lectureSchema = z.object({
 const blockSchema = z.object({
   id: z.number(),
   name: z.string(),
+  subject: z.string().nullable().optional(),
   lectures: z.array(lectureSchema),
 });
 

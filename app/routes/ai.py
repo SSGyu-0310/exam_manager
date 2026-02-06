@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import re
 from flask import Blueprint, request, jsonify, render_template
 from app import db
-from app.models import Question, Block, ClassificationJob
+from app.models import Question, Block, Lecture, ClassificationJob
 from app.services.ai_classifier import (
     AsyncBatchProcessor,
     apply_classification_results,
@@ -16,6 +16,13 @@ from app.services.ai_classifier import (
 )
 from app.services.folder_scope import parse_bool, resolve_lecture_ids
 from app.services.db_guard import guard_write_request
+from app.services.user_scope import (
+    attach_current_user,
+    current_user,
+    scope_model,
+    scope_query,
+)
+from app.services.block_sort import block_ordering
 from config import get_config
 
 # Google GenAI SDK (for text correction)
@@ -36,6 +43,13 @@ def guard_read_only():
     if blocked is not None:
         return blocked
     return None
+
+
+@ai_bp.before_request
+def attach_user():
+    if request.endpoint in {'ai.correct_text'}:
+        return None
+    return attach_current_user(require=True)
 
 def _build_request_signature(question_ids, idempotency_key=None, scope=None):
     payload = {'question_ids': question_ids}
@@ -58,9 +72,27 @@ def _find_recent_job(signature, max_age_hours=24):
     return None
 
 
+def _job_visible_to_user(job, user) -> bool:
+    if user is None:
+        return False
+    if getattr(user, "is_admin", False):
+        return True
+    request_meta, _ = parse_job_payload(job.result_json)
+    question_ids = request_meta.get("question_ids") or []
+    if not question_ids:
+        return False
+    allowed = (
+        scope_query(Question.query, Question, user)
+        .filter(Question.id.in_(question_ids))
+        .count()
+    )
+    return allowed == len(set(question_ids))
+
+
 @ai_bp.route('/classify/start', methods=['POST'])
 def start_classification():
     """AI 분류 작업 시작"""
+    user = current_user()
     if not GENAI_AVAILABLE:
         return jsonify({
             'success': False,
@@ -77,7 +109,10 @@ def start_classification():
     
     # 유효한 문제 ID만 필터링
     valid_ids = [
-        q.id for q in Question.query.filter(Question.id.in_(question_ids)).all()
+        q.id
+        for q in scope_query(Question.query, Question, user)
+        .filter(Question.id.in_(question_ids))
+        .all()
     ]
     
     if not valid_ids:
@@ -102,12 +137,21 @@ def start_classification():
             lecture_ids = [int(lid) for lid in lecture_ids]
         except (TypeError, ValueError):
             lecture_ids = None
+        if lecture_ids is not None:
+            lecture_ids = [
+                row.id
+                for row in scope_model(Lecture, user, include_public=True)
+                .filter(Lecture.id.in_(lecture_ids))
+                .all()
+            ]
 
     if lecture_ids is None and (block_id or folder_id):
         lecture_ids = resolve_lecture_ids(
             int(block_id) if block_id is not None else None,
             int(folder_id) if folder_id is not None else None,
             include_descendants,
+            user=user,
+            include_public=True,
         )
 
     scope = {}
@@ -131,6 +175,8 @@ def start_classification():
     existing_job = None
     if not force:
         existing_job = _find_recent_job(signature)
+        if existing_job and not _job_visible_to_user(existing_job, user):
+            existing_job = None
 
     if existing_job and not (existing_job.status == ClassificationJob.STATUS_FAILED and retry_failed):
         return jsonify({
@@ -172,8 +218,11 @@ def start_classification():
 @ai_bp.route('/classify/status/<int:job_id>')
 def get_classification_status(job_id):
     """분류 작업 상태 조회 (Polling용)"""
+    user = current_user()
     job = ClassificationJob.query.get(job_id)
     if not job:
+        return jsonify({'success': False, 'error': '작업을 찾을 수 없습니다.'}), 404
+    if not _job_visible_to_user(job, user):
         return jsonify({'success': False, 'error': '작업을 찾을 수 없습니다.'}), 404
     
     request_meta, _ = parse_job_payload(job.result_json)
@@ -196,8 +245,11 @@ def get_classification_status(job_id):
 @ai_bp.route('/classify/result/<int:job_id>')
 def get_classification_result(job_id):
     """분류 결과 조회 (Preview 데이터)"""
+    user = current_user()
     job = ClassificationJob.query.get(job_id)
     if not job:
+        return jsonify({'success': False, 'error': '작업을 찾을 수 없습니다.'}), 404
+    if not _job_visible_to_user(job, user):
         return jsonify({'success': False, 'error': '작업을 찾을 수 없습니다.'}), 404
     
     if not job.is_complete:
@@ -271,6 +323,7 @@ def get_classification_result(job_id):
 @ai_bp.route('/classify/apply', methods=['POST'])
 def apply_classification():
     """분류 결과 적용 (사용자 확인 후)"""
+    user = current_user()
     data = request.get_json()
     if not data:
         return jsonify({'success': False, 'error': '데이터가 없습니다.'}), 400
@@ -283,10 +336,23 @@ def apply_classification():
     
     if not question_ids:
         return jsonify({'success': False, 'error': '적용할 문제가 없습니다.'}), 400
+
+    job = ClassificationJob.query.get(job_id)
+    if not job or not _job_visible_to_user(job, user):
+        return jsonify({'success': False, 'error': '작업을 찾을 수 없습니다.'}), 404
+
+    valid_ids = [
+        q.id
+        for q in scope_query(Question.query, Question, user)
+        .filter(Question.id.in_(question_ids))
+        .all()
+    ]
+    if not valid_ids:
+        return jsonify({'success': False, 'error': '유효한 문제가 없습니다.'}), 400
     
     try:
         apply_mode = data.get('apply_mode') or data.get('applyMode') or 'all'
-        applied_count = apply_classification_results(question_ids, job_id, apply_mode=apply_mode)
+        applied_count = apply_classification_results(valid_ids, job_id, apply_mode=apply_mode)
         return jsonify({
             'success': True,
             'applied_count': applied_count
@@ -298,6 +364,7 @@ def apply_classification():
 @ai_bp.route('/classify/recent')
 def get_recent_jobs():
     """최근 AI 분류 작업 목록 조회"""
+    user = current_user()
     # 최근 7일 이내, 최대 10개의 작업을 가져옴
     week_ago = datetime.utcnow() - timedelta(days=7)
     
@@ -307,6 +374,8 @@ def get_recent_jobs():
     
     result = []
     for job in jobs:
+        if not _job_visible_to_user(job, user):
+            continue
         status_label = {
             'pending': '대기중',
             'processing': '진행중',
@@ -333,8 +402,11 @@ def get_recent_jobs():
 @ai_bp.route('/classify/preview/<int:job_id>')
 def preview_classification(job_id):
     """분류 결과 미리보기 페이지"""
+    user = current_user()
     job = ClassificationJob.query.get_or_404(job_id)
-    blocks = Block.query.order_by(Block.order).all()
+    if not _job_visible_to_user(job, user):
+        return jsonify({'success': False, 'error': '작업을 찾을 수 없습니다.'}), 404
+    blocks = scope_model(Block, user, include_public=True).order_by(*block_ordering()).all()
     
     return render_template('exam/ai_classification_preview.html',
                          job=job,

@@ -42,6 +42,7 @@ from app.models import (
 )
 from app.services import retrieval
 from app.services.folder_scope import parse_bool, resolve_lecture_ids
+from app.services.block_sort import block_lecture_ordering
 
 # ============================================================
 # Job payload helpers (idempotency + compatibility)
@@ -239,7 +240,7 @@ class LectureRetriever:
 
     def refresh_cache(self):
         """강의 캐시 갱신 (앱 컨텍스트 내에서 호출)"""
-        lectures = Lecture.query.join(Block).order_by(Block.order, Lecture.order).all()
+        lectures = Lecture.query.join(Block).order_by(*block_lecture_ordering()).all()
         self._lectures_cache = []
         for lecture in lectures:
             self._lectures_cache.append(

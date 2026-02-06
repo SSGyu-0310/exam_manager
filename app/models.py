@@ -1,19 +1,87 @@
 """데이터베이스 모델 정의 - 블록제 수업 기출 학습 시스템"""
 from datetime import datetime
 from app import db
+from werkzeug.security import generate_password_hash, check_password_hash
+
+
+class User(db.Model):
+    """사용자 모델"""
+    __tablename__ = 'users'
+
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(200))
+    is_admin = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    def __repr__(self):
+        return f'<User {self.email}>'
+
+
+class PublicCurriculumTemplate(db.Model):
+    """Public curriculum template for cloning into user's private workspace"""
+    __tablename__ = 'public_curriculum_templates'
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(300), nullable=False)
+    school_tag = db.Column(db.String(100))
+    grade_tag = db.Column(db.String(50))
+    subject_tag = db.Column(db.String(100))
+    description = db.Column(db.Text)
+    payload_json = db.Column(db.Text, nullable=False)
+    published = db.Column(db.Boolean, default=False)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    creator = db.relationship('User', backref='created_templates')
+
+    def __repr__(self):
+        return f'<PublicCurriculumTemplate {self.id}:{self.title}>'
+
+
+class Subject(db.Model):
+    """과목 모델 - 블록의 상위 단위"""
+    __tablename__ = 'subjects'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('users.id'), nullable=True, index=True
+    )  # public when null
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<Subject {self.name}>'
 
 
 class Block(db.Model):
-    """블록(과목) 모델 - 여러 강의를 포함하는 상위 단위"""
+    """블록 모델 - 과목 아래의 상위 단위"""
     __tablename__ = 'blocks'
     
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('users.id'), nullable=True, index=True
+    )  # TODO: MVP 이후 nullable=False
     name = db.Column(db.String(200), nullable=False)  # 예: 심혈관학, 호흡기학
+    subject = db.Column(db.String(100))  # 과목명 (예: 생리학)
+    subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=True)
     description = db.Column(db.Text)
     order = db.Column(db.Integer, default=0)  # 표시 순서
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
+    subject_ref = db.relationship('Subject', backref='blocks')
+
     # 관계: 블록 → 강의들
     lectures = db.relationship('Lecture', backref='block', lazy='dynamic', 
                                cascade='all, delete-orphan', order_by='Lecture.order')
@@ -22,6 +90,10 @@ class Block(db.Model):
     
     def __repr__(self):
         return f'<Block {self.name}>'
+
+    @property
+    def is_public(self):
+        return self.user_id is None
     
     @property
     def lecture_count(self):
@@ -65,6 +137,9 @@ class Lecture(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     block_id = db.Column(db.Integer, db.ForeignKey('blocks.id'), nullable=False)
     folder_id = db.Column(db.Integer, db.ForeignKey('block_folders.id'), nullable=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('users.id'), nullable=True, index=True
+    )  # public when null
     title = db.Column(db.String(300), nullable=False)  # 예: 심전도의 원리
     professor = db.Column(db.String(100))  # 교수명
     order = db.Column(db.Integer, default=0)  # 강의 순서 (1강, 2강...)
@@ -97,6 +172,10 @@ class Lecture(db.Model):
     
     def __repr__(self):
         return f'<Lecture {self.order}. {self.title}>'
+
+    @property
+    def is_public(self):
+        return self.user_id is None
     
     @property
     def question_count(self):
@@ -156,6 +235,9 @@ class PreviousExam(db.Model):
     __tablename__ = 'previous_exams'
     
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('users.id'), nullable=True, index=True
+    )  # TODO: MVP 이후 nullable=False
     title = db.Column(db.String(300), nullable=False)  # 예: 21년 생리학 1차
     exam_date = db.Column(db.Date)  # 시험 날짜
     subject = db.Column(db.String(100))  # 과목명 (생리학, 해부학 등)
@@ -201,6 +283,9 @@ class Question(db.Model):
     
     # 원본 시험지와의 관계 (필수)
     exam_id = db.Column(db.Integer, db.ForeignKey('previous_exams.id'), nullable=False)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('users.id'), nullable=True, index=True
+    )  # TODO: MVP 이후 nullable=False
     question_number = db.Column(db.Integer, nullable=False)  # 문제 번호
     
     # 강의 분류 (선택적 - 분류 전에는 null)
@@ -396,6 +481,9 @@ class PracticeSession(db.Model):
     __tablename__ = 'practice_sessions'
 
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('users.id'), nullable=True, index=True
+    )  # TODO: MVP 이후 nullable=False
     lecture_id = db.Column(db.Integer, db.ForeignKey('lectures.id'), nullable=True)
     mode = db.Column(db.String(50), default='practice')
     lecture_ids_json = db.Column(db.Text)

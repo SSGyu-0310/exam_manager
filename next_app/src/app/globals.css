@@ -3,108 +3,125 @@
 @tailwind utilities;
 
 :root {
-  /* TODO: replace token values with Figma design tokens. */
-  --color-background: #f6f1e9;
-  --color-background-rgb: 246 241 233;
-  --color-surface: #ffffff;
-  --color-surface-rgb: 255 255 255;
-  --color-surface-2: #f0ebe3;
-  --color-surface-2-rgb: 240 235 227;
-  --color-surface-3: #e6dfd4;
-  --color-surface-3-rgb: 230 223 212;
-  --color-primary: #1b3c52;
-  --color-primary-rgb: 27 60 82;
-  --color-on-primary: #fdfbf7;
-  --color-on-primary-rgb: 253 251 247;
-  --color-secondary: #f2c57c;
-  --color-secondary-rgb: 242 197 124;
-  --color-on-secondary: #2b1d0f;
-  --color-on-secondary-rgb: 43 29 15;
-  --color-accent: #3b7c76;
-  --color-accent-rgb: 59 124 118;
-  --color-on-accent: #f2fffb;
-  --color-on-accent-rgb: 242 255 251;
-  --color-text: #1a1a1a;
-  --color-text-rgb: 26 26 26;
-  --color-text-muted: #5c5c5c;
-  --color-text-muted-rgb: 92 92 92;
-  --color-border: #d9d1c6;
-  --color-border-rgb: 217 209 198;
-  --color-border-strong: #b8afa3;
-  --color-border-strong-rgb: 184 175 163;
-  --color-success: #1f7a5b;
-  --color-success-rgb: 31 122 91;
-  --color-danger: #b83a3a;
-  --color-danger-rgb: 184 58 58;
-  --color-warning: #c57b1e;
-  --color-warning-rgb: 197 123 30;
-  --color-ai: #2d5b73;
-  --color-ai-rgb: 45 91 115;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-  --shadow-1: 0 10px 24px rgba(20, 24, 38, 0.08);
-  --shadow-2: 0 18px 40px rgba(20, 24, 38, 0.12);
+  --font-sans: "Pretendard Variable", "Noto Sans KR", "Apple SD Gothic Neo",
+    "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 
+  /* Modern Cool Neutral + Navy Theme */
+  --color-background: #F8FAFC;
+  --color-background-rgb: 248 250 252;
+  
+  --color-surface: #FFFFFF;
+  --color-surface-rgb: 255 255 255;
+  
+  --color-surface-2: #F1F5F9; /* Slate-100 */
+  --color-surface-2-rgb: 241 245 249;
+  
+  --color-primary: #0F3D56; /* Navy */
+  --color-primary-rgb: 15 61 86;
+  --color-on-primary: #FFFFFF;
+  --color-on-primary-rgb: 255 255 255;
+  
+  --color-secondary: #E2E8F0; /* Slate-200 */
+  --color-secondary-rgb: 226 232 240;
+  --color-on-secondary: #0F172A;
+  --color-on-secondary-rgb: 15 23 42;
+  
+  /* Text Colors (Slate Scale) */
+  --color-text: #0F172A; /* Slate-900 */
+  --color-text-rgb: 15 23 42;
+  
+  --color-text-muted: #475569; /* Slate-600 */
+  --color-text-muted-rgb: 71 85 105;
+  
+  --color-text-sub: #94A3B8; /* Slate-400 */
+  --color-text-sub-rgb: 148 163 184;
+
+  /* Borders */
+  --color-border: #E2E8F0; /* Slate-200 */
+  --color-border-rgb: 226 232 240;
+  
+  /* Semantic Colors */
+  --color-success: #22C55E;
+  --color-success-rgb: 34 197 94;
+  
+  --color-warning: #F59E0B;
+  --color-warning-rgb: 245 158 11;
+  
+  --color-danger: #EF4444;
+  --color-danger-rgb: 239 68 68;
+  
+  --color-ai: #0EA5E9; /* Sky Blue for AI/Tech feel */
+  --color-ai-rgb: 14 165 233;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  
+  /* Shadows - Minimal/Flat */
+  --shadow-1: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-2: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+
+  /* Tailwind Mappings */
   --background: var(--color-background-rgb);
   --foreground: var(--color-text-rgb);
+  
   --card: var(--color-surface-rgb);
   --card-foreground: var(--color-text-rgb);
+  
   --popover: var(--color-surface-rgb);
   --popover-foreground: var(--color-text-rgb);
+  
   --primary: var(--color-primary-rgb);
   --primary-foreground: var(--color-on-primary-rgb);
+  
   --secondary: var(--color-secondary-rgb);
   --secondary-foreground: var(--color-on-secondary-rgb);
+  
   --muted: var(--color-surface-2-rgb);
   --muted-foreground: var(--color-text-muted-rgb);
-  --accent: var(--color-surface-3-rgb);
+  
+  --accent: var(--color-surface-2-rgb);
   --accent-foreground: var(--color-text-rgb);
+  
   --destructive: var(--color-danger-rgb);
   --destructive-foreground: 255 255 255;
+  
   --border: var(--color-border-rgb);
   --input: var(--color-border-rgb);
   --ring: var(--color-primary-rgb);
+  
   --radius: var(--radius-md);
 }
 
 .dark {
-  --color-background: #0f1112;
-  --color-background-rgb: 15 17 18;
-  --color-surface: #151719;
-  --color-surface-rgb: 21 23 25;
-  --color-surface-2: #1b1e22;
-  --color-surface-2-rgb: 27 30 34;
-  --color-surface-3: #22262b;
-  --color-surface-3-rgb: 34 38 43;
-  --color-primary: #9cc7de;
-  --color-primary-rgb: 156 199 222;
-  --color-on-primary: #101214;
-  --color-on-primary-rgb: 16 18 20;
-  --color-secondary: #c1a064;
-  --color-secondary-rgb: 193 160 100;
-  --color-on-secondary: #1a1208;
-  --color-on-secondary-rgb: 26 18 8;
-  --color-accent: #7bb6b1;
-  --color-accent-rgb: 123 182 177;
-  --color-on-accent: #0b1413;
-  --color-on-accent-rgb: 11 20 19;
-  --color-text: #f2f1ee;
-  --color-text-rgb: 242 241 238;
-  --color-text-muted: #b7b2ab;
-  --color-text-muted-rgb: 183 178 171;
-  --color-border: #2b3035;
-  --color-border-rgb: 43 48 53;
-  --color-border-strong: #3b4249;
-  --color-border-strong-rgb: 59 66 73;
-  --color-success: #53b08a;
-  --color-success-rgb: 83 176 138;
-  --color-danger: #e37a7a;
-  --color-danger-rgb: 227 122 122;
-  --color-warning: #d9a356;
-  --color-warning-rgb: 217 163 86;
-  --color-ai: #7fb7d6;
-  --color-ai-rgb: 127 183 214;
+  /* Dark Mode Mappings (Slate-950 base) */
+  --color-background: #020617;
+  --color-background-rgb: 2 6 23;
+  
+  --color-surface: #0F172A;
+  --color-surface-rgb: 15 23 42;
+  
+  --color-surface-2: #1E293B;
+  --color-surface-2-rgb: 30 41 59;
+  
+  --color-primary: #38BDF8; /* Lighter Blue for Dark Mode */
+  --color-primary-rgb: 56 189 248;
+  --color-on-primary: #0F172A;
+  
+  --color-secondary: #1E293B;
+  --color-secondary-rgb: 30 41 59;
+  --color-on-secondary: #F8FAFC;
+  
+  --color-text: #F8FAFC;
+  --color-text-rgb: 248 250 252;
+  
+  --color-text-muted: #94A3B8;
+  --color-text-muted-rgb: 148 163 184;
+
+  --color-border: #1E293B;
+  --color-border-rgb: 30 41 59;
+  
+  --shadow-1: 0 1px 2px 0 rgb(0 0 0 / 0.5);
 }
 
 @layer base {
@@ -113,11 +130,7 @@
   }
 
   body {
-    @apply text-foreground antialiased;
-    background-color: rgb(var(--color-background-rgb));
-    background-image:
-      radial-gradient(1200px circle at 12% -10%, rgba(27, 60, 82, 0.08), transparent 60%),
-      radial-gradient(900px circle at 90% 10%, rgba(242, 197, 124, 0.16), transparent 55%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0));
+    @apply text-foreground antialiased bg-background;
+    /* Removed gradients for cleaner look */
   }
 }

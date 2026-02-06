@@ -198,6 +198,7 @@
                     <div>
                         <div class="block-title">{{ block.name }}</div>
                         <div class="block-meta">
+                            {{ block.subject or '과목 미지정' }} ·
                             {{ block.lecture_count }}개 강의 | {{ block.question_count }}개 문제
                         </div>
                     </div>
@@ -245,6 +246,7 @@
             {% endif %}
         </div>
     </div>
+    <script src="{{ url_for('static', filename='js/duck_quack.js') }}"></script>
 </body>
 
 </html>

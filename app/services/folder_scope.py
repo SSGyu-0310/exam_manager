@@ -6,6 +6,7 @@ from sqlalchemy import text
 
 from app import db
 from app.models import BlockFolder, Lecture
+from app.services.user_scope import scope_query
 
 
 def parse_bool(value: object, default: bool = False) -> bool:
@@ -57,11 +58,13 @@ def resolve_lecture_ids(
     block_id: Optional[int],
     folder_id: Optional[int],
     include_descendants: bool,
+    user=None,
+    include_public: bool = False,
 ) -> Optional[List[int]]:
     if block_id is None and folder_id is None:
         return None
 
-    query = Lecture.query
+    query = scope_query(Lecture.query, Lecture, user, include_public=include_public)
     if block_id is not None:
         query = query.filter(Lecture.block_id == block_id)
 

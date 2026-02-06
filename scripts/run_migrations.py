@@ -11,7 +11,6 @@ import hashlib
 import sys
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
 
 import sqlite3
 
@@ -21,19 +20,23 @@ if str(ROOT_DIR) not in sys.path:
 MIGRATIONS_DIR = ROOT_DIR / "migrations"
 
 
-def _resolve_db_path(db_arg: str | None) -> Path:
+def _resolve_db_uri(db_arg: str | None) -> str:
     if db_arg:
-        return Path(db_arg)
+        if "://" in db_arg:
+            return db_arg
+        return f"sqlite:///{Path(db_arg).resolve()}"
 
-    from config import Config
+    from config import get_config
 
-    uri = Config.SQLALCHEMY_DATABASE_URI
+    return str(get_config().runtime.db_uri)
+
+
+def _sqlite_path_from_uri(uri: str) -> Path:
     if uri.startswith("sqlite:///"):
         return Path(uri.replace("sqlite:///", "", 1))
     if uri.startswith("sqlite://"):
         return Path(uri.replace("sqlite://", "", 1))
-    parsed = urlparse(uri)
-    return Path(parsed.path)
+    raise RuntimeError("run_migrations.py only supports SQLite URIs.")
 
 
 def _checksum(text: str) -> str:
@@ -88,7 +91,11 @@ def _apply_migration(
     conn.executescript(script)
 
 
-def run_migrations(db_path: Path) -> int:
+def run_migrations(db_uri: str) -> int:
+    if not db_uri.startswith("sqlite://"):
+        raise RuntimeError("run_migrations.py only supports SQLite databases.")
+
+    db_path = _sqlite_path_from_uri(db_uri)
     if not db_path.exists():
         raise FileNotFoundError(f"SQLite DB not found: {db_path}")
 
@@ -131,8 +138,8 @@ def main() -> None:
     parser.add_argument("--db", help="Path to sqlite db file.")
     args = parser.parse_args()
 
-    db_path = _resolve_db_path(args.db)
-    count = run_migrations(db_path)
+    db_uri = _resolve_db_uri(args.db)
+    count = run_migrations(db_uri)
     print(f"Applied {count} migrations.")
 
 

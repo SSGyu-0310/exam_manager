@@ -11,4 +11,9 @@ from app import create_app
 app = create_app(os.environ.get('FLASK_CONFIG') or 'default')
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    flask_config = os.environ.get("FLASK_CONFIG", "default")
+    debug = flask_config != "production" and os.environ.get(
+        "FLASK_DEBUG", "0"
+    ).lower() in ("1", "true", "yes", "on")
+    port = int(os.environ.get("PORT", "5000"))
+    app.run(debug=debug, port=port)

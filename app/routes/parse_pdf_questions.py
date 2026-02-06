@@ -14,6 +14,7 @@ from app.services.pdf_parser import (
     detect_answer_color,
     color_distance,
     extract_events,
+    merge_orphan_labels,
     match_option_line,
     normalize_embedded_option,
 )
@@ -251,6 +252,7 @@ def pdf_to_csv(pdf_path: str, output_csv: str | None = None, max_option_number=1
     with pdfplumber.open(str(pdf_path)) as pdf:
         answer_color = detect_answer_color(pdf)
         events = extract_events(pdf, answer_color)
+        events = merge_orphan_labels(events)
         media_prefix = f"media/{pdf_path.stem}/"
         df = parse_events(
             events,

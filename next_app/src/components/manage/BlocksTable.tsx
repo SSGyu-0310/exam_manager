@@ -23,6 +23,7 @@ export function BlocksTable({ blocks, showActions = false }: BlocksTableProps) {
       <table className="w-full text-sm">
         <thead className="bg-muted/60 text-left text-xs uppercase tracking-[0.2em] text-muted-foreground">
           <tr>
+            <th className="px-5 py-3">Subject</th>
             <th className="px-5 py-3">Block</th>
             <th className="px-5 py-3">Lectures</th>
             <th className="px-5 py-3">Questions</th>
@@ -33,6 +34,9 @@ export function BlocksTable({ blocks, showActions = false }: BlocksTableProps) {
         <tbody>
           {blocks.map((block) => (
             <TableRow key={block.id}>
+              <td className="px-5 py-4 text-muted-foreground">
+                {block.subject || "Unassigned"}
+              </td>
               <td className="px-5 py-4">
                 <Link
                   href={`/manage/blocks/${block.id}/lectures`}

@@ -16,11 +16,11 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
-            padding: 1rem 2rem;
+            padding: 1rem 2.5rem;
         }
 
         .container {
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
         }
 
@@ -287,6 +287,13 @@
             white-space: pre-line;
         }
 
+        .question-image {
+            display: block;
+            max-width: 100%;
+            border-radius: 10px;
+            margin-top: 1rem;
+        }
+
         .question-content .markdown-image,
         .explanation .markdown-image {
             display: block;
@@ -336,6 +343,16 @@
             flex: 1;
         }
 
+        .choice-image {
+            display: block;
+            max-width: 100%;
+            max-height: 180px;
+            margin-top: 0.5rem;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            object-fit: contain;
+        }
+
         .choice-tag {
             font-size: 0.75rem;
             padding: 0.2rem 0.5rem;
@@ -377,6 +394,16 @@
             font-size: 0.8rem;
             cursor: pointer;
             margin-left: 0.8rem;
+        }
+
+        .copy-btn {
+            background: #f7fafc;
+            color: #4a5568;
+            border: 1px solid #e2e8f0;
+        }
+
+        .copy-btn:hover {
+            background: #edf2f7;
         }
 
         .edit-btn:hover {
@@ -498,6 +525,27 @@
             color: #888;
             margin-left: 0.3rem;
         }
+
+        .copy-toast {
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: #2f855a;
+            color: white;
+            padding: 0.8rem 1.5rem;
+            border-radius: 999px;
+            font-weight: bold;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+            opacity: 0;
+            transition: all 0.3s ease;
+            z-index: 1001;
+        }
+
+        .copy-toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
     </style>
 </head>
 
@@ -589,32 +637,135 @@
         </div>
     </div>
 
+    <div class="copy-toast" id="copyToast">✓ 클립보드에 복사되었습니다</div>
+
     <script src="{{ url_for('static', filename='js/practice_storage.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/duck_quack.js') }}"></script>
     <script>
         const lectureId = {{ lecture.id }};
         const filterQuery = {{ filter_query | tojson }};
         const resultKey = getPracticeResultKey(lectureId);
         const questions = {{ questions | tojson }};
+        const questionMetaMap = {};
+        questions.forEach((question) => {
+            questionMetaMap[String(question.id)] = Boolean(question.is_short_answer);
+        });
 
         let wrongQuestions = [];
         let currentIndex = 0;
+        let activeQuestion = null;
+        let activeResult = null;
+        let isRegrading = false;
 
         document.addEventListener('DOMContentLoaded', function () {
             loadResults();
+            checkPracticeEditCompleteFlag();
         });
+
+        function handlePracticeEditComplete() {
+            localStorage.removeItem('practice_edit_complete');
+            // 현재 인덱스 초기화
+            localStorage.removeItem(`${resultKey}_currentIndex`);
+            regradeResults();
+        }
+
+        function setRegradingState(message) {
+            const loading = document.getElementById('loadingState');
+            const resultContent = document.getElementById('resultContent');
+            const wrongSection = document.getElementById('wrongSection');
+            if (loading) {
+                loading.textContent = message || '재채점 중입니다...';
+                loading.style.display = 'block';
+            }
+            if (resultContent) {
+                resultContent.style.display = 'none';
+            }
+            if (wrongSection) {
+                wrongSection.style.display = 'none';
+            }
+        }
+
+        function regradeResults() {
+            if (isRegrading) return;
+            isRegrading = true;
+
+            const state = loadPracticeState(lectureId, questionMetaMap);
+            let answers = exportLegacyAnswers(state);
+            if (!answers || Object.keys(answers).length === 0) {
+                const stored = loadPracticeResult(lectureId);
+                if (stored && stored.payload && Array.isArray(stored.payload.results)) {
+                    answers = {};
+                    stored.payload.results.forEach((item) => {
+                        if (item.user_answer === null || item.user_answer === undefined) {
+                            return;
+                        }
+                        answers[String(item.question_id)] = item.user_answer;
+                    });
+                }
+            }
+            const answeredCount = answers ? Object.keys(answers).length : 0;
+
+            if (!answeredCount) {
+                isRegrading = false;
+                alert('저장된 답안이 없습니다. 다시 풀기를 진행해 주세요.');
+                window.location.href = `/practice/lecture/${lectureId}${filterQuery}`;
+                return;
+            }
+
+            setRegradingState('문제가 수정되었습니다. 재채점 중입니다...');
+
+            fetch(`/practice/lecture/${lectureId}/submit${filterQuery}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ answers: answers })
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then((data) => {
+                            throw new Error(data && data.error ? data.error : '재채점 실패');
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        savePracticeResult(lectureId, data);
+                        window.location.reload();
+                    } else {
+                        throw new Error(data && data.error ? data.error : '재채점 실패');
+                    }
+                })
+                .catch(error => {
+                    console.error('Regrade error:', error);
+                    alert('재채점 중 오류가 발생했습니다. 다시 제출해 주세요.');
+                    isRegrading = false;
+                    loadResults();
+                });
+        }
+
+        function checkPracticeEditCompleteFlag() {
+            if (localStorage.getItem('practice_edit_complete')) {
+                handlePracticeEditComplete();
+            }
+        }
 
         // 문제 수정 후 자동 새로고침
         window.addEventListener('storage', function (e) {
             if (e.key === 'practice_edit_complete') {
-                localStorage.removeItem('practice_edit_complete');
-                // 결과 데이터 삭제하여 재채점 유도
-                clearPracticeResult(lectureId);
-                // 현재 인덱스 초기화
-                localStorage.removeItem(`${resultKey}_currentIndex`);
-                // 대시보드로 이동하여 다시 제출하도록 안내
-                alert('문제가 수정되었습니다. 다시 제출해 주세요.');
-                window.location.href = `/practice/lecture/${lectureId}${filterQuery}`;
+                handlePracticeEditComplete();
             }
+        });
+
+        window.addEventListener('message', function (e) {
+            if (e.data && e.data.type === 'practice_edit_complete') {
+                handlePracticeEditComplete();
+            }
+        });
+
+        window.addEventListener('focus', function () {
+            checkPracticeEditCompleteFlag();
         });
 
         function toggleSummary() {
@@ -708,6 +859,8 @@
 
             const userAnswers = Array.isArray(result.user_answer) ? result.user_answer : [result.user_answer];
             const correctAnswers = Array.isArray(result.correct_answer) ? result.correct_answer : [result.correct_answer];
+            activeQuestion = question;
+            activeResult = result;
 
             let choicesHtml = '<div class="choices-list">';
             if (question.choices && question.choices.length > 0) {
@@ -727,6 +880,7 @@
                         <div class="${classes}">
                             <span class="choice-number">${choice.choice_number}.</span>
                             <span class="choice-content">${choice.content}</span>
+                            ${choice.image_url ? `<img src="${escapeHtml(choice.image_url)}" class="choice-image" alt="choice image">` : ''}
                             ${tags}
                         </div>
                     `;
@@ -735,8 +889,11 @@
             choicesHtml += '</div>';
 
             const sourceInfo = question.exam_name ? `<span class="question-source">📝 ${question.exam_name} #${question.question_number}</span>` : '';
-            const editUrl = `/manage/question/${question.id}/edit`;
+            const editUrl = `/manage/question/${question.id}/edit?from_practice=1`;
             const contentHtml = renderMarkdownImages(question.content || '(이미지 문제)');
+            const questionImageHtml = question.question_image_url
+                ? `<img src="${escapeHtml(question.question_image_url)}" class="question-image" alt="question image">`
+                : '';
 
             let html = `
                 <div class="question-card">
@@ -744,6 +901,7 @@
                         <div class="question-title-row">
                             <span class="question-number">문제 ${result.seq}</span>
                             ${sourceInfo}
+                            <button class="edit-btn copy-btn" onclick="copyQuestion()">📋 복사</button>
                             <button class="edit-btn" onclick="openEdit('${editUrl}')">✏️ 수정</button>
                         </div>
                         <div class="answer-badge">
@@ -752,6 +910,7 @@
                         </div>
                     </div>
                     <div class="question-content">${contentHtml}</div>
+                    ${questionImageHtml}
                     ${choicesHtml}
             `;
 
@@ -796,6 +955,11 @@
             return String(answer);
         }
 
+        function stripMarkdownImages(value) {
+            if (!value) return '';
+            return String(value).replace(/!\[[^\]]*\]\(([^)]+)\)/g, '').replace(/\s{2,}/g, ' ').trim();
+        }
+
         function escapeHtml(value) {
             return String(value)
                 .replace(/&/g, '&amp;')
@@ -823,6 +987,94 @@
             return html;
         }
 
+        function copyTextToClipboard(text) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                return navigator.clipboard.writeText(text);
+            }
+
+            return new Promise((resolve, reject) => {
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.setAttribute('readonly', '');
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.focus();
+                textarea.select();
+                try {
+                    const ok = document.execCommand('copy');
+                    document.body.removeChild(textarea);
+                    if (ok) resolve();
+                    else reject(new Error('copy-failed'));
+                } catch (err) {
+                    document.body.removeChild(textarea);
+                    reject(err);
+                }
+            });
+        }
+
+        function readAsDataUrl(blob) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        }
+
+        function copyQuestion() {
+            if (!activeQuestion || !activeResult) return;
+            const toast = document.getElementById('copyToast');
+            const showToast = () => {
+                toast.classList.add('show');
+                setTimeout(() => {
+                    toast.classList.remove('show');
+                }, 2000);
+            };
+
+            const questionText = stripMarkdownImages(activeQuestion.content || '(이미지 문제)');
+            let payload = `문제 ${activeResult.seq}\n${questionText}`;
+            if (activeQuestion.choices && activeQuestion.choices.length > 0) {
+                payload += "\n\n선택지:\n";
+                activeQuestion.choices.forEach(choice => {
+                    payload += `${choice.choice_number}. ${choice.content}\n`;
+                });
+            }
+            payload += `\n정답: ${formatAnswer(activeResult.correct_answer)}`;
+
+            const imageElement = document.querySelector('#questionContainer .question-image');
+            const imageUrl = imageElement ? imageElement.src : activeQuestion.question_image_url;
+            if (!imageUrl || !navigator.clipboard || !navigator.clipboard.write) {
+                copyTextToClipboard(payload.trim()).then(showToast).catch(() => {
+                    alert('클립보드 복사에 실패했습니다.');
+                });
+                return;
+            }
+
+            const textPayload = payload.trim();
+            const htmlText = escapeHtml(textPayload).replace(/\n/g, "<br>");
+
+            fetch(imageUrl)
+                .then((response) => response.blob())
+                .then((blob) => readAsDataUrl(blob).then((dataUrl) => ({ blob, dataUrl })))
+                .then(({ blob, dataUrl }) => {
+                    const htmlPayload = `<p>${htmlText}</p><img src="${dataUrl}" alt="question image">`;
+                    const items = {
+                        "text/plain": new Blob([textPayload], { type: "text/plain" }),
+                        "text/html": new Blob([htmlPayload], { type: "text/html" }),
+                    };
+                    items[blob.type || "image/png"] = blob;
+                    return navigator.clipboard.write([new ClipboardItem(items)]);
+                })
+                .then(showToast)
+                .catch((err) => {
+                    console.error('Copy failed:', err);
+                    copyTextToClipboard(textPayload).then(showToast).catch(() => {
+                        alert('클립보드 복사에 실패했습니다.');
+                    });
+                });
+        }
+
         let memoTimeout;
         function saveMemo(questionId) {
             clearTimeout(memoTimeout);
@@ -843,6 +1095,25 @@
         function openEdit(url) {
             window.open(url, '_blank', 'width=800,height=700');
         }
+
+        document.addEventListener('keydown', function (e) {
+            if (e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && e.key.toLowerCase() === 'c') {
+                copyQuestion();
+                e.preventDefault();
+                return;
+            }
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                return;
+            }
+            if (e.key === 'ArrowLeft') {
+                prevQuestion();
+                e.preventDefault();
+            }
+            if (e.key === 'ArrowRight') {
+                nextQuestion();
+                e.preventDefault();
+            }
+        });
     </script>
 </body>
 

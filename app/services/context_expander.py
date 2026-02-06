@@ -15,6 +15,7 @@ from sqlalchemy import text
 
 from app import db
 from app.models import LectureChunk
+from app.services.db_utils import is_postgres
 from app.services import retrieval
 
 
@@ -40,21 +41,37 @@ def _semantic_neighbors(
     if not match_query:
         return []
 
-    sql = text(
-        """
-        SELECT c.id AS chunk_id,
-               c.page_start,
-               c.page_end,
-               c.content,
-               bm25(lecture_chunks_fts) AS bm25_score
-        FROM lecture_chunks_fts
-        JOIN lecture_chunks c ON c.id = lecture_chunks_fts.chunk_id
-        WHERE lecture_chunks_fts MATCH :query
-          AND c.lecture_id = :lecture_id
-        ORDER BY bm25_score
-        LIMIT :top_n
-        """
-    )
+    if is_postgres():
+        sql = text(
+            """
+            SELECT c.id AS chunk_id,
+                   c.page_start,
+                   c.page_end,
+                   c.content,
+                   ts_rank_cd(c.content_tsv, to_tsquery('simple', :query)) AS bm25_score
+            FROM lecture_chunks c
+            WHERE c.content_tsv @@ to_tsquery('simple', :query)
+              AND c.lecture_id = :lecture_id
+            ORDER BY bm25_score DESC
+            LIMIT :top_n
+            """
+        )
+    else:
+        sql = text(
+            """
+            SELECT c.id AS chunk_id,
+                   c.page_start,
+                   c.page_end,
+                   c.content,
+                   bm25(lecture_chunks_fts) AS bm25_score
+            FROM lecture_chunks_fts
+            JOIN lecture_chunks c ON c.id = lecture_chunks_fts.chunk_id
+            WHERE lecture_chunks_fts MATCH :query
+              AND c.lecture_id = :lecture_id
+            ORDER BY bm25_score
+            LIMIT :top_n
+            """
+        )
     rows = (
         db.session.execute(
             sql,

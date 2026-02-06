@@ -692,7 +692,7 @@
                 style="width: 100%; padding: 0.8rem; margin: 1rem 0; border-radius: 5px; border: 1px solid #ddd;">
                 <option value="">강의를 선택하세요...</option>
                 {% for b in all_blocks %}
-                <optgroup label="{{ b.name }}">
+                <optgroup label="{{ (b.subject or '과목 미지정') }} > {{ b.name }}">
                     {% for l in b.lectures %}
                     {% if l.id != lecture.id %}
                     <option value="{{ l.id }}">{{ l.title }} ({{ l.professor or '교수 미정' }})</option>
@@ -894,6 +894,7 @@
             }
         }
     </script>
+    <script src="{{ url_for('static', filename='js/duck_quack.js') }}"></script>
 </body>
 
 </html>

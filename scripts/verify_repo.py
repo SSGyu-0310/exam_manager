@@ -41,11 +41,18 @@ def _compile_check() -> bool:
             print(f"  [SKIP] {target} does not exist")
             continue
 
-        result = compileall.compile_dir(
-            target,
-            force=True,
-            quiet=1,
-        )
+        if target.is_dir():
+            result = compileall.compile_dir(
+                target,
+                force=True,
+                quiet=1,
+            )
+        else:
+            result = compileall.compile_file(
+                target,
+                force=True,
+                quiet=1,
+            )
         if not result:
             print(f"  [FAIL] Compilation failed for {target}")
             return False
@@ -71,14 +78,15 @@ def _db_check(db_path: Path) -> bool:
         from scripts.init_fts import init_fts
 
         # Run migrations
-        count = run_migrations(db_path)
+        db_uri = f"sqlite:///{db_path.resolve()}"
+        count = run_migrations(db_uri)
         if count > 0:
             print(f"  [INFO] Applied {count} migration(s)")
         else:
             print("  [INFO] No pending migrations")
 
         # Run FTS sync (doesn't rebuild, just syncs)
-        init_fts(db_path, rebuild=False)
+        init_fts(db_uri, rebuild=False, sync=True)
         print("  [OK] FTS sync completed")
 
         print("[PASS] DB checks passed")
