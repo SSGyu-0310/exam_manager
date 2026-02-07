@@ -302,14 +302,15 @@ def build_legacy_results(questions, items, include_content=False):
 
 
 @transactional
-def grade_practice_submission(lecture_id, answers_v1, questions=None):
+def grade_practice_submission(lecture_id, answers_v1, questions=None, user_id=None):
     from app.services.transaction import transaction
 
     if questions is None:
-        questions = get_lecture_questions_ordered(lecture_id) or []
+        questions = get_lecture_questions_ordered(lecture_id, user_id=user_id) or []
     # Each submit creates a new session; repeated submissions are kept for history.
     session = PracticeSession(
         lecture_id=lecture_id,
+        user_id=user_id,
         lecture_ids_json=json.dumps([lecture_id], ensure_ascii=True),
         mode="practice",
         question_order=json.dumps([q.id for q in questions], ensure_ascii=True),
@@ -337,11 +338,57 @@ def grade_practice_submission(lecture_id, answers_v1, questions=None):
     return summary, items
 
 
-def get_lecture_questions_ordered(lecture_id):
+@transactional
+def grade_exam_submission(exam_id, answers_v1, questions=None, user_id=None):
+    from app.services.transaction import transaction
+
+    if questions is None:
+        questions = get_exam_questions_ordered(exam_id, user_id=user_id) or []
+    session = PracticeSession(
+        lecture_id=None,
+        user_id=user_id,
+        lecture_ids_json=None,
+        mode="practice",
+        question_order=json.dumps([q.id for q in questions], ensure_ascii=True),
+    )
+    db.session.add(session)
+    summary, items, _counts = evaluate_practice_answers(questions, answers_v1 or {})
+
+    for item in items:
+        if not item.get("isAnswered"):
+            continue
+        answer_payload = json.dumps(
+            {"type": item.get("type"), "value": item.get("userAnswer")},
+            ensure_ascii=True,
+        )
+        answer = PracticeAnswer(
+            session=session,
+            question_id=item.get("questionId"),
+            answer_payload=answer_payload,
+            is_correct=item.get("isCorrect"),
+            answered_at=datetime.utcnow(),
+        )
+        db.session.add(answer)
+
+    session.finished_at = datetime.utcnow()
+    return summary, items
+
+
+def get_lecture_questions_ordered(lecture_id, user_id=None):
     lecture = Lecture.query.get(lecture_id)
     if lecture is None:
         return None
-    return lecture.questions.order_by(Question.question_number).all()
+    query = Question.query.filter_by(lecture_id=lecture_id)
+    if user_id is not None:
+        query = query.filter_by(user_id=user_id)
+    return query.order_by(Question.question_number).all()
+
+
+def get_exam_questions_ordered(exam_id, user_id=None):
+    query = Question.query.filter_by(exam_id=exam_id)
+    if user_id is not None:
+        query = query.filter_by(user_id=user_id)
+    return query.order_by(Question.question_number).all()
 
 
 def get_question_by_seq(lecture_id, seq):

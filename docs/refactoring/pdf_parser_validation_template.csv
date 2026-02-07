@@ -1,0 +1,11 @@
+sample_id,pdf_path,expected_questions,expected_choices,uploaded_questions,uploaded_choices,notes
+sample_01,../../parse_lab/pdfs/sample_01.pdf,,,,,
+sample_02,../../parse_lab/pdfs/sample_02.pdf,,,,,
+sample_03,../../parse_lab/pdfs/sample_03.pdf,,,,,
+sample_04,../../parse_lab/pdfs/sample_04.pdf,,,,,
+sample_05,../../parse_lab/pdfs/sample_05.pdf,,,,,
+sample_06,../../parse_lab/pdfs/sample_06.pdf,,,,,
+sample_07,../../parse_lab/pdfs/sample_07.pdf,,,,,
+sample_08,../../parse_lab/pdfs/sample_08.pdf,,,,,
+sample_09,../../parse_lab/pdfs/sample_09.pdf,,,,,
+sample_10,../../parse_lab/pdfs/sample_10.pdf,,,,,

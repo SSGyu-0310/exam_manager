@@ -25,6 +25,8 @@ const PAGE_SIZE = 200;
 type SessionContext = {
   lectureId?: string;
   lectureTitle?: string;
+  examId?: string;
+  examTitle?: string;
   mode?: string;
   fallback?: boolean;
   warning?: string | null;
@@ -36,6 +38,8 @@ type SessionContext = {
 
 type SubmitResult = {
   lectureId?: string;
+  examId?: string;
+  examTitle?: string;
   submittedAt?: string;
   summary?: unknown;
   items?: unknown[];
@@ -118,6 +122,13 @@ export default function PracticeSessionPage() {
     return null;
   }, [sessionId]);
 
+  const fallbackExamId = useMemo(() => {
+    if (sessionId?.startsWith("exam-")) {
+      return decodeURIComponent(sessionId.replace("exam-", ""));
+    }
+    return null;
+  }, [sessionId]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const stored = sessionStorage.getItem(`practice:session:${sessionId}`);
@@ -141,7 +152,7 @@ export default function PracticeSessionPage() {
     return () => clearInterval(timerId);
   }, [isTimed]);
 
-  const fetchQuestions = useCallback(
+  const fetchLectureQuestions = useCallback(
     async (
       lectureId: string,
       offset = 0,
@@ -173,6 +184,30 @@ export default function PracticeSessionPage() {
     []
   );
 
+  const fetchExamQuestions = useCallback(
+    async (examId: string, offset = 0) => {
+      const params = new URLSearchParams();
+      params.set("limit", String(PAGE_SIZE));
+      params.set("offset", String(offset));
+      const response = await apiFetch<unknown>(
+        `/api/practice/exam/${encodeURIComponent(examId)}/questions?${params.toString()}`,
+        { cache: "no-store" }
+      );
+      const parsed = lectureQuestionsResponseSchema.safeParse(response);
+      if (!parsed.success) {
+        throw new Error(CONNECTION_ERROR_MESSAGE);
+      }
+      const data = parsed.data;
+      return {
+        questions: data.questions ?? [],
+        total: data.total ?? 0,
+        offset: data.offset ?? offset,
+        limit: data.limit ?? PAGE_SIZE,
+      };
+    },
+    []
+  );
+
   useEffect(() => {
     let active = true;
 
@@ -182,11 +217,18 @@ export default function PracticeSessionPage() {
       setSubmitError(null);
 
       let lectureId = sessionContext.lectureId ?? fallbackLectureId ?? undefined;
+      let examId = sessionContext.examId ?? fallbackExamId ?? undefined;
       let order = sessionContext.questionOrder ?? [];
       const examIds = sessionContext.examIds;
       const filterActive = sessionContext.filterActive;
 
-      if (!lectureId && sessionId && !sessionId.startsWith("lecture-")) {
+      if (
+        !lectureId &&
+        !examId &&
+        sessionId &&
+        !sessionId.startsWith("lecture-") &&
+        !sessionId.startsWith("exam-")
+      ) {
         try {
           const response = await apiFetch<unknown>(
             `/api/practice/sessions/${encodeURIComponent(sessionId)}`,
@@ -212,14 +254,16 @@ export default function PracticeSessionPage() {
         }
       }
 
-      if (!lectureId) {
-        setError("Unable to resolve lecture for this session.");
+      if (!lectureId && !examId) {
+        setError("Unable to resolve content for this session.");
         setLoading(false);
         return;
       }
 
       try {
-        const page = await fetchQuestions(lectureId, 0, examIds, filterActive);
+        const page = lectureId
+          ? await fetchLectureQuestions(lectureId, 0, examIds, filterActive)
+          : await fetchExamQuestions(examId!, 0);
         if (!active) return;
         setQuestions(page.questions);
         setQuestionOrder(order);
@@ -243,9 +287,12 @@ export default function PracticeSessionPage() {
       active = false;
     };
   }, [
-    fetchQuestions,
+    fetchLectureQuestions,
+    fetchExamQuestions,
     fallbackLectureId,
+    fallbackExamId,
     sessionContext.lectureId,
+    sessionContext.examId,
     sessionId,
     sessionContext.questionOrder,
     sessionContext.examIds,
@@ -399,8 +446,9 @@ export default function PracticeSessionPage() {
 
   const handleSubmit = async () => {
     const lectureId = sessionContext.lectureId ?? fallbackLectureId;
-    if (!lectureId) {
-      setSubmitError("Unable to resolve lecture for submission.");
+    const examId = sessionContext.examId ?? fallbackExamId;
+    if (!lectureId && !examId) {
+      setSubmitError("Unable to resolve content for submission.");
       return;
     }
     setSubmitting(true);
@@ -428,13 +476,19 @@ export default function PracticeSessionPage() {
     );
     const submitViaLecture = async () =>
       apiFetch<unknown>(
-        `/api/practice/lecture/${encodeURIComponent(lectureId)}/submit${filterQuery}`,
+        `/api/practice/lecture/${encodeURIComponent(lectureId!)}/submit${filterQuery}`,
+        { method: "POST", headers, body }
+      );
+
+    const submitViaExam = async () =>
+      apiFetch<unknown>(
+        `/api/practice/exam/${encodeURIComponent(examId!)}/submit`,
         { method: "POST", headers, body }
       );
 
     let response: unknown = null;
     try {
-      if (!sessionId.startsWith("lecture-")) {
+      if (!sessionId.startsWith("lecture-") && !sessionId.startsWith("exam-")) {
         response = await submitViaSession();
       }
     } catch {
@@ -443,7 +497,7 @@ export default function PracticeSessionPage() {
 
     if (!response) {
       try {
-        response = await submitViaLecture();
+        response = examId ? await submitViaExam() : await submitViaLecture();
       } catch (err) {
         setSubmitError(err instanceof Error ? err.message : CONNECTION_ERROR_MESSAGE);
         setSubmitting(false);
@@ -454,17 +508,17 @@ export default function PracticeSessionPage() {
     const parsed = submitResponseSchema.safeParse(response);
     const resultPayload: SubmitResult = parsed.success
       ? {
-          lectureId:
-            parsed.data.lectureId !== undefined ? String(parsed.data.lectureId) : lectureId,
-          submittedAt: parsed.data.submittedAt,
-          summary: parsed.data.summary,
-          items: parsed.data.items ?? [],
-        }
+        lectureId:
+          parsed.data.lectureId !== undefined ? String(parsed.data.lectureId) : (lectureId ?? undefined),
+        submittedAt: parsed.data.submittedAt,
+        summary: parsed.data.summary,
+        items: parsed.data.items ?? [],
+      }
       : {
-          lectureId,
-          summary: undefined,
-          items: [],
-        };
+        lectureId: lectureId ?? undefined,
+        summary: undefined,
+        items: [],
+      };
 
     if (typeof window !== "undefined") {
       sessionStorage.setItem(
@@ -472,6 +526,8 @@ export default function PracticeSessionPage() {
         JSON.stringify({
           ...resultPayload,
           lectureId,
+          examId,
+          examTitle: sessionContext.examTitle,
           answers: answersPayload,
           mode: sessionContext.mode,
           examIds: sessionContext.examIds,
@@ -486,16 +542,19 @@ export default function PracticeSessionPage() {
   const handleLoadMore = async () => {
     if (loadMoreLoading || !pagination.hasMore) return;
     const lectureId = sessionContext.lectureId ?? fallbackLectureId;
-    if (!lectureId) return;
+    const examId = sessionContext.examId ?? fallbackExamId;
+    if (!lectureId && !examId) return;
     setLoadMoreLoading(true);
     try {
       const nextOffset = pagination.offset + pagination.limit;
-      const page = await fetchQuestions(
-        lectureId,
-        nextOffset,
-        sessionContext.examIds,
-        sessionContext.filterActive
-      );
+      const page = lectureId
+        ? await fetchLectureQuestions(
+          lectureId,
+          nextOffset,
+          sessionContext.examIds,
+          sessionContext.filterActive
+        )
+        : await fetchExamQuestions(examId!, nextOffset);
       setQuestions((prev) => [...prev, ...page.questions]);
       setPagination({
         total: page.total,
@@ -620,7 +679,9 @@ export default function PracticeSessionPage() {
                     Session
                   </p>
                   <p className="text-sm font-semibold text-foreground">
-                    {sessionContext.lectureTitle ?? "Practice Session"}
+                    {sessionContext.lectureTitle ??
+                      sessionContext.examTitle ??
+                      "Practice Session"}
                   </p>
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <Badge variant="neutral">{formatMode(sessionContext.mode)}</Badge>
@@ -727,8 +788,8 @@ export default function PracticeSessionPage() {
                           isActive
                             ? "border-primary bg-primary text-primary-foreground shadow-soft"
                             : isAnswered
-                            ? "border-success/40 bg-success/20 text-success"
-                            : "border-border/70 bg-card text-muted-foreground hover:bg-muted"
+                              ? "border-success/40 bg-success/20 text-success"
+                              : "border-border/70 bg-card text-muted-foreground hover:bg-muted"
                         )}
                       >
                         {index + 1}

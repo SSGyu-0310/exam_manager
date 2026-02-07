@@ -3,6 +3,7 @@
 Provides a centralized `get_config()` function that returns an AppConfig singleton.
 """
 
+import os
 import threading
 
 from .base import DEFAULT_SECRET_KEY
@@ -47,7 +48,7 @@ def get_config() -> AppConfig:
             _config_cache = AppConfig(
                 runtime=runtime,
                 experiment=experiment,
-                secret_key=DEFAULT_SECRET_KEY,
+                secret_key=os.environ.get("SECRET_KEY", DEFAULT_SECRET_KEY),
             )
 
     return _config_cache

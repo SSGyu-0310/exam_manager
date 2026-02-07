@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { BookOpen, ListChecks } from "lucide-react";
+import { useLanguage } from "@/context/LanguageContext";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

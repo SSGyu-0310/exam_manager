@@ -1,9 +1,0 @@
-branch: feature/db-ops-safety
-commit: f202ef163fc0515881a4670681e433dfd5807816
-1) backup dev.db -> reports/hyde_ab_20260115/dev.db.bak
-2) .\.venv\Scripts\python.exe scripts\run_migrations.py --db data\dev.db
-3) table check: question_queries + index
-4) .\.venv\Scripts\python.exe scripts\build_queries.py --provider gemini --concurrency 10 --skip-existing
-5) HYDE_ENABLED=0 HYDE_AUTO_GENERATE=0 .\.venv\Scripts\python.exe scripts\evaluate_evalset.py --db data\dev.db --retrieval-mode hybrid_rrf
-6) HYDE_ENABLED=1 HYDE_AUTO_GENERATE=0 .\.venv\Scripts\python.exe scripts\evaluate_evalset.py --db data\dev.db --retrieval-mode hybrid_rrf
-7) copied reports to reports/hyde_ab_20260115/results_off and results_on

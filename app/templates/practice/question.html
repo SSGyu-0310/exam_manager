@@ -482,6 +482,7 @@
     <div class="copy-toast" id="copyToast">✓ 클립보드에 복사되었습니다</div>
 
     <script src="{{ url_for('static', filename='js/practice_storage.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/duck_quack.js') }}"></script>
     <script>
         const lectureId = {{ lecture.id }};
         const questionId = {{ question.id }};
@@ -661,6 +662,11 @@
 
         // 키보드 단축키
         document.addEventListener('keydown', function (e) {
+            if (e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && e.key.toLowerCase() === 'c') {
+                copyQuestion();
+                e.preventDefault();
+                return;
+            }
             // 입력 중이면 무시
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
                 return;
@@ -730,12 +736,6 @@
                         saveBeforeNav();
                         editBtn.click();
                     }
-                    break;
-
-                case 'c':
-                case 'C':
-                    // 문제 복사
-                    copyQuestion();
                     break;
 
                 case '1':

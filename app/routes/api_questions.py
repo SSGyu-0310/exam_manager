@@ -1,7 +1,9 @@
 """JSON API for question evidence."""
 from flask import Blueprint, jsonify, current_app, abort, request
+from sqlalchemy.orm import selectinload
 
-from app.models import Question, QuestionChunkMatch
+from app.models import Question, QuestionChunkMatch, Lecture
+from app.services.user_scope import attach_current_user, current_user, get_scoped_by_id
 
 api_questions_bp = Blueprint('api_questions', __name__, url_prefix='/api/questions')
 
@@ -16,15 +18,27 @@ def restrict_to_local_admin():
     return None
 
 
+@api_questions_bp.before_request
+def attach_user():
+    return attach_current_user(require=True)
+
+
 def ok(data=None, status=200):
     return jsonify({'ok': True, 'data': data}), status
 
 
 @api_questions_bp.get('/<int:question_id>/evidence')
 def get_question_evidence(question_id):
-    question = Question.query.get_or_404(question_id)
+    user = current_user()
+    question = get_scoped_by_id(Question, question_id, user)
+    if not question:
+        return jsonify({'ok': False, 'message': 'Question not found.'}), 404
     matches = (
         QuestionChunkMatch.query.filter_by(question_id=question.id)
+        .options(
+            selectinload(QuestionChunkMatch.lecture).selectinload(Lecture.block),
+            selectinload(QuestionChunkMatch.material),
+        )
         .order_by(QuestionChunkMatch.is_primary.desc(), QuestionChunkMatch.id)
         .all()
     )

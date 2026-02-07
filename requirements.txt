@@ -1,4 +1,5 @@
 flask
+gunicorn
 flask-sqlalchemy
 pandas
 python-dotenv
@@ -10,3 +11,5 @@ tenacity
 scikit-learn
 numpy<2
 sentence-transformers
+flask-jwt-extended
+psycopg[binary]

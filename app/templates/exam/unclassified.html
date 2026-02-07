@@ -563,7 +563,7 @@
                 <div class="block-item">
                     <div class="block-name" onclick="toggleBlock(this.parentElement)">
                         <span class="icon">▼</span>
-                        {{ block.name }}
+                        {{ (block.subject or '과목 미지정') }} > {{ block.name }}
                     </div>
                     <div class="lecture-list">
                         {% for lecture in block.lectures %}
@@ -668,7 +668,7 @@
                             <select class="lecture-select" id="select-{{ question.id }}">
                                 <option value="">강의 선택...</option>
                                 {% for block in blocks %}
-                                <optgroup label="{{ block.name }}">
+                                <optgroup label="{{ (block.subject or '과목 미지정') }} > {{ block.name }}">
                                     {% for lecture in block.lectures %}
                                     <option value="{{ lecture.id }}" {{ 'selected' if question.lecture_id==lecture.id
                                         else '' }}>
@@ -728,7 +728,7 @@
         <select id="bulkLectureSelect">
             <option value="">분류할 강의 선택...</option>
             {% for block in blocks %}
-            <optgroup label="{{ block.name }}">
+            <optgroup label="{{ (block.subject or '과목 미지정') }} > {{ block.name }}">
                 {% for lecture in block.lectures %}
                 <option value="{{ lecture.id }}">{{ lecture.order }}강. {{ lecture.title }}</option>
                 {% endfor %}
@@ -1013,6 +1013,7 @@
             document.getElementById('recentJobsModal').classList.add('hidden');
         }
     </script>
+    <script src="{{ url_for('static', filename='js/duck_quack.js') }}"></script>
 </body>
 
 </html>

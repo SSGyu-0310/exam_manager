@@ -17,6 +17,10 @@ def _resolve_db_path(uri: str) -> Path:
     return Path(parsed.path)
 
 
+def _is_sqlite_uri(uri: str) -> bool:
+    return uri.startswith("sqlite://")
+
+
 def _build_backup_path(db_path: Path, backup_dir: Path) -> Path:
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     return backup_dir / f"{db_path.name}.{timestamp}"
@@ -33,6 +37,8 @@ def _prune_backups(backup_dir: Path, db_name: str, keep: int) -> None:
 
 
 def backup_database(db_uri: str, backup_dir: Path, keep: int) -> Path:
+    if not _is_sqlite_uri(db_uri):
+        raise RuntimeError("backup_database only supports SQLite databases.")
     db_path = _resolve_db_path(db_uri)
     if not db_path.exists():
         raise FileNotFoundError(f"SQLite DB not found: {db_path}")
@@ -58,6 +64,11 @@ def maybe_backup_before_write(action: str | None = None) -> Path | None:
     keep = int(config.get("AUTO_BACKUP_KEEP") or 30)
     db_uri = config.get("SQLALCHEMY_DATABASE_URI")
     if not db_uri:
+        return None
+    if not _is_sqlite_uri(db_uri):
+        current_app.logger.info(
+            "Skipping auto-backup for non-SQLite DB (%s).", db_uri
+        )
         return None
 
     backup_path = backup_database(db_uri, backup_dir, keep)

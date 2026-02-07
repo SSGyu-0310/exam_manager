@@ -61,14 +61,19 @@ export function QuestionEditor({ question, lectures }: QuestionEditorProps) {
   const [success, setSuccess] = useState<string | null>(null);
 
   const groupedLectures = useMemo(() => {
-    const groups = new Map<string, ManageLecture[]>();
+    const groups = new Map<string, { subject: string; block: string; lectures: ManageLecture[] }>();
     lectures.forEach((lecture) => {
-      const key = lecture.blockName ?? "Other";
-      const list = groups.get(key) ?? [];
-      list.push(lecture);
-      groups.set(key, list);
+      const subject = lecture.blockSubject ?? "Unassigned";
+      const block = lecture.blockName ?? "Other";
+      const key = `${subject}|||${block}`;
+      const entry = groups.get(key) ?? { subject, block, lectures: [] };
+      entry.lectures.push(lecture);
+      groups.set(key, entry);
     });
-    return Array.from(groups.entries());
+    return Array.from(groups.values()).sort((a, b) => {
+      if (a.subject === b.subject) return a.block.localeCompare(b.block);
+      return a.subject.localeCompare(b.subject);
+    });
   }, [lectures]);
 
   const handleChoiceChange = (index: number, value: string) => {
@@ -116,6 +121,7 @@ export function QuestionEditor({ question, lectures }: QuestionEditorProps) {
     const response = await fetch("/api/proxy/manage/upload-image", {
       method: "POST",
       body: formData,
+      credentials: "include",
     });
     if (!response.ok) {
       throw new Error("Image upload failed.");
@@ -199,9 +205,9 @@ export function QuestionEditor({ question, lectures }: QuestionEditorProps) {
             }
           >
             <option value="">Unclassified</option>
-            {groupedLectures.map(([blockName, blockLectures]) => (
-              <optgroup key={blockName} label={blockName}>
-                {blockLectures.map((lecture) => (
+            {groupedLectures.map((group) => (
+              <optgroup key={`${group.subject}-${group.block}`} label={`${group.subject} · ${group.block}`}>
+                {group.lectures.map((lecture) => (
                   <option key={lecture.id} value={lecture.id}>
                     {lecture.title}
                   </option>

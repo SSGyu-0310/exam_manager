@@ -34,6 +34,9 @@ class RuntimeConfig:
         default_factory=lambda: {"png", "jpg", "jpeg", "gif"}
     )
 
+    # JWT
+    jwt_secret_key: str = "dev-jwt-secret-key"
+
     # AI/Gemini
     gemini_api_key: Optional[str] = None
     gemini_model_name: str = "gemini-2.0-flash-lite"

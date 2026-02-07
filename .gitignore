@@ -11,6 +11,7 @@ env/
 
 # Environment / secrets
 .env
+.env.docker
 .env.local
 
 # Databases and generated datasets
@@ -29,6 +30,7 @@ backups/
 data/cache/
 data/classifier_cache.json
 reports/
+parse_lab/
 
 # Uploaded assets
 app/static/uploads/*
@@ -39,6 +41,7 @@ app/static/uploads_admin/*
 # IDE / OS
 .vscode/
 .idea/
+.agent/
 .DS_Store
 Thumbs.db
 
@@ -48,3 +51,4 @@ Thumbs.db
 **/.next/
 **/.turbo/
 **/*.log
+next_app/[A-Za-z]:*

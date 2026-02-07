@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { apiFetch, HttpError } from "@/lib/http";
@@ -89,7 +89,7 @@ const createSession = async (
   return { sessionId: null, error: lastError ?? null, unsupported };
 };
 
-export default function PracticeStartPage() {
+function PracticeStartContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const lectureIdParam = searchParams.get("lectureId");
@@ -304,5 +304,14 @@ export default function PracticeStartPage() {
         )}
       </div>
     </div>
+  );
+
+}
+
+export default function PracticeStartPage() {
+  return (
+    <Suspense fallback={<div className="min-h-[70vh] flex items-center justify-center">Loading...</div>}>
+      <PracticeStartContent />
+    </Suspense>
   );
 }

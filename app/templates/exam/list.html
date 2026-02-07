@@ -146,10 +146,11 @@
         {% else %}
         <div class="empty-state">
             <p>등록된 시험이 없습니다.</p>
-            <a href="{{ url_for('manage.upload_csv') }}" class="btn btn-primary" style="margin-top: 1rem;">CSV 업로드하기</a>
+            <a href="{{ url_for('manage.upload_pdf') }}" class="btn btn-primary" style="margin-top: 1rem;">PDF 업로드하기</a>
         </div>
         {% endif %}
     </div>
+    <script src="{{ url_for('static', filename='js/duck_quack.js') }}"></script>
 </body>
 
 </html>

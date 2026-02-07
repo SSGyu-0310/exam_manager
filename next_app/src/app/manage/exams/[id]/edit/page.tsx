@@ -1,5 +1,6 @@
 import { getExamDetail } from "@/lib/api/manage";
 import { ExamForm } from "@/components/manage/ExamForm";
+import { ExamEditHeader } from "@/components/manage/ExamEditHeader";
 import { Card, CardContent } from "@/components/ui/card";
 
 type PageProps = {
@@ -12,12 +13,10 @@ export default async function ManageExamEditPage({ params }: PageProps) {
     const data = await getExamDetail(id);
     return (
       <div className="space-y-6">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
-            Exams
-          </p>
-          <h2 className="text-2xl font-semibold text-foreground">Edit exam</h2>
-        </div>
+        <ExamEditHeader
+          examTitle={data.exam.title}
+          questionCount={data.exam.questionCount ?? data.questions.length}
+        />
         <ExamForm initial={data.exam} />
       </div>
     );

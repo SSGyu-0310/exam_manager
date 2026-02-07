@@ -56,17 +56,17 @@
 
     <script>
         // 여러 방법으로 부모 창 새로고침 시도
+        // 방법 1: localStorage 시그널 (부모 창에서 감지)
+        localStorage.setItem('practice_edit_complete', Date.now().toString());
+
+        // 방법 2: postMessage로 부모창에 즉시 알림
         try {
-            // 방법 1: window.opener 사용
             if (window.opener && !window.opener.closed) {
-                window.opener.location.reload();
+                window.opener.postMessage({ type: 'practice_edit_complete' }, '*');
             }
         } catch (e) {
-            console.log('window.opener 접근 실패:', e);
+            console.log('postMessage 실패:', e);
         }
-
-        // 방법 2: localStorage 시그널 (부모 창에서 감지)
-        localStorage.setItem('practice_edit_complete', Date.now().toString());
 
         // 0.5초 후 창 닫기
         setTimeout(function () {
@@ -77,6 +77,7 @@
             }, 500);
         }, 500);
     </script>
+    <script src="{{ url_for('static', filename='js/duck_quack.js') }}"></script>
 </body>
 
 </html>

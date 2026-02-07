@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from sqlalchemy import func, case
+
 from app import db
 from app.models import Block, Lecture, PreviousExam, Question, Choice
 from app.services.folder_scope import (
@@ -15,19 +17,45 @@ from app.services.folder_scope import (
     resolve_folder_ids,
     resolve_lecture_ids,
 )
-from app.services.exam_cleanup import delete_exam_with_assets
 from app.services.markdown_images import strip_markdown_images
 from app.services.db_guard import guard_write_request
+from app.services.user_scope import scope_model, scope_query
 
 
-def get_dashboard_stats() -> dict:
+def get_dashboard_stats(user) -> dict:
     """Get dashboard statistics."""
+    block_query = scope_model(Block, user, include_public=True)
+    lecture_query = scope_model(Lecture, user, include_public=True)
+    exam_query = scope_model(PreviousExam, user)
+    question_query = scope_model(Question, user)
+    recent_exams = exam_query.order_by(PreviousExam.created_at.desc()).limit(5).all()
+    exam_ids = [exam.id for exam in recent_exams]
+    exam_counts = {}
+    if exam_ids:
+        rows = (
+            scope_query(Question.query, Question, user)
+            .with_entities(
+                Question.exam_id,
+                func.count(Question.id),
+                func.sum(case((Question.is_classified.is_(True), 1), else_=0)),
+            )
+            .filter(Question.exam_id.in_(exam_ids))
+            .group_by(Question.exam_id)
+            .all()
+        )
+        for exam_id, total, classified in rows:
+            total_count = int(total or 0)
+            classified_count = int(classified or 0)
+            exam_counts[exam_id] = {
+                "total": total_count,
+                "unclassified": max(total_count - classified_count, 0),
+            }
     return {
-        "block_count": Block.query.count(),
-        "lecture_count": Lecture.query.count(),
-        "exam_count": PreviousExam.query.count(),
-        "question_count": Question.query.count(),
-        "unclassified_count": Question.query.filter_by(is_classified=False).count(),
+        "block_count": block_query.count(),
+        "lecture_count": lecture_query.count(),
+        "exam_count": exam_query.count(),
+        "question_count": question_query.count(),
+        "unclassified_count": question_query.filter_by(is_classified=False).count(),
         "recent_exams": [
             {
                 "id": e.id,
@@ -35,12 +63,10 @@ def get_dashboard_stats() -> dict:
                 "subject": e.subject,
                 "year": e.year,
                 "term": e.term,
-                "question_count": e.question_count,
-                "unclassified_count": e.unclassified_count,
+                "question_count": exam_counts.get(e.id, {}).get("total", 0),
+                "unclassified_count": exam_counts.get(e.id, {}).get("unclassified", 0),
             }
-            for e in PreviousExam.query.order_by(PreviousExam.created_at.desc())
-            .limit(5)
-            .all()
+            for e in recent_exams
         ],
     }
 
@@ -90,9 +116,36 @@ def delete_block(block_id: int) -> bool:
     block = Block.query.get(block_id)
     if not block:
         return False
+    fallback_block = _get_or_create_unassigned_block(block.user_id)
+    Lecture.query.filter_by(block_id=block.id).update(
+        {"block_id": fallback_block.id, "folder_id": None}
+    )
     db.session.delete(block)
     db.session.commit()
     return True
+
+
+def _get_or_create_unassigned_block(user_id: Optional[int]):
+    fallback_name = "미지정"
+    query = Block.query.filter(Block.name == fallback_name, Block.subject.is_(None))
+    if user_id is None:
+        query = query.filter(Block.user_id.is_(None))
+    else:
+        query = query.filter(Block.user_id == user_id)
+    block = query.first()
+    if block:
+        return block
+    block = Block(
+        name=fallback_name,
+        subject=None,
+        subject_id=None,
+        description=None,
+        order=0,
+        user_id=user_id,
+    )
+    db.session.add(block)
+    db.session.flush()
+    return block
 
 
 def get_lecture_details(lecture_id: int) -> Optional[dict]:
@@ -174,85 +227,6 @@ def delete_lecture(lecture_id: int) -> bool:
     db.session.commit()
     return True
 
-
-def get_exam_details(exam_id: int) -> Optional[dict]:
-    """Get exam details with related data."""
-    exam = PreviousExam.query.get(exam_id)
-    if not exam:
-        return None
-
-    return {
-        "id": exam.id,
-        "block_id": exam.block_id,
-        "folder_id": exam.folder_id,
-        "title": exam.title,
-        "subject": exam.subject,
-        "year": exam.year,
-        "professor": exam.professor,
-        "order": exam.order,
-        "description": exam.description,
-        "question_count": exam.question_count,
-        "created_at": exam.created_at.isoformat() if exam.created_at else None,
-        "updated_at": exam.updated_at.isoformat() if exam.updated_at else None,
-    }
-
-
-def create_exam(
-    block_id: int,
-    folder_id: Optional[int],
-    title: str,
-    subject: str,
-    year: int,
-    professor: Optional[str],
-    order: int,
-    description: Optional[str],
-) -> PreviousExam:
-    """Create a new exam."""
-    exam = PreviousExam(
-        block_id=block_id,
-        folder_id=folder_id,
-        title=title,
-        subject=subject,
-        year=year,
-        professor=professor,
-        order=order,
-        description=description,
-    )
-    db.session.add(exam)
-    db.session.commit()
-    return exam
-
-
-def update_exam(
-    exam_id: int,
-    block_id: int,
-    folder_id: Optional[int],
-    title: str,
-    subject: str,
-    year: int,
-    professor: Optional[str],
-    order: int,
-    description: Optional[str],
-) -> Optional[PreviousExam]:
-    """Update an existing exam."""
-    exam = PreviousExam.query.get(exam_id)
-    if not exam:
-        return None
-    exam.block_id = block_id
-    exam.folder_id = folder_id
-    exam.title = title
-    exam.subject = subject
-    exam.year = year
-    exam.professor = professor
-    exam.order = order
-    exam.description = description
-    db.session.commit()
-    return exam
-
-
-def delete_exam(exam_id: int) -> bool:
-    """Delete an exam and its assets."""
-    return delete_exam_with_assets(exam_id)
 
 
 def get_question_details(question_id: int) -> Optional[dict]:

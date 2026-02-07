@@ -1,9 +1,8 @@
-import Link from "next/link";
-
 import { getExamDetail } from "@/lib/api/manage";
+import { composeExamTitle } from "@/lib/examTitle";
 import { ExamQuestionTable } from "@/components/exam/ExamQuestionTable";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { ExamEditButton } from "@/components/manage/ExamEditButton";
 import { Card, CardContent } from "@/components/ui/card";
 
 type PageProps = {
@@ -25,16 +24,18 @@ export default async function ManageExamDetailPage({ params }: PageProps) {
             </p>
             <h2 className="text-2xl font-semibold text-foreground">{exam.title}</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              {[exam.subject, exam.term, exam.examDate].filter(Boolean).join(" · ")}
+              {composeExamTitle({
+                subject: exam.subject,
+                year: exam.year,
+                term: exam.term,
+              })}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <Badge variant="neutral">{exam.questionCount ?? 0} questions</Badge>
             <Badge variant="success">{exam.classifiedCount ?? 0} classified</Badge>
             <Badge variant="danger">{exam.unclassifiedCount ?? 0} unclassified</Badge>
-            <Button size="sm" asChild>
-              <Link href={`/manage/exams/${exam.id}/edit`}>Edit exam</Link>
-            </Button>
+            <ExamEditButton examId={exam.id} />
           </div>
         </div>
 

@@ -11,26 +11,29 @@ import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
 
-def _resolve_db_path(db_arg: str | None) -> Path:
+def _resolve_db_uri(db_arg: str | None) -> str:
     if db_arg:
-        return Path(db_arg)
+        if "://" in db_arg:
+            return db_arg
+        return f"sqlite:///{Path(db_arg).resolve()}"
 
-    from config import Config
+    from config import get_config
 
-    uri = Config.SQLALCHEMY_DATABASE_URI
+    return str(get_config().runtime.db_uri)
+
+
+def _sqlite_path_from_uri(uri: str) -> Path:
     if uri.startswith("sqlite:///"):
         return Path(uri.replace("sqlite:///", "", 1))
     if uri.startswith("sqlite://"):
         return Path(uri.replace("sqlite://", "", 1))
-    parsed = urlparse(uri)
-    return Path(parsed.path)
+    raise RuntimeError("backup_db.py only supports SQLite databases.")
 
 
 def _backup_path(db_path: Path, backup_dir: Path) -> Path:
@@ -79,7 +82,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    db_path = _resolve_db_path(args.db)
+    db_uri = _resolve_db_uri(args.db)
+    db_path = _sqlite_path_from_uri(db_uri)
     backup_dir = Path(args.backup_dir)
     backup_path = hot_backup(db_path, backup_dir, args.keep)
     print(f"Backup created: {backup_path}")

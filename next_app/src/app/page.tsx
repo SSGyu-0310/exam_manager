@@ -1,48 +1,49 @@
-export default function Home() {
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
+import { useLanguage } from "@/context/LanguageContext";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
+
+export default function LandingPage() {
+  const { isAuthenticated, isLoading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      router.push("/dashboard");
+    }
+  }, [isAuthenticated, isLoading, router]);
+
+  const { t } = useLanguage();
+
+  if (isLoading) {
+    return <div className="flex h-screen items-center justify-center">{t("common.loading")}</div>;
+  }
+
   return (
-    <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-      <div className="rounded-2xl border border-border/70 bg-card p-8 shadow-soft">
-        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Exam Manager</p>
-        <h2 className="mt-3 text-3xl font-semibold leading-tight text-foreground">
-          Built for rapid lecture curation and exam delivery.
-        </h2>
-        <p className="mt-4 text-sm text-muted-foreground">
-          Move through blocks, lectures, exams, and unclassified queues with a single
-          navigation spine. This shell will host the new Next.js admin flows.
+    <div className="flex min-h-[80vh] flex-col items-center justify-center space-y-8 text-center">
+      <div className="space-y-4">
+        <h1 className="text-4xl font-bold tracking-tight sm:text-6xl">
+          {t("landing.title")}
+        </h1>
+        <p className="mx-auto max-w-2xl text-lg text-muted-foreground">
+          {t("landing.subtitle")}
         </p>
-        <div className="mt-6 flex flex-wrap gap-3">
-          <a
-            className="inline-flex h-11 items-center justify-center rounded-md bg-primary px-5 text-sm font-semibold text-primary-foreground shadow-soft"
-            href="/manage"
-          >
-            Go to Dashboard
-          </a>
-          <a
-            className="inline-flex h-11 items-center justify-center rounded-md border border-border bg-card px-5 text-sm font-semibold text-foreground"
-            href="/lectures"
-          >
-            Practice Library
-          </a>
-        </div>
       </div>
-      <div className="rounded-2xl border border-border/70 bg-muted/70 p-6 text-sm text-muted-foreground shadow-soft">
-        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-          Migration Status
-        </p>
-        <ul className="mt-4 space-y-3">
-          <li className="flex items-start gap-2">
-            <span className="mt-1 h-2 w-2 rounded-full bg-success" />
-            App shell, tokens, and core UI components are in place.
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="mt-1 h-2 w-2 rounded-full bg-warning" />
-            Read-only admin screens are next (blocks, lectures, exams).
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="mt-1 h-2 w-2 rounded-full bg-danger" />
-            CRUD, PDF upload, and AI flows will follow in Phase 3+.
-          </li>
-        </ul>
+      <div className="flex gap-4">
+        <Link href="/login">
+          <Button size="lg" className="min-w-[120px]">
+            {t("landing.loginButton")}
+          </Button>
+        </Link>
+        <Link href="/register">
+          <Button size="lg" variant="outline" className="min-w-[120px]">
+            {t("landing.signupButton")}
+          </Button>
+        </Link>
       </div>
     </div>
   );

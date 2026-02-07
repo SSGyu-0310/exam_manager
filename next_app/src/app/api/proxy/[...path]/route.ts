@@ -19,13 +19,22 @@ async function handler(request: NextRequest, params: Promise<{ path: string[] }>
     body = await request.arrayBuffer();
   }
 
-  let upstream: Response;
   try {
-    upstream = await fetch(targetUrl, {
+    const upstream = await fetch(targetUrl, {
       method: request.method,
       headers,
       body,
       redirect: "manual",
+    });
+
+    const responseHeaders = new Headers(upstream.headers);
+    responseHeaders.delete("content-encoding");
+    responseHeaders.delete("content-length");
+    responseHeaders.delete("transfer-encoding");
+
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers: responseHeaders,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Upstream request failed";
@@ -34,16 +43,6 @@ async function handler(request: NextRequest, params: Promise<{ path: string[] }>
       { status: 502, headers: { "content-type": "application/json" } }
     );
   }
-
-  const responseHeaders = new Headers(upstream.headers);
-  responseHeaders.delete("content-encoding");
-  responseHeaders.delete("content-length");
-  responseHeaders.delete("transfer-encoding");
-
-  return new Response(upstream.body, {
-    status: upstream.status,
-    headers: responseHeaders,
-  });
 }
 
 export async function GET(

@@ -16,6 +16,10 @@ def _resolve_db_path(db_uri: str) -> Path:
     return Path(parsed.path)
 
 
+def _is_sqlite_uri(db_uri: str) -> bool:
+    return db_uri.startswith("sqlite://")
+
+
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     row = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?",
@@ -46,6 +50,8 @@ def _fetch_applied(conn: sqlite3.Connection) -> Dict[str, str]:
 def detect_pending_migrations(
     db_uri: str, migrations_dir: Path
 ) -> Tuple[List[str], List[str]]:
+    if not _is_sqlite_uri(db_uri):
+        return [], []
     db_path = _resolve_db_path(db_uri)
     if not db_path.exists():
         return [], []
@@ -79,6 +85,9 @@ def check_pending_migrations(
     logger,
     fail_on_pending: bool,
 ) -> None:
+    if not _is_sqlite_uri(db_uri):
+        logger.info("Non-SQLite DB detected; skipping migration check.")
+        return
     db_path = _resolve_db_path(db_uri)
     if not db_path.exists():
         logger.warning("SQLite DB not found; skipping migration check: %s", db_path)

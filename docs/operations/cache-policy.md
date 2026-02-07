@@ -124,7 +124,7 @@ rm -f data/classifier_cache.json
 rm -rf data/cache/*
 
 # 새 캐시 생성 후 실행
-python run.py
+./scripts/dc restart api
 ```
 
 ### 3. 평가 스크립트와 캐시
