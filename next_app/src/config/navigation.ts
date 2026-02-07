@@ -52,7 +52,7 @@ export const SIDEBAR_NAV: Record<NavContext, NavItem[]> = {
     manage: [
         { label: "Blocks & Lectures", key: "sidebar.blockLectures", href: "/manage", icon: Library },
         { label: "Uploaded Exams", key: "sidebar.uploadedExams", href: "/manage/exams", icon: Upload },
-        { label: "Classifications", key: "sidebar.classifications", href: "/manage/unclassified", icon: LayoutGrid },
+        { label: "Classifications", key: "sidebar.classifications", href: "/manage/classifications", icon: LayoutGrid },
         { label: "Settings", key: "common.settings", href: "/manage/settings", icon: Settings },
     ],
 };

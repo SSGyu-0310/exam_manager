@@ -170,6 +170,16 @@ const uploadPdfSchema = z.object({
   choiceCount: z.number(),
 });
 
+const uploadLectureMaterialSchema = z.object({
+  materialId: z.number(),
+  originalFilename: z.string().nullable().optional(),
+  status: z.string().nullable().optional(),
+  chunks: z.number().optional(),
+  pages: z.number().optional(),
+  uploadedAt: z.string().nullable().optional(),
+  indexedAt: z.string().nullable().optional(),
+});
+
 const okResponse = <T extends z.ZodTypeAny>(schema: T) =>
   z.object({ ok: z.literal(true), data: schema });
 
@@ -181,6 +191,7 @@ export type ManageQuestion = z.infer<typeof questionSchema>;
 export type ManageChoice = z.infer<typeof choiceSchema>;
 export type ManageQuestionDetail = z.infer<typeof questionDetailSchema>;
 export type UploadPdfResult = z.infer<typeof uploadPdfSchema>;
+export type UploadLectureMaterialResult = z.infer<typeof uploadLectureMaterialSchema>;
 export type ManageBlockWorkspace = z.infer<typeof blockWorkspaceSchema>;
 export type ManageLectureDetail = z.infer<typeof lectureDetailSchema>;
 export type ManageMaterial = z.infer<typeof materialSchema>;
@@ -409,6 +420,20 @@ export async function uploadPdf(formData: FormData) {
     body: formData,
   });
   return okResponse(uploadPdfSchema).parse(payload).data;
+}
+
+export async function uploadLectureMaterial(
+  lectureId: string | number,
+  formData: FormData
+) {
+  const payload = await apiFetch<unknown>(
+    `/api/manage/lectures/${encodeURIComponent(String(lectureId))}/materials`,
+    {
+      method: "POST",
+      body: formData,
+    }
+  );
+  return okResponse(uploadLectureMaterialSchema).parse(payload).data;
 }
 
 export async function getExams() {

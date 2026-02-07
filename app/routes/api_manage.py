@@ -4,6 +4,7 @@ from datetime import datetime
 
 import os
 import shutil
+from pathlib import Path
 
 from flask import Blueprint, request, jsonify, current_app, abort, url_for
 from sqlalchemy import func, case
@@ -192,6 +193,13 @@ def _parse_year(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _resolve_upload_folder() -> Path:
+    upload_folder = current_app.config.get("UPLOAD_FOLDER")
+    if not upload_folder:
+        upload_folder = Path(current_app.static_folder) / "uploads"
+    return Path(upload_folder)
 
 
 def _compose_exam_title(subject=None, year=None, term=None, fallback=None):
@@ -877,6 +885,92 @@ def get_lecture_detail(lecture_id):
         "questions": questions_payload,
         "materials": materials_payload,
     })
+
+
+@api_manage_bp.post("/lectures/<int:lecture_id>/materials")
+def upload_lecture_material(lecture_id):
+    user = current_user()
+    lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
+    if not lecture:
+        return error_response("Lecture not found.", code="LECTURE_NOT_FOUND", status=404)
+    edit_error = _ensure_editable(lecture, user, "Public lectures are read-only.")
+    if edit_error:
+        return edit_error
+
+    if "pdf_file" not in request.files:
+        return error_response("PDF file is required.", code="PDF_REQUIRED", status=400)
+
+    file = request.files["pdf_file"]
+    if file.filename == "":
+        return error_response(
+            "PDF filename is missing.", code="PDF_NAME_REQUIRED", status=400
+        )
+    if not file.filename.lower().endswith(".pdf"):
+        return error_response(
+            "Only PDF files are allowed.", code="PDF_INVALID_TYPE", status=400
+        )
+
+    upload_folder = _resolve_upload_folder()
+    target_dir = upload_folder / "lecture_notes" / str(lecture.id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    original_name = Path(file.filename).name
+    safe_name = secure_filename(original_name)
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    stored_name = f"{timestamp}_{safe_name or 'lecture_note.pdf'}"
+    stored_path = target_dir / stored_name
+    material = None
+
+    try:
+        file.save(stored_path)
+
+        relative_path = os.path.relpath(stored_path, upload_folder)
+        relative_path = Path(relative_path).as_posix()
+
+        material = LectureMaterial(
+            lecture_id=lecture.id,
+            file_path=relative_path,
+            original_filename=original_name,
+            status=LectureMaterial.STATUS_UPLOADED,
+        )
+        db.session.add(material)
+        db.session.commit()
+
+        from app.services.lecture_indexer import index_material
+
+        index_result = index_material(material)
+        chunk_count = LectureChunk.query.filter_by(material_id=material.id).count()
+        return ok(
+            {
+                "materialId": material.id,
+                "originalFilename": material.original_filename,
+                "status": material.status,
+                "chunks": chunk_count,
+                "pages": index_result.get("pages", 0),
+                "uploadedAt": material.uploaded_at.isoformat()
+                if material.uploaded_at
+                else None,
+                "indexedAt": material.indexed_at.isoformat()
+                if material.indexed_at
+                else None,
+            },
+            status=201,
+        )
+    except Exception as exc:
+        if material is None:
+            db.session.rollback()
+            try:
+                stored_path.unlink(missing_ok=True)
+            except OSError:
+                current_app.logger.warning("Failed to cleanup %s", stored_path)
+        current_app.logger.exception(
+            "Lecture material upload/indexing failed for lecture_id=%s", lecture_id
+        )
+        return error_response(
+            f"Lecture material indexing failed: {exc}",
+            code="LECTURE_MATERIAL_INDEX_FAILED",
+            status=500,
+        )
 
 
 @api_manage_bp.get("/lectures")

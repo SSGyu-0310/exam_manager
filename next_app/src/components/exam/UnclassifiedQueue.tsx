@@ -11,6 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { TableRow } from "@/components/ui/table-row";
+import { useLanguage } from "@/context/LanguageContext";
 
 type AiStatus = {
   jobId?: number;
@@ -52,6 +53,7 @@ const extractQuestionIds = (grouped: unknown[]) => {
 };
 
 export function UnclassifiedQueue() {
+  const { t } = useLanguage();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<UnclassifiedQuestion[]>([]);
@@ -81,7 +83,7 @@ export function UnclassifiedQueue() {
       setExams(data.exams);
       setSelected(new Set());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to load queue.");
+      setError(err instanceof Error ? err.message : t("classifications.errorLoadQueue"));
     } finally {
       setLoading(false);
     }
@@ -112,12 +114,12 @@ export function UnclassifiedQueue() {
     const flat: { id: number; label: string }[] = [];
     blocks.forEach((block) => {
       block.lectures.forEach((lecture) => {
-        const subject = block.subject ?? "Unassigned";
+        const subject = block.subject ?? t("classifications.unassigned");
         flat.push({ id: lecture.id, label: `${subject} · ${block.name} · ${lecture.title}` });
       });
     });
     return flat;
-  }, [blocks]);
+  }, [blocks, t]);
 
   const toggleSelected = (id: number) => {
     setSelected((prev) => {
@@ -152,7 +154,7 @@ export function UnclassifiedQueue() {
       setSelected(new Set());
       await loadQueue();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Bulk classify failed.");
+      setError(err instanceof Error ? err.message : t("classifications.errorBulkClassify"));
     }
   };
 
@@ -169,7 +171,7 @@ export function UnclassifiedQueue() {
       setSelected(new Set());
       await loadQueue();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Reset failed.");
+      setError(err instanceof Error ? err.message : t("classifications.errorBulkReset"));
     }
   };
 
@@ -187,13 +189,13 @@ export function UnclassifiedQueue() {
       setSelected(new Set());
       await loadQueue();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Move failed.");
+      setError(err instanceof Error ? err.message : t("classifications.errorBulkMove"));
     }
   };
 
   const startAiClassification = async () => {
     if (!selected.size) {
-      setError("Select questions before starting AI.");
+      setError(t("classifications.errorSelectFirst"));
       return;
     }
     try {
@@ -208,11 +210,11 @@ export function UnclassifiedQueue() {
         body: JSON.stringify({ question_ids: Array.from(selected) }),
       });
       if (!response.success || !response.job_id) {
-        throw new Error(response.error || "AI start failed.");
+        throw new Error(response.error || t("classifications.errorAiStart"));
       }
       setAiStatus({ jobId: response.job_id, status: response.status, error: null });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "AI start failed.");
+      setError(err instanceof Error ? err.message : t("classifications.errorAiStart"));
     }
   };
 
@@ -253,7 +255,7 @@ export function UnclassifiedQueue() {
       } catch (err) {
         setAiStatus((prev) => ({
           ...prev,
-          error: err instanceof Error ? err.message : "AI polling failed.",
+          error: err instanceof Error ? err.message : t("classifications.errorAiPolling"),
         }));
       }
     };
@@ -266,7 +268,7 @@ export function UnclassifiedQueue() {
     if (!aiStatus.jobId || !aiStatus.groupedResults) return;
     const ids = extractQuestionIds(aiStatus.groupedResults);
     if (!ids.length) {
-      setError("No AI results to apply.");
+      setError(t("classifications.errorNoAiResults"));
       return;
     }
     try {
@@ -277,7 +279,7 @@ export function UnclassifiedQueue() {
       });
       await loadQueue();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Apply failed.");
+      setError(err instanceof Error ? err.message : t("classifications.errorApply"));
     }
   };
 
@@ -289,23 +291,23 @@ export function UnclassifiedQueue() {
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex-1">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                  Filters
+                  {t("classifications.filters")}
                 </p>
                 <Input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search content..."
+                  placeholder={t("classifications.searchPlaceholder")}
                 />
               </div>
               <div className="min-w-[180px]">
                 <Select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | "unclassified")}>
-                  <option value="unclassified">Unclassified</option>
-                  <option value="all">All</option>
+                  <option value="unclassified">{t("classifications.statusUnclassified")}</option>
+                  <option value="all">{t("classifications.statusAll")}</option>
                 </Select>
               </div>
               <div className="min-w-[200px]">
                 <Select value={examFilter} onChange={(event) => setExamFilter(event.target.value)}>
-                  <option value="">All exams</option>
+                  <option value="">{t("classifications.allExams")}</option>
                   {exams.map((exam) => (
                     <option key={exam.id} value={exam.id}>
                       {exam.title}
@@ -320,7 +322,7 @@ export function UnclassifiedQueue() {
                   value={targetLecture}
                   onChange={(event) => setTargetLecture(event.target.value)}
                 >
-                  <option value="">Select lecture</option>
+                  <option value="">{t("classifications.selectLecture")}</option>
                   {lectures.map((lecture) => (
                     <option key={lecture.id} value={lecture.id}>
                       {lecture.label}
@@ -328,15 +330,15 @@ export function UnclassifiedQueue() {
                   ))}
                 </Select>
               </div>
-              <Badge variant="neutral">Selected {selected.size}</Badge>
+              <Badge variant="neutral">{t("classifications.selected")} {selected.size}</Badge>
               <Button onClick={handleBulkClassify} disabled={!selected.size || !targetLecture}>
-                Classify selected
+                {t("classifications.classifySelected")}
               </Button>
               <Button variant="outline" onClick={handleBulkMove} disabled={!selected.size || !targetLecture}>
-                Move selected
+                {t("classifications.moveSelected")}
               </Button>
               <Button variant="outline" onClick={handleBulkReset} disabled={!selected.size}>
-                Reset selected
+                {t("classifications.resetSelected")}
               </Button>
             </div>
           </CardContent>
@@ -345,40 +347,40 @@ export function UnclassifiedQueue() {
         <Card className="border border-border/70 bg-card/85 shadow-soft">
           <CardContent className="space-y-4 p-5">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-              AI classification
+              {t("classifications.aiClassification")}
             </p>
             <div className="space-y-2 text-sm text-muted-foreground">
-              <p>Selected: {selected.size}</p>
+              <p>{t("classifications.selected")}: {selected.size}</p>
               {aiStatus.status && (
                 <p>
-                  Status: {aiStatus.status}{" "}
+                  {t("classifications.status")}: {aiStatus.status}{" "}
                   {typeof aiStatus.progress === "number" ? `(${aiStatus.progress}%)` : ""}
                 </p>
               )}
               {aiStatus.summary && (
                 <p>
-                  Summary: {aiStatus.summary.success}/{aiStatus.summary.total} success,{" "}
-                  {aiStatus.summary.failed} failed
+                  {t("classifications.summary")}: {aiStatus.summary.success}/{aiStatus.summary.total} {t("classifications.success")},{" "}
+                  {aiStatus.summary.failed} {t("classifications.failed")}
                 </p>
               )}
               {aiStatus.error && <p className="text-danger">{aiStatus.error}</p>}
             </div>
             <div className="flex flex-wrap gap-2">
               <Button onClick={startAiClassification} disabled={!selected.size}>
-                Start AI
+                {t("classifications.startAi")}
               </Button>
               <Button
                 variant="outline"
                 onClick={applyAiResults}
                 disabled={!aiStatus.groupedResults?.length}
               >
-                Apply AI results
+                {t("classifications.applyAiResults")}
               </Button>
             </div>
             {recentJobs.length > 0 && (
               <div className="rounded-2xl border border-border/70 bg-muted/60 p-3 text-xs text-muted-foreground">
                 <p className="font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                  Recent jobs
+                  {t("classifications.recentJobs")}
                 </p>
                 <div className="mt-2 space-y-1">
                   {recentJobs.map((job) => (
@@ -408,24 +410,24 @@ export function UnclassifiedQueue() {
                 <th className="px-5 py-3">
                   <input type="checkbox" checked={selected.size === items.length && items.length > 0} onChange={toggleAll} />
                 </th>
-                <th className="px-5 py-3">Exam</th>
-                <th className="px-5 py-3">Question</th>
-                <th className="px-5 py-3">Snippet</th>
-                <th className="px-5 py-3">Lecture</th>
-                <th className="px-5 py-3">Status</th>
+                <th className="px-5 py-3">{t("classifications.tableExam")}</th>
+                <th className="px-5 py-3">{t("classifications.tableQuestion")}</th>
+                <th className="px-5 py-3">{t("classifications.tableSnippet")}</th>
+                <th className="px-5 py-3">{t("classifications.tableLecture")}</th>
+                <th className="px-5 py-3">{t("classifications.tableStatus")}</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <TableRow>
                   <td className="px-5 py-4 text-muted-foreground" colSpan={6}>
-                    Loading...
+                    {t("classifications.loading")}
                   </td>
                 </TableRow>
               ) : items.length === 0 ? (
                 <TableRow>
                   <td className="px-5 py-4 text-muted-foreground" colSpan={6}>
-                    No questions found.
+                    {t("classifications.noQuestions")}
                   </td>
                 </TableRow>
               ) : (
@@ -451,14 +453,14 @@ export function UnclassifiedQueue() {
                       {item.lectureTitle ? (
                         <span className="text-foreground">{item.lectureTitle}</span>
                       ) : (
-                        <span className="text-muted-foreground">Unclassified</span>
+                        <span className="text-muted-foreground">{t("classifications.unclassified")}</span>
                       )}
                     </td>
                     <td className="px-5 py-4">
                       {item.isClassified ? (
-                        <Badge variant="success">Classified</Badge>
+                        <Badge variant="success">{t("classifications.classified")}</Badge>
                       ) : (
-                        <Badge variant="danger">Unclassified</Badge>
+                        <Badge variant="danger">{t("classifications.unclassified")}</Badge>
                       )}
                     </td>
                   </TableRow>

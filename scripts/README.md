@@ -25,3 +25,4 @@ Example:
 - `scripts/backup_db.py`
 - `scripts/clone_db.py`
 - `scripts/compare_db_counts.py`
+- `scripts/validate_pdf_parser_manifest.py`: PDF 파서 결과를 체크표(expected/uploaded)와 비교

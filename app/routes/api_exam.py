@@ -150,16 +150,29 @@ def list_unclassified():
         .order_by(*block_ordering())
         .all()
     )
+    block_ids = [block.id for block in blocks]
     exams = scope_model(PreviousExam, user).order_by(
         PreviousExam.created_at.desc()
     ).all()
     block_lecture_counts, block_question_counts = _build_block_counts(
-        [block.id for block in blocks], user
+        block_ids, user
     )
     exam_counts = _build_exam_counts([exam.id for exam in exams], user)
     unclassified_count = scope_query(Question.query, Question, user).filter_by(
         is_classified=False
     ).count()
+    lectures_by_block = {block_id: [] for block_id in block_ids}
+    if block_ids:
+        lecture_rows = (
+            scope_model(Lecture, user, include_public=True)
+            .filter(Lecture.block_id.in_(block_ids))
+            .order_by(Lecture.block_id, Lecture.order, Lecture.id)
+            .all()
+        )
+        for lecture in lecture_rows:
+            lectures_by_block.setdefault(lecture.block_id, []).append(
+                {"id": lecture.id, "title": lecture.title}
+            )
 
     candidate_lectures = None
     if lecture_ids is not None:
@@ -191,7 +204,12 @@ def list_unclassified():
             "limit": limit,
             "unclassifiedCount": unclassified_count,
             "blocks": [
-                _block_payload(block, block_lecture_counts, block_question_counts)
+                {
+                    **_block_payload(
+                        block, block_lecture_counts, block_question_counts
+                    ),
+                    "lectures": lectures_by_block.get(block.id, []),
+                }
                 for block in blocks
             ],
             "exams": [_exam_payload(exam, exam_counts) for exam in exams],

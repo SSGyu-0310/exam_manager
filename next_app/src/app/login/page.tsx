@@ -30,7 +30,8 @@ function LoginForm() {
                 await login();
                 // Redirect to the originally requested page or dashboard
                 const from = searchParams.get('from') || '/dashboard';
-                router.push(from);
+                router.replace(from);
+                router.refresh();
             } else {
                 const data = await res.json();
                 setError(data.msg || 'Login failed');

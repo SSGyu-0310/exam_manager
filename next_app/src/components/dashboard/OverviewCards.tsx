@@ -114,7 +114,7 @@ export function OverviewCards() {
                     </div>
                 </CardContent>
                 <CardFooter className="mt-auto">
-                    <Link href="/manage/unclassified" className="w-full">
+                    <Link href="/exam/unclassified" className="w-full">
                         <Button variant="outline" className="w-full border-border hover:bg-muted text-foreground">
                             {t("dashboard.overviewGoToClassification")}
                         </Button>

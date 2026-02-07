@@ -164,12 +164,13 @@ Exam Manager의 기능을 Next.js 페이지, Flask 라우트/API, 서비스/모�
 
 | Description | Next.js | Flask UI | API | Service | Model |
 |-------------|-----------|-----------|------|---------|--------|
-| 노트 업로드/인덱싱 | - | `/manage/lecture/<id>` | - | `lecture_indexer` | `LectureMaterial`, `LectureChunk` |
+| 노트 업로드/인덱싱 | `/manage/lectures/[id]` | `/manage/lecture/<id>` | `POST /api/manage/lectures/<id>/materials` | `lecture_indexer` | `LectureMaterial`, `LectureChunk` |
 | FTS 검색 (내부) | - | - | - | `retrieval` | `LectureChunk` |
 
 **Files:**
-- Flask: `app/routes/manage.py` (lecture detail)
-- API: N/A (internal service use)
+- Next.js: `next_app/src/app/manage/lectures/[id]/page.tsx`
+- Flask: `app/routes/manage.py` (legacy lecture detail)
+- API: `app/routes/api_manage.py`
 - Services: `app/services/lecture_indexer.py`, `app/services/retrieval.py`
 - Model: `app/models.py` (LectureMaterial, LectureChunk)
 

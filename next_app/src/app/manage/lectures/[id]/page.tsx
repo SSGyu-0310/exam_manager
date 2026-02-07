@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ChangeEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, FileText, Hash, User, BookOpen, Pencil, Check, X } from "lucide-react";
+import { ArrowLeft, FileText, Hash, BookOpen, Pencil, Check, X } from "lucide-react";
 
 import {
   getLectureDetail,
+  uploadLectureMaterial,
   updateLecture,
   type ManageLectureDetail,
   type ManageLectureQuestion,
@@ -28,7 +29,10 @@ export default function LectureDetailPage() {
 
   const [data, setData] = useState<ManageLectureDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   // Inline editing
   const [editing, setEditing] = useState(false);
@@ -39,23 +43,29 @@ export default function LectureDetailPage() {
   // Question expansion
   const [expandedQ, setExpandedQ] = useState<Set<number>>(new Set());
 
-  useEffect(() => {
+  const loadLectureDetail = useCallback(async () => {
     if (!lectureId) return;
     setLoading(true);
-    getLectureDetail(lectureId)
-      .then((result) => {
-        setData(result);
-        setEditTitle(result.lecture.title);
-        setEditProfessor(result.lecture.professor ?? "");
-      })
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : "Unable to load lecture")
-      )
-      .finally(() => setLoading(false));
+    setLoadError(null);
+    try {
+      const result = await getLectureDetail(lectureId);
+      setData(result);
+      setEditTitle(result.lecture.title);
+      setEditProfessor(result.lecture.professor ?? "");
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Unable to load lecture");
+    } finally {
+      setLoading(false);
+    }
   }, [lectureId]);
+
+  useEffect(() => {
+    void loadLectureDetail();
+  }, [loadLectureDetail]);
 
   const handleSave = async () => {
     if (!data || !editTitle.trim()) return;
+    setActionError(null);
     setSaving(true);
     try {
       await updateLecture(data.lecture.id, {
@@ -72,7 +82,7 @@ export default function LectureDetailPage() {
       });
       setEditing(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to save");
+      setActionError(err instanceof Error ? err.message : "Unable to save");
     } finally {
       setSaving(false);
     }
@@ -87,6 +97,37 @@ export default function LectureDetailPage() {
     });
   };
 
+  const handleMaterialUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    const isPdf =
+      file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf) {
+      setActionError("Only PDF files are allowed.");
+      input.value = "";
+      return;
+    }
+
+    setActionError(null);
+    setUploadMessage(null);
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("pdf_file", file);
+      const result = await uploadLectureMaterial(lectureId, formData);
+      const indexedChunks = result.chunks ?? 0;
+      setUploadMessage(`Uploaded and indexed "${file.name}" (${indexedChunks} chunks).`);
+      await loadLectureDetail();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Unable to upload lecture PDF");
+    } finally {
+      setUploading(false);
+      input.value = "";
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-40 items-center justify-center text-muted-foreground">
@@ -95,14 +136,14 @@ export default function LectureDetailPage() {
     );
   }
 
-  if (error || !data) {
+  if (loadError || !data) {
     return (
       <Card className="border border-danger/30 bg-danger/10">
         <CardContent className="space-y-2 p-6">
           <p className="text-lg font-semibold text-foreground">
             Lecture unavailable
           </p>
-          <p className="text-sm text-muted-foreground">{error}</p>
+          <p className="text-sm text-muted-foreground">{loadError}</p>
         </CardContent>
       </Card>
     );
@@ -199,16 +240,46 @@ export default function LectureDetailPage() {
       </div>
 
       {/* Materials */}
-      {materials.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <FileText className="h-5 w-5" />
-              Lecture Materials
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {materials.map((m) => (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <FileText className="h-5 w-5" />
+            Lecture Materials
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-2">
+            <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              Upload PDF for indexing
+            </label>
+            <Input
+              type="file"
+              accept="application/pdf"
+              onChange={handleMaterialUpload}
+              disabled={uploading}
+            />
+            <p className="text-xs text-muted-foreground">
+              {uploading ? "Uploading and indexing..." : "New uploads are indexed immediately for AI classification."}
+            </p>
+          </div>
+
+          {uploadMessage && (
+            <div className="rounded border border-success/40 bg-success/10 px-3 py-2 text-sm text-success">
+              {uploadMessage}
+            </div>
+          )}
+          {actionError && (
+            <div className="rounded border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+              {actionError}
+            </div>
+          )}
+
+          {materials.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No materials uploaded yet.
+            </p>
+          ) : (
+            materials.map((m) => (
               <div
                 key={m.id}
                 className="flex items-center justify-between rounded border border-border/50 px-3 py-2"
@@ -225,10 +296,10 @@ export default function LectureDetailPage() {
                   </span>
                 </div>
               </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+            ))
+          )}
+        </CardContent>
+      </Card>
 
       {/* Questions */}
       <Card>
