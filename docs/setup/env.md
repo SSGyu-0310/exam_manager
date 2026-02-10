@@ -23,6 +23,7 @@ cp .env.docker.example .env.docker
 | `POSTGRES_USER` | Postgres user | `exam` |
 | `POSTGRES_DB` | Postgres database | `exam_manager` |
 | `CORS_ALLOWED_ORIGINS` | Allowed browser origins | `http://localhost:4000` |
+| `JWT_COOKIE_SECURE` | Force secure JWT cookie (`1` for HTTPS only) | `0` |
 | `NEXT_PUBLIC_SITE_URL` | Next base URL | `http://localhost:4000` |
 | `NEXT_PUBLIC_APP_URL` | Next base URL fallback | `http://localhost:4000` |
 | `GEMINI_API_KEY` | Enable AI features | unset |

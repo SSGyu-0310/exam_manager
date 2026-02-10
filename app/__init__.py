@@ -84,7 +84,7 @@ def create_app(
     app.config["JWT_TOKEN_LOCATION"] = ["headers", "cookies"]
     app.config["JWT_ACCESS_COOKIE_NAME"] = "auth_token"
     app.config["JWT_COOKIE_SAMESITE"] = "Lax"
-    app.config["JWT_COOKIE_SECURE"] = config_name == "production"
+    app.config["JWT_COOKIE_SECURE"] = cfg.runtime.jwt_cookie_secure
     # HTML form posts in local/dev flows (e.g. manage delete actions) do not
     # send JWT CSRF headers. Keep strict CSRF in production only.
     app.config["JWT_COOKIE_CSRF_PROTECT"] = config_name == "production"

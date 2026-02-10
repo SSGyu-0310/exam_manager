@@ -19,6 +19,7 @@ Exam Manager의 환경 설정에 대한 상세 레퍼런스입니다.
 |-----|---------|-------------|
 | `SECRET_KEY` | `dev-secret-key-change-in-production` | Flask 세션/보안 키 (프로덕션에서 필수 변경) |
 | `FLASK_CONFIG` | `development` | 실행 프로파일 (`development`, `production`, `local_admin`) |
+| `JWT_COOKIE_SECURE` | `True` in production, else `False` | JWT 쿠키를 `Secure`로 강제 (`http://localhost`에서는 `0` 권장) |
 
 ### Database Operations
 

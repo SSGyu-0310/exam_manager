@@ -154,6 +154,9 @@ def get_runtime_config(flask_config_name="default") -> RuntimeConfig:
         ),
         allowed_extensions={"png", "jpg", "jpeg", "gif"},
         jwt_secret_key=os.environ.get("JWT_SECRET_KEY", "dev-jwt-secret-key"),
+        jwt_cookie_secure=_env_flag(
+            "JWT_COOKIE_SECURE", default=(flask_config_name == "production")
+        ),
         gemini_api_key=os.environ.get("GEMINI_API_KEY"),
         gemini_model_name=os.environ.get(
             "GEMINI_MODEL_NAME", DEFAULT_GEMINI_MODEL_NAME

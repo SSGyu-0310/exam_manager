@@ -36,6 +36,7 @@ class RuntimeConfig:
 
     # JWT
     jwt_secret_key: str = "dev-jwt-secret-key"
+    jwt_cookie_secure: bool = False
 
     # AI/Gemini
     gemini_api_key: Optional[str] = None
