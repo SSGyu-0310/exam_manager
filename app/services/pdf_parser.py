@@ -19,6 +19,7 @@ Q_HEADER = re.compile(r"^\s*(\d{1,3})\.(?!\d)\s*(.*)$")
 OPT_RE = re.compile(r"^([1-9]|1[0-6])([)\.])\s*(.*)$")
 EMBEDDED_OPT_RE = re.compile(r"^(?P<prefix>.*)\s+(?P<num>[1-9]|1[0-6])\s*[)\.](?P<suffix>\s+.*)?$")
 ANSWER_LABEL_RE = re.compile(r"^(?:\uC815\uB2F5|\uB2F5|answer)\s*[:\uFF1A]\s*(.*)$", re.IGNORECASE)
+EXAMINER_RE = re.compile(r"^\s*출제자\s*[:\uFF1A]\s*(.+?)\s*$")
 
 INDENT_TOL = 6.0
 WORD_X_TOL = 0.5
@@ -359,6 +360,40 @@ def save_image_crop(page, bbox, upload_dir: Path, exam_prefix: str, resolution=2
     return fname
 
 
+def fix_split_options(questions):
+    """Reassign trailing fragment from previous option to current option.
+
+    Handles late label layouts where the beginning of (n+1) option text was
+    attached to n option during sequential accumulation.
+    """
+    split_re = re.compile(r"(.*(?:이다|것이다|된다|한다|없다|있다|였으며|으며))\s+(.+)$")
+
+    for q in questions:
+        options_map = q.get("options_map") or {}
+        if not options_map:
+            continue
+
+        sorted_nums = sorted(options_map)
+        for i in range(1, len(sorted_nums)):
+            prev_num = sorted_nums[i - 1]
+            curr_num = sorted_nums[i]
+            prev_opt = options_map[prev_num]
+            curr_opt = options_map[curr_num]
+
+            prev_content = (prev_opt.get("content") or "").strip()
+            curr_content = (curr_opt.get("content") or "").strip()
+            if not prev_content or not curr_content:
+                continue
+
+            match = split_re.search(prev_content)
+            if not match:
+                continue
+
+            prev_opt["content"] = match.group(1).strip()
+            moved = match.group(2).strip()
+            curr_opt["content"] = f"{moved} {curr_content}".strip()
+
+
 def parse_pdf_to_questions(pdf_path, upload_dir: Path, exam_prefix: str, max_option_number=16):
     pdf_path = Path(pdf_path)
     upload_dir = Path(upload_dir)
@@ -373,11 +408,18 @@ def parse_pdf_to_questions(pdf_path, upload_dir: Path, exam_prefix: str, max_opt
 
         cur = None
         cur_opt = None
+        pending_examiner = None
 
         for ev in events:
             if ev["type"] == "text":
                 normalized_lines = normalize_embedded_option(ev["text"], cur, max_option_number)
                 for txt in normalized_lines:
+                    m_examiner = EXAMINER_RE.match(txt)
+                    if m_examiner:
+                        examiner_name = (m_examiner.group(1) or "").strip()
+                        pending_examiner = examiner_name or None
+                        continue
+
                     m_q = Q_HEADER.match(txt)
                     if m_q:
                         if cur:
@@ -411,11 +453,13 @@ def parse_pdf_to_questions(pdf_path, upload_dir: Path, exam_prefix: str, max_opt
                             "question_number": int(m_q.group(1)),
                             "content": m_q.group(2).strip(),
                             "image_path": None,
+                            "examiner": pending_examiner,
                             "options_map": {},
                             "answer_lines": [],
                             "question_x0": ev["x0"],
                             "option_x0": None,
                         }
+                        pending_examiner = None
                         cur_opt = None
                         continue
 
@@ -478,6 +522,8 @@ def parse_pdf_to_questions(pdf_path, upload_dir: Path, exam_prefix: str, max_opt
 
         if cur:
             questions.append(cur)
+
+    fix_split_options(questions)
 
     for q in questions:
         options = [q["options_map"][n] for n in sorted(q["options_map"])]

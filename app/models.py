@@ -308,6 +308,7 @@ class Question(db.Model):
     # 문제 내용
     content = db.Column(db.Text)  # 문제 텍스트
     image_path = db.Column(db.String(500))  # 문제 이미지 경로
+    examiner = db.Column(db.String(120))  # 출제자명 (예: 홍장원)
     
     # 정답 및 해설
     answer = db.Column(db.String(500))  # 객관식 정답 (번호, 복수일 경우 콤마 구분)

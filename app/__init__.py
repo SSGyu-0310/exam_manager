@@ -85,12 +85,16 @@ def create_app(
     app.config["JWT_ACCESS_COOKIE_NAME"] = "auth_token"
     app.config["JWT_COOKIE_SAMESITE"] = "Lax"
     app.config["JWT_COOKIE_SECURE"] = config_name == "production"
-    app.config["JWT_COOKIE_CSRF_PROTECT"] = True
+    # HTML form posts in local/dev flows (e.g. manage delete actions) do not
+    # send JWT CSRF headers. Keep strict CSRF in production only.
+    app.config["JWT_COOKIE_CSRF_PROTECT"] = config_name == "production"
     app.config["LOCAL_ADMIN_ONLY"] = cfg.runtime.local_admin_only
     app.secret_key = cfg.secret_key
     app.config["UPLOAD_FOLDER"] = str(cfg.runtime.upload_folder)
     app.config["MAX_CONTENT_LENGTH"] = cfg.runtime.max_content_length
     app.config["APP_MODE"] = os.getenv("APP_MODE", "full")
+    # Legacy routes still read parser mode from current_app.config.
+    app.config["PDF_PARSER_MODE"] = cfg.experiment.pdf_parser_mode
     app.config["CORS_ALLOWED_ORIGINS"] = cfg.runtime.cors_allowed_origins
     app.config["CORS_ALLOW_CREDENTIALS"] = True
 
@@ -115,6 +119,12 @@ def create_app(
     # SQLAlchemy 초기화
     db.init_app(app)
     jwt.init_app(app)
+
+    # Backward-compatible schema patch for existing DB volumes.
+    with app.app_context():
+        from app.services.schema_patch import ensure_question_examiner_column
+
+        ensure_question_examiner_column(app.logger)
 
     # 업로드 디렉토리 생성
     upload_folder = app.config.get("UPLOAD_FOLDER")

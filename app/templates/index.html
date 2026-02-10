@@ -59,9 +59,25 @@
             transition: transform 0.2s, box-shadow 0.2s;
         }
 
+        .nav-links button {
+            padding: 1rem 2rem;
+            background: linear-gradient(135deg, #2c3e50 0%, #4b79a1 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
         .nav-links a:hover {
             transform: translateY(-3px);
             box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .nav-links button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px rgba(44, 62, 80, 0.4);
         }
 
         .status {
@@ -83,11 +99,42 @@
             <a href="{{ url_for('practice.list_lectures') }}">📝 연습 모드</a>
             <a href="{{ url_for('manage.dashboard') }}">⚙️ 관리</a>
             <a href="{{ url_for('practice.session_list') }}">Practice Sessions</a>
+            <button type="button" id="admin-login-btn">관리자 접속</button>
         </div>
         <div class="status">
             ✅ 시스템이 정상 작동 중입니다
         </div>
     </div>
+    <script>
+        (function () {
+            const button = document.getElementById('admin-login-btn');
+            if (!button) return;
+
+            button.addEventListener('click', async function () {
+                const password = window.prompt('관리자 비밀번호를 입력하세요');
+                if (password === null) return;
+
+                try {
+                    const response = await fetch('/api/auth/dev-admin-login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ password }),
+                        credentials: 'same-origin'
+                    });
+
+                    const payload = await response.json().catch(() => ({}));
+                    if (!response.ok || !payload.ok) {
+                        window.alert(payload.message || '관리자 접속에 실패했습니다.');
+                        return;
+                    }
+
+                    window.location.href = "{{ url_for('manage.dashboard') }}";
+                } catch (err) {
+                    window.alert('요청 중 오류가 발생했습니다.');
+                }
+            });
+        })();
+    </script>
     <script src="{{ url_for('static', filename='js/duck_quack.js') }}"></script>
 </body>
 

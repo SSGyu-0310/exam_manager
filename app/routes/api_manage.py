@@ -344,6 +344,7 @@ def _question_payload(question, choices_map=None):
         "type": question.q_type,
         "examId": question.exam_id,
         "examTitle": question.exam.title if question.exam else None,
+        "examiner": question.examiner,
         "lectureId": question.lecture_id,
         "lectureTitle": question.lecture.title if question.lecture else None,
         "isClassified": question.is_classified,
@@ -391,6 +392,7 @@ def _question_detail_payload(question):
         "examId": question.exam_id,
         "examTitle": question.exam.title if question.exam else None,
         "questionNumber": question.question_number,
+        "examiner": question.examiner,
         "type": question.q_type,
         "lectureId": question.lecture_id,
         "lectureTitle": question.lecture.title if question.lecture else None,
@@ -1157,6 +1159,8 @@ def upload_pdf():
         crop_question_count = 0
         crop_image_count = 0
         crop_meta_url = None
+        crop_question_images = {}
+        crop_is_reliable = False
         import tempfile
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -1200,6 +1204,13 @@ def upload_pdf():
             crop_meta = crop_result.get("meta") or {}
             crop_question_count = len(crop_meta.get("questions", []))
             crop_image_count = len(crop_result.get("question_images", {}))
+            crop_question_images = crop_result.get("question_images", {}) or {}
+            duplicate_qnums = crop_meta.get("duplicate_qnums") or []
+            crop_is_reliable = (
+                crop_question_count == len(questions_data)
+                and crop_image_count == len(questions_data)
+                and not duplicate_qnums
+            )
             meta_path = crop_result.get("meta_path")
             if meta_path:
                 relative_path = to_static_relative(
@@ -1214,6 +1225,15 @@ def upload_pdf():
         choice_count = 0
 
         for q_data in questions_data:
+            qnum = int(q_data["question_number"])
+            crop_image_name = crop_question_images.get(qnum) or crop_question_images.get(
+                str(qnum)
+            )
+            if crop_is_reliable and crop_image_name:
+                question_image_path = f"exam_crops/exam_{exam.id}/{crop_image_name}"
+            else:
+                question_image_path = q_data.get("image_path")
+
             answer_count = len(q_data.get("answer_options", []))
             has_options = len(q_data.get("options", [])) > 0
 
@@ -1227,9 +1247,10 @@ def upload_pdf():
             question = Question(
                 exam_id=exam.id,
                 user_id=user.id,
-                question_number=q_data["question_number"],
+                question_number=qnum,
                 content=q_data.get("content", ""),
-                image_path=q_data.get("image_path"),
+                image_path=question_image_path,
+                examiner=q_data.get("examiner"),
                 q_type=q_type,
                 answer=",".join(map(str, q_data.get("answer_options", []))),
                 correct_answer_text=q_data.get("answer_text")
@@ -1266,6 +1287,7 @@ def upload_pdf():
                 "choiceCount": choice_count,
                 "cropImageCount": crop_image_count,
                 "cropQuestionCount": crop_question_count,
+                "cropReliable": crop_is_reliable,
                 "cropMetaUrl": crop_meta_url,
             },
             status=201,
@@ -1372,6 +1394,9 @@ def update_question(question_id):
 
     question.content = cleaned_content
     question.explanation = data.get("explanation") or ""
+    if "examiner" in data:
+        examiner = (data.get("examiner") or "").strip()
+        question.examiner = examiner or None
     q_type = data.get("type") or question.q_type
     question.q_type = q_type
 

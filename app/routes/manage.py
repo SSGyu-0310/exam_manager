@@ -834,6 +834,8 @@ def upload_pdf():
             crop_dir = None
             crop_question_count = 0
             crop_image_count = 0
+            crop_question_images = {}
+            crop_is_reliable = False
             import tempfile
 
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -881,6 +883,13 @@ def upload_pdf():
                 crop_meta = crop_result.get("meta") or {}
                 crop_question_count = len(crop_meta.get("questions", []))
                 crop_image_count = len(crop_result.get("question_images", {}))
+                crop_question_images = crop_result.get("question_images", {}) or {}
+                duplicate_qnums = crop_meta.get("duplicate_qnums") or []
+                crop_is_reliable = (
+                    crop_question_count == len(questions_data)
+                    and crop_image_count == len(questions_data)
+                    and not duplicate_qnums
+                )
             except RuntimeError as exc:
                 current_app.logger.warning("PDF crop skipped: %s", exc)
                 flash(f"PDF crop 건너뜀: {exc}", "warning")
@@ -889,6 +898,17 @@ def upload_pdf():
             choice_count = 0
 
             for q_data in questions_data:
+                qnum = int(q_data["question_number"])
+                crop_image_name = crop_question_images.get(qnum) or crop_question_images.get(
+                    str(qnum)
+                )
+                if crop_is_reliable and crop_image_name:
+                    question_image_path = (
+                        f"exam_crops/exam_{exam.id}/{crop_image_name}"
+                    )
+                else:
+                    question_image_path = q_data.get("image_path")
+
                 # 문제 유형 결정
                 answer_count = len(q_data.get("answer_options", []))
                 has_options = len(q_data.get("options", [])) > 0
@@ -904,9 +924,10 @@ def upload_pdf():
                 question = Question(
                     exam_id=exam.id,
                     user_id=user.id,
-                    question_number=q_data["question_number"],
+                    question_number=qnum,
                     content=q_data.get("content", ""),
-                    image_path=q_data.get("image_path"),
+                    image_path=question_image_path,
+                    examiner=q_data.get("examiner"),
                     q_type=q_type,
                     answer=",".join(map(str, q_data.get("answer_options", []))),
                     correct_answer_text=q_data.get("answer_text")
@@ -942,7 +963,11 @@ def upload_pdf():
                 "success",
             )
             if crop_image_count:
-                flash(f"Original images created: {crop_image_count}", "success")
+                status = "enabled" if crop_is_reliable else "fallback-to-parser"
+                flash(
+                    f"Original images created: {crop_image_count} ({status})",
+                    "success" if crop_is_reliable else "warning",
+                )
             if crop_question_count and crop_question_count != question_count:
                 flash(
                     "Crop count differs from parsed question count. Verify the exam.",
