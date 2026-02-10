@@ -69,18 +69,6 @@ const sortChoices = (choices: ManageChoice[]) => {
   });
 };
 
-const isCropImagePath = (value?: string | null) => {
-  if (!value) return false;
-  let normalized = value.trim().replace(/^\/+/, "");
-  if (normalized.startsWith("static/")) {
-    normalized = normalized.slice("static/".length);
-  }
-  if (normalized.startsWith("uploads/")) {
-    normalized = normalized.slice("uploads/".length);
-  }
-  return normalized.startsWith("exam_crops/");
-};
-
 export default async function ManageQuestionDetailPage({ params }: PageProps) {
   try {
     const { id } = await params;
@@ -100,19 +88,7 @@ export default async function ManageQuestionDetailPage({ params }: PageProps) {
     const isShortAnswer = question.type === "short_answer";
     const contentSegments = parseMarkdownWithImages(question.content);
     const explanationSegments = parseMarkdownWithImages(question.explanation);
-    const parsedImageCandidates: string[] = [];
-    const dbParsedImageUrl = !isCropImagePath(question.imagePath)
-      ? resolveImageUrl(question.imagePath)
-      : null;
-    if (dbParsedImageUrl) {
-      parsedImageCandidates.push(dbParsedImageUrl);
-    }
-    contentSegments.forEach((segment) => {
-      if (segment.kind === "image") {
-        parsedImageCandidates.push(segment.src);
-      }
-    });
-    const parsedImageUrls = Array.from(new Set(parsedImageCandidates));
+    const questionImageUrl = resolveImageUrl(question.imagePath);
     const originalImageUrl = resolveImageUrl(question.originalImageUrl);
     const answerText = (question.correctAnswerText || question.answer || "").trim();
     const prevHref = prevQuestion ? `/manage/questions/${prevQuestion.id}` : null;
@@ -155,21 +131,16 @@ export default async function ManageQuestionDetailPage({ params }: PageProps) {
           <div className="space-y-6">
             <Card className="border border-border/70 bg-card/85 shadow-soft">
               <CardContent className="space-y-4 p-6">
-                <h3 className="text-lg font-semibold text-foreground">파싱된 문제 이미지</h3>
-                {parsedImageUrls.length ? (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {parsedImageUrls.map((src, index) => (
-                      <img
-                        key={`${question.id}-parsed-${index}`}
-                        src={src}
-                        alt={`Q${question.questionNumber} 파싱 이미지 ${index + 1}`}
-                        className="max-h-[460px] w-full rounded-xl border border-border/60 object-contain"
-                      />
-                    ))}
-                  </div>
+                <h3 className="text-lg font-semibold text-foreground">문제 이미지</h3>
+                {questionImageUrl ? (
+                  <img
+                    src={questionImageUrl}
+                    alt={`Q${question.questionNumber} 문제 이미지`}
+                    className="max-h-[460px] w-full rounded-xl border border-border/60 object-contain"
+                  />
                 ) : (
                   <div className="rounded-xl border border-dashed border-border/70 bg-muted/30 px-4 py-6 text-sm text-muted-foreground">
-                    파싱 결과로 저장된 문제 이미지가 없습니다.
+                    저장된 문제 이미지가 없습니다.
                   </div>
                 )}
               </CardContent>
