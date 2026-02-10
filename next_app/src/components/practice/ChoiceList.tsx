@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { resolveImageUrl } from "@/lib/image";
 
 import type { PracticeChoice } from "@/components/practice/types";
 
@@ -19,7 +20,7 @@ export function ChoiceList({ choices, multiple, selected, onChange }: ChoiceList
         const choiceId = getChoiceId(choice, index);
         const checked = selected.includes(choiceId);
         const label = choice.content ?? `Choice ${choiceId}`;
-        const image = choice.imageUrl ?? choice.image;
+        const image = resolveImageUrl(choice.imageUrl ?? choice.image);
 
         const toggle = () => {
           if (multiple) {

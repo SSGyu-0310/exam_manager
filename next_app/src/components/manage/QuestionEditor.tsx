@@ -13,6 +13,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { resolveImageUrl } from "@/lib/image";
 
 type QuestionEditorProps = {
   question: ManageQuestionDetail;
@@ -52,7 +53,7 @@ export function QuestionEditor({ question, lectures }: QuestionEditorProps) {
     buildChoices(question.choices)
   );
   const [imageUrl, setImageUrl] = useState<string | null>(
-    question.imagePath ? `/static/uploads/${question.imagePath}` : null
+    resolveImageUrl(question.imagePath)
   );
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [removeImage, setRemoveImage] = useState(false);
@@ -130,7 +131,7 @@ export function QuestionEditor({ question, lectures }: QuestionEditorProps) {
     if (!data.success) {
       throw new Error(data.error || "Image upload failed.");
     }
-    setImageUrl(data.url ?? null);
+    setImageUrl(resolveImageUrl(data.url));
     setUploadedImage(data.filename ?? null);
     setRemoveImage(false);
   };

@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Check, Copy } from "lucide-react";
 
 import { apiFetch } from "@/lib/http";
+import { resolveImageUrl } from "@/lib/image";
 import { ResultSummary } from "@/components/practice/ResultSummary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -105,28 +106,12 @@ const parseStemContent = (value?: string) => {
   };
 };
 
-const normalizeImageUrl = (value?: string) => {
-  if (!value) return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-    return trimmed;
-  }
-  if (trimmed.startsWith("/")) {
-    return trimmed;
-  }
-  if (trimmed.startsWith("static/")) {
-    return `/${trimmed}`;
-  }
-  return `/static/${trimmed.replace(/^\/+/, "")}`;
-};
-
 const getPrimaryImageUrl = (question: ResultQuestion) => {
-  const direct = normalizeImageUrl(question.imageUrl ?? question.image);
+  const direct = resolveImageUrl(question.imageUrl ?? question.image);
   if (direct) return direct;
   const { images } = parseStemContent(question.stem ?? "");
   for (const candidate of images) {
-    const normalized = normalizeImageUrl(candidate);
+    const normalized = resolveImageUrl(candidate);
     if (normalized) return normalized;
   }
   return null;
@@ -582,8 +567,8 @@ export default function PracticeResultPage() {
                     question.stem ?? ""
                   );
                   const imageCandidates = [
-                    normalizeImageUrl(question.imageUrl ?? question.image),
-                    ...stemImages.map((image) => normalizeImageUrl(image)),
+                    resolveImageUrl(question.imageUrl ?? question.image),
+                    ...stemImages.map((image) => resolveImageUrl(image)),
                   ].filter((value): value is string => Boolean(value));
                   const questionImages = Array.from(new Set(imageCandidates));
                   return (
@@ -677,7 +662,7 @@ export default function PracticeResultPage() {
                                 const isCorrectChoice = Array.isArray(correctAnswers)
                                   ? correctAnswers.includes(choiceId)
                                   : false;
-                                const choiceImage = normalizeImageUrl(
+                                const choiceImage = resolveImageUrl(
                                   choice.imageUrl ?? choice.image
                                 );
                                 return (
