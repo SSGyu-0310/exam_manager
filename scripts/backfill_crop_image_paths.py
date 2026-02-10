@@ -1,11 +1,12 @@
 """
-Backfill question.image_path to use cropped original images when available.
+Backfill missing question.image_path using cropped original images when available.
 
 This is useful after deploying crop/parser fixes to existing Docker volumes.
 
 Usage:
   python scripts/backfill_crop_image_paths.py --config production --apply
   python scripts/backfill_crop_image_paths.py --config production --exam-id 25 --apply
+  python scripts/backfill_crop_image_paths.py --config production --exam-id 25 --apply --force
 """
 from __future__ import annotations
 
@@ -46,6 +47,11 @@ def main() -> None:
         action="store_true",
         help="Apply DB updates. Without this flag, runs in dry-run mode.",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing image_path values as well.",
+    )
     args = parser.parse_args()
 
     app = create_app(args.config, skip_migration_check=True)
@@ -81,7 +87,12 @@ def main() -> None:
                     skipped += 1
                     continue
 
-                if question.image_path == normalized:
+                current = (question.image_path or "").strip()
+                if current and not args.force:
+                    skipped += 1
+                    continue
+
+                if current == normalized:
                     continue
 
                 question.image_path = normalized

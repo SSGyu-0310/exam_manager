@@ -899,15 +899,9 @@ def upload_pdf():
 
             for q_data in questions_data:
                 qnum = int(q_data["question_number"])
-                crop_image_name = crop_question_images.get(qnum) or crop_question_images.get(
-                    str(qnum)
-                )
-                if crop_is_reliable and crop_image_name:
-                    question_image_path = (
-                        f"exam_crops/exam_{exam.id}/{crop_image_name}"
-                    )
-                else:
-                    question_image_path = q_data.get("image_path")
+                # Keep parser output in question.image_path.
+                # Cropped originals are exposed separately via original_image_url.
+                question_image_path = q_data.get("image_path")
 
                 # 문제 유형 결정
                 answer_count = len(q_data.get("answer_options", []))

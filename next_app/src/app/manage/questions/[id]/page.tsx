@@ -5,6 +5,7 @@ import { getExamDetail, getQuestionDetail, type ManageChoice } from "@/lib/api/m
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { QuestionDetailHotkeys } from "@/components/exam/QuestionDetailHotkeys";
 import { resolveImageUrl } from "@/lib/image";
 
 type PageProps = {
@@ -68,6 +69,18 @@ const sortChoices = (choices: ManageChoice[]) => {
   });
 };
 
+const isCropImagePath = (value?: string | null) => {
+  if (!value) return false;
+  let normalized = value.trim().replace(/^\/+/, "");
+  if (normalized.startsWith("static/")) {
+    normalized = normalized.slice("static/".length);
+  }
+  if (normalized.startsWith("uploads/")) {
+    normalized = normalized.slice("uploads/".length);
+  }
+  return normalized.startsWith("exam_crops/");
+};
+
 export default async function ManageQuestionDetailPage({ params }: PageProps) {
   try {
     const { id } = await params;
@@ -85,12 +98,29 @@ export default async function ManageQuestionDetailPage({ params }: PageProps) {
         : null;
 
     const isShortAnswer = question.type === "short_answer";
-    const parsedImageUrl = resolveImageUrl(question.imagePath);
+    const contentSegments = parseMarkdownWithImages(question.content);
+    const explanationSegments = parseMarkdownWithImages(question.explanation);
+    const parsedImageCandidates: string[] = [];
+    const dbParsedImageUrl = !isCropImagePath(question.imagePath)
+      ? resolveImageUrl(question.imagePath)
+      : null;
+    if (dbParsedImageUrl) {
+      parsedImageCandidates.push(dbParsedImageUrl);
+    }
+    contentSegments.forEach((segment) => {
+      if (segment.kind === "image") {
+        parsedImageCandidates.push(segment.src);
+      }
+    });
+    const parsedImageUrls = Array.from(new Set(parsedImageCandidates));
     const originalImageUrl = resolveImageUrl(question.originalImageUrl);
     const answerText = (question.correctAnswerText || question.answer || "").trim();
+    const prevHref = prevQuestion ? `/manage/questions/${prevQuestion.id}` : null;
+    const nextHref = nextQuestion ? `/manage/questions/${nextQuestion.id}` : null;
 
     return (
       <div className="space-y-6">
+        <QuestionDetailHotkeys prevHref={prevHref} nextHref={nextHref} />
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
@@ -126,15 +156,20 @@ export default async function ManageQuestionDetailPage({ params }: PageProps) {
             <Card className="border border-border/70 bg-card/85 shadow-soft">
               <CardContent className="space-y-4 p-6">
                 <h3 className="text-lg font-semibold text-foreground">파싱된 문제 이미지</h3>
-                {parsedImageUrl ? (
-                  <img
-                    src={parsedImageUrl}
-                    alt={`Q${question.questionNumber} 파싱 이미지`}
-                    className="max-h-[460px] w-full rounded-xl border border-border/60 object-contain"
-                  />
+                {parsedImageUrls.length ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {parsedImageUrls.map((src, index) => (
+                      <img
+                        key={`${question.id}-parsed-${index}`}
+                        src={src}
+                        alt={`Q${question.questionNumber} 파싱 이미지 ${index + 1}`}
+                        className="max-h-[460px] w-full rounded-xl border border-border/60 object-contain"
+                      />
+                    ))}
+                  </div>
                 ) : (
                   <div className="rounded-xl border border-dashed border-border/70 bg-muted/30 px-4 py-6 text-sm text-muted-foreground">
-                    저장된 문제 이미지가 없습니다.
+                    파싱 결과로 저장된 문제 이미지가 없습니다.
                   </div>
                 )}
               </CardContent>
@@ -143,9 +178,9 @@ export default async function ManageQuestionDetailPage({ params }: PageProps) {
             <Card className="border border-border/70 bg-card/85 shadow-soft">
               <CardContent className="space-y-4 p-6">
                 <h3 className="text-lg font-semibold text-foreground">지문</h3>
-                {parseMarkdownWithImages(question.content).length ? (
+                {contentSegments.length ? (
                   <div className="space-y-4">
-                    {parseMarkdownWithImages(question.content).map((segment, index) =>
+                    {contentSegments.map((segment, index) =>
                       segment.kind === "text" ? (
                         segment.value.trim() ? (
                           <p
@@ -235,7 +270,7 @@ export default async function ManageQuestionDetailPage({ params }: PageProps) {
                 <h3 className="text-lg font-semibold text-foreground">해설</h3>
                 {question.explanation ? (
                   <div className="space-y-4">
-                    {parseMarkdownWithImages(question.explanation).map((segment, index) =>
+                    {explanationSegments.map((segment, index) =>
                       segment.kind === "text" ? (
                         segment.value.trim() ? (
                           <p
@@ -291,7 +326,7 @@ export default async function ManageQuestionDetailPage({ params }: PageProps) {
                 <div className="grid gap-2">
                   {prevQuestion ? (
                     <Button asChild variant="outline" size="sm">
-                      <Link href={`/manage/questions/${prevQuestion.id}`}>
+                      <Link href={prevHref!}>
                         ← 이전 문제 (Q{prevQuestion.questionNumber})
                       </Link>
                     </Button>
@@ -302,7 +337,7 @@ export default async function ManageQuestionDetailPage({ params }: PageProps) {
                   )}
                   {nextQuestion ? (
                     <Button asChild variant="outline" size="sm">
-                      <Link href={`/manage/questions/${nextQuestion.id}`}>
+                      <Link href={nextHref!}>
                         다음 문제 (Q{nextQuestion.questionNumber}) →
                       </Link>
                     </Button>
