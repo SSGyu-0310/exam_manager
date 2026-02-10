@@ -105,6 +105,7 @@ def crop_pdf_to_questions(
     meta_path = output_dir / "bboxes.json"
     meta = None
     question_images: Dict[int, str] = {}
+    duplicate_qnums: set[int] = set()
 
     if meta_path.exists():
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -116,7 +117,12 @@ def crop_pdf_to_questions(
             q["final_image"] = final_name
             q["final_bbox"] = _union_bbox(q.get("parts") or [])
             if qnum_int is not None and final_name:
+                if qnum_int in question_images:
+                    duplicate_qnums.add(qnum_int)
                 question_images[qnum_int] = final_name
+
+        if duplicate_qnums:
+            meta["duplicate_qnums"] = sorted(duplicate_qnums)
 
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 

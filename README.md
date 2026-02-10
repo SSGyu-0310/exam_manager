@@ -40,6 +40,24 @@ cp .env.docker.example .env.docker
 ./scripts/dc logs -f api web
 ```
 
+## After Deploying PDF Crop Fixes
+If you updated parser/crop logic, run these in Docker once:
+```bash
+# rebuild + restart api
+./scripts/dc up -d --build api
+
+# backfill existing question.image_path to exam_crops paths
+./scripts/dc exec api sh -lc 'python scripts/backfill_crop_image_paths.py --config production --apply'
+```
+
+## Local PDF Lab (Backend-only)
+빠른 파서 실험 루프:
+```bash
+.venv/bin/python scripts/pdf_lab.py --pdf parse_lab/pdfs/sample.pdf --mode experimental --watch
+```
+
+산출물은 `parse_lab/output/lab_runs/` 아래에 run별로 저장됩니다.
+
 ## SQLite to Postgres Migration
 ```bash
 docker cp data/exam.db exam_manager-api-1:/tmp/exam.db

@@ -99,7 +99,14 @@ def test_upload_pdf_creates_exam_questions_and_choices(client, app, monkeypatch)
         exam = PreviousExam.query.get(exam_id)
         assert exam is not None
         assert exam.user_id == user_id
-        assert Question.query.filter_by(exam_id=exam_id).count() == 2
+        questions = (
+            Question.query.filter_by(exam_id=exam_id)
+            .order_by(Question.question_number.asc())
+            .all()
+        )
+        assert len(questions) == 2
+        assert questions[0].image_path == f"exam_crops/exam_{exam_id}/img1.png"
+        assert questions[1].image_path == f"exam_crops/exam_{exam_id}/img2.png"
         choice_count = (
             Choice.query.join(Question, Choice.question_id == Question.id)
             .filter(Question.exam_id == exam_id)
@@ -134,6 +141,75 @@ def test_upload_pdf_returns_400_when_parser_extracts_no_questions(client, app, m
     payload = response.get_json()
     assert payload["ok"] is False
     assert payload["code"] == "PDF_PARSE_EMPTY"
+
+
+def test_upload_pdf_falls_back_to_parser_images_when_crop_unreliable(client, app, monkeypatch):
+    with app.app_context():
+        user = _create_user("gate-upload-crop-fallback@example.com")
+        token = create_access_token(identity=str(user.id))
+
+    def fake_parse_pdf(pdf_path, upload_dir, exam_prefix, mode="legacy", max_option_number=16):
+        return [
+            {
+                "question_number": 1,
+                "content": "Question 1",
+                "image_path": "parser_q1.png",
+                "options": [],
+                "answer_options": [],
+                "answer_text": "",
+            },
+            {
+                "question_number": 2,
+                "content": "Question 2",
+                "image_path": "parser_q2.png",
+                "options": [],
+                "answer_options": [],
+                "answer_text": "",
+            },
+        ]
+
+    monkeypatch.setattr("app.services.pdf_parser_factory.parse_pdf", fake_parse_pdf)
+    monkeypatch.setattr(
+        "app.services.pdf_cropper.crop_pdf_to_questions",
+        lambda *args, **kwargs: {
+            # Deliberately unreliable: only one cropped question for two parsed questions.
+            "meta": {"questions": [{"qnum": 1}]},
+            "question_images": {"1": "img1.png"},
+            "meta_path": None,
+        },
+    )
+    monkeypatch.setattr(
+        "app.services.pdf_cropper.to_static_relative",
+        lambda *args, **kwargs: None,
+    )
+
+    response = client.post(
+        "/api/manage/upload-pdf",
+        headers=_auth_header(token),
+        data={
+            "pdf_file": (BytesIO(b"%PDF-1.4 fake"), "sample.pdf"),
+            "subject": "Biology",
+            "year": "2025",
+            "term": "1\ucc28",
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["data"]["cropReliable"] is False
+
+    with app.app_context():
+        exam_id = payload["data"]["examId"]
+        questions = (
+            Question.query.filter_by(exam_id=exam_id)
+            .order_by(Question.question_number.asc())
+            .all()
+        )
+        assert len(questions) == 2
+        assert questions[0].image_path == "parser_q1.png"
+        assert questions[1].image_path == "parser_q2.png"
 
 
 def test_ai_classify_start_to_apply_flow(client, app, monkeypatch):
