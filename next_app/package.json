@@ -6,7 +6,8 @@
         "dev": "next dev -H 0.0.0.0 -p 4000",
         "build": "next build --webpack",
         "start": "next start",
-        "lint": "eslint"
+        "lint": "eslint",
+        "verify:redirect": "node scripts/verify-redirect-target.mjs"
     },
     "dependencies": {
         "@emotion/react": "^11.14.0",

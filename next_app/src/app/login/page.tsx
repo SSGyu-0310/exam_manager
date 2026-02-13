@@ -4,6 +4,8 @@ import { useState, Suspense } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { getApiEnvelopeMessage, type ApiEnvelope } from '@/lib/api/contract';
+import { normalizeRedirectTarget } from '@/lib/security/redirect';
 
 function LoginForm() {
     const [email, setEmail] = useState('');
@@ -28,13 +30,13 @@ function LoginForm() {
             if (res.ok) {
                 await res.json();
                 await login();
-                // Redirect to the originally requested page or dashboard
-                const from = searchParams.get('from') || '/dashboard';
-                router.replace(from);
+                const from = searchParams.get('from');
+                const target = normalizeRedirectTarget(from, '/dashboard');
+                router.replace(target);
                 router.refresh();
             } else {
-                const data = await res.json();
-                setError(data.msg || 'Login failed');
+                const payload = (await res.json()) as ApiEnvelope<unknown>;
+                setError(getApiEnvelopeMessage(payload, 'Login failed'));
             }
         } catch {
             setError('An unexpected error occurred');
