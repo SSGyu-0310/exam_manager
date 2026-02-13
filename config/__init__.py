@@ -23,7 +23,7 @@ def set_config_name(name: str) -> None:
 
     This must be called before `get_config()` if using a non-default profile.
     """
-    global _config_name
+    global _config_name, _config_cache
     with _config_lock:
         _config_name = name
         _config_cache = None  # Invalidate cache

@@ -93,6 +93,19 @@ def normalize_space(text: str | None) -> str:
     return " ".join(str(text).split())
 
 
+def _normalize_db_uri(db_value: str) -> str:
+    db_uri = db_value.strip()
+    if db_uri.startswith("postgres://"):
+        db_uri = db_uri.replace("postgres://", "postgresql+psycopg://", 1)
+    elif db_uri.startswith("postgresql://"):
+        db_uri = db_uri.replace("postgresql://", "postgresql+psycopg://", 1)
+    if not db_uri.startswith("postgresql+psycopg://"):
+        raise RuntimeError(
+            "--db must be a PostgreSQL URI (postgresql+psycopg://...)."
+        )
+    return db_uri
+
+
 def canonicalize_question(question: dict[str, Any]) -> dict[str, Any]:
     options = sorted(
         question.get("options", []),
@@ -502,8 +515,7 @@ def run_once(args) -> LabResult:
 
         db_override = None
         if args.db:
-            db_path = Path(args.db).expanduser().resolve()
-            db_override = f"sqlite:///{db_path.as_posix()}"
+            db_override = _normalize_db_uri(args.db)
 
         app = create_app(
             args.config,
@@ -675,7 +687,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--db",
         default=None,
-        help="Optional sqlite db path override for retrieval/classification.",
+        help="Optional PostgreSQL URI override for retrieval/classification.",
     )
     parser.add_argument(
         "--config",
@@ -764,9 +776,10 @@ def main() -> int:
         args.with_retrieval = True
 
     if args.db:
-        db_path = Path(args.db).expanduser().resolve()
-        if not db_path.exists():
-            print(f"[ERROR] --db file not found: {db_path}")
+        try:
+            _normalize_db_uri(args.db)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[ERROR] {exc}")
             return 1
     if args.compare_mode and args.compare_json:
         print("[ERROR] Use only one of --compare-mode or --compare-json.")

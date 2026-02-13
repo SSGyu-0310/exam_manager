@@ -16,7 +16,7 @@ def _require_admin():
     user_id = get_jwt_identity()
     if not user_id:
         return None, (jsonify({"ok": False, "code": "UNAUTHORIZED", "message": "Authentication required"}), 401)
-    user = User.query.get(int(user_id))
+    user = db.session.get(User, int(user_id))
     if not user or not user.is_admin:
         return None, (jsonify({"ok": False, "code": "FORBIDDEN", "message": "Admin access required"}), 403)
     return user, None
@@ -92,7 +92,7 @@ def get_template(template_id):
     user, error = _require_admin()
     if error:
         return error
-    template = PublicCurriculumTemplate.query.get(template_id)
+    template = db.session.get(PublicCurriculumTemplate, template_id)
     if not template:
         return jsonify({"ok": False, "code": "NOT_FOUND", "message": "Template not found"}), 404
     return jsonify({"ok": True, "data": _template_payload(template)})
@@ -106,7 +106,7 @@ def update_template(template_id):
     if error:
         return error
 
-    template = PublicCurriculumTemplate.query.get(template_id)
+    template = db.session.get(PublicCurriculumTemplate, template_id)
     if not template:
         return jsonify({"ok": False, "code": "NOT_FOUND", "message": "Template not found"}), 404
 
@@ -136,7 +136,7 @@ def publish_template(template_id):
     if error:
         return error
 
-    template = PublicCurriculumTemplate.query.get(template_id)
+    template = db.session.get(PublicCurriculumTemplate, template_id)
     if not template:
         return jsonify({"ok": False, "code": "NOT_FOUND", "message": "Template not found"}), 404
 
@@ -153,7 +153,7 @@ def unpublish_template(template_id):
     if error:
         return error
 
-    template = PublicCurriculumTemplate.query.get(template_id)
+    template = db.session.get(PublicCurriculumTemplate, template_id)
     if not template:
         return jsonify({"ok": False, "code": "NOT_FOUND", "message": "Template not found"}), 404
 
@@ -170,7 +170,7 @@ def delete_template(template_id):
     if error:
         return error
 
-    template = PublicCurriculumTemplate.query.get(template_id)
+    template = db.session.get(PublicCurriculumTemplate, template_id)
     if not template:
         return jsonify({"ok": False, "code": "NOT_FOUND", "message": "Template not found"}), 404
 

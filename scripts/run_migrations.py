@@ -1,146 +1,72 @@
 """
-Run pending SQLite migrations.
+Compatibility wrapper for Postgres migrations.
 
 Usage:
-  python scripts/run_migrations.py --db path/to/exam.db
+  python scripts/run_migrations.py --db "postgresql+psycopg://user:pass@host:5432/dbname"
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import sys
-from datetime import datetime
 from pathlib import Path
-
-import sqlite3
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
-MIGRATIONS_DIR = ROOT_DIR / "migrations"
+
+from scripts.run_postgres_migrations import (
+    DEFAULT_MIGRATIONS_DIR,
+    run_migrations as run_postgres_migrations,
+)
+
+
+def _normalize_db_uri(db_uri: str) -> str:
+    uri = db_uri.strip()
+    if uri.startswith("postgres://"):
+        return uri.replace("postgres://", "postgresql+psycopg://", 1)
+    if uri.startswith("postgresql://"):
+        return uri.replace("postgresql://", "postgresql+psycopg://", 1)
+    if uri.startswith("postgresql+psycopg://"):
+        return uri
+    raise RuntimeError(
+        "run_migrations.py now supports PostgreSQL only "
+        "(postgresql+psycopg://...)."
+    )
 
 
 def _resolve_db_uri(db_arg: str | None) -> str:
     if db_arg:
-        if "://" in db_arg:
-            return db_arg
-        return f"sqlite:///{Path(db_arg).resolve()}"
+        return _normalize_db_uri(db_arg)
 
     from config import get_config
 
-    return str(get_config().runtime.db_uri)
-
-
-def _sqlite_path_from_uri(uri: str) -> Path:
-    if uri.startswith("sqlite:///"):
-        return Path(uri.replace("sqlite:///", "", 1))
-    if uri.startswith("sqlite://"):
-        return Path(uri.replace("sqlite://", "", 1))
-    raise RuntimeError("run_migrations.py only supports SQLite URIs.")
-
-
-def _checksum(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def _ensure_schema_migrations(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS schema_migrations (
-            version TEXT PRIMARY KEY,
-            checksum TEXT NOT NULL,
-            applied_at TEXT NOT NULL
-        )
-        """
-    )
-    conn.commit()
-
-
-def _load_migrations() -> list[Path]:
-    if not MIGRATIONS_DIR.exists():
-        return []
-    return sorted(p for p in MIGRATIONS_DIR.glob("*.sql") if p.is_file())
-
-
-def _sql_literal(value: str) -> str:
-    return value.replace("'", "''")
-
-
-def _fetch_applied(conn: sqlite3.Connection) -> dict[str, str]:
-    rows = conn.execute(
-        "SELECT version, checksum FROM schema_migrations"
-    ).fetchall()
-    return {row[0]: row[1] for row in rows}
-
-
-def _apply_migration(
-    conn: sqlite3.Connection, version: str, sql_text: str, checksum: str
-) -> None:
-    applied_at = datetime.utcnow().isoformat(timespec="seconds")
-    script = "\n".join(
-        [
-            "BEGIN;",
-            sql_text.rstrip().rstrip(";") + ";",
-            (
-                "INSERT INTO schema_migrations (version, checksum, applied_at) "
-                f"VALUES ('{_sql_literal(version)}', '{checksum}', '{applied_at}');"
-            ),
-            "COMMIT;",
-        ]
-    )
-    conn.executescript(script)
+    return _normalize_db_uri(str(get_config().runtime.db_uri))
 
 
 def run_migrations(db_uri: str) -> int:
-    if not db_uri.startswith("sqlite://"):
-        raise RuntimeError("run_migrations.py only supports SQLite databases.")
-
-    db_path = _sqlite_path_from_uri(db_uri)
-    if not db_path.exists():
-        raise FileNotFoundError(f"SQLite DB not found: {db_path}")
-
-    migrations = _load_migrations()
-    if not migrations:
-        print("No migrations found.")
-        return 0
-
-    applied_count = 0
-    with sqlite3.connect(db_path.as_posix()) as conn:
-        _ensure_schema_migrations(conn)
-        applied = _fetch_applied(conn)
-
-        for path in migrations:
-            version = path.name
-            sql_text = path.read_text(encoding="utf-8")
-            checksum = _checksum(sql_text)
-
-            if version in applied:
-                if applied[version] != checksum:
-                    raise RuntimeError(
-                        f"Checksum mismatch for {version}: {applied[version]} != {checksum}"
-                    )
-                print(f"Skip: {version}")
-                continue
-
-            try:
-                _apply_migration(conn, version, sql_text, checksum)
-            except Exception as exc:
-                raise RuntimeError(f"Migration failed: {version}") from exc
-
-            applied_count += 1
-            print(f"Applied: {version}")
-
-    return applied_count
+    return run_postgres_migrations(
+        db_uri=_normalize_db_uri(db_uri),
+        migrations_dir=DEFAULT_MIGRATIONS_DIR,
+        dry_run=False,
+    )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run pending SQLite migrations.")
-    parser.add_argument("--db", help="Path to sqlite db file.")
+    parser = argparse.ArgumentParser(description="Run pending Postgres migrations.")
+    parser.add_argument("--db", help="PostgreSQL URI override.")
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     db_uri = _resolve_db_uri(args.db)
-    count = run_migrations(db_uri)
-    print(f"Applied {count} migrations.")
+    count = run_postgres_migrations(
+        db_uri=db_uri,
+        migrations_dir=DEFAULT_MIGRATIONS_DIR,
+        dry_run=args.dry_run,
+    )
+    if args.dry_run:
+        print("Dry run complete.")
+    else:
+        print(f"Applied {count} Postgres migrations.")
 
 
 if __name__ == "__main__":

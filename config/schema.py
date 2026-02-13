@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from .base import DEFAULT_JWT_SECRET_KEY
+
 
 @dataclass
 class RuntimeConfig:
@@ -30,12 +32,13 @@ class RuntimeConfig:
     # File handling
     upload_folder: Path = field(default_factory=lambda: Path("app/static/uploads"))
     max_content_length: int = 100 * 1024 * 1024  # 100MB
+    keep_pdf_after_index: bool = False
     allowed_extensions: set = field(
         default_factory=lambda: {"png", "jpg", "jpeg", "gif"}
     )
 
     # JWT
-    jwt_secret_key: str = "dev-jwt-secret-key"
+    jwt_secret_key: str = DEFAULT_JWT_SECRET_KEY
     jwt_cookie_secure: bool = False
 
     # AI/Gemini
@@ -56,7 +59,7 @@ class RuntimeConfig:
     local_admin_only: bool = False
 
     # CORS
-    cors_allowed_origins: str = "http://localhost:3000"
+    cors_allowed_origins: str = "http://localhost:4000"
 
     def __post_init__(self):
         """Validate after initialization."""
@@ -97,8 +100,21 @@ class ExperimentConfig:
     semantic_expansion_query_max_chars: int = 1200
 
     # Retrieval mode
-    retrieval_mode: str = "hybrid_rrf"
+    retrieval_mode: str = "bm25"
     rrf_k: int = 60
+    search_backend: str = "auto"  # auto | postgres
+    search_pg_query_mode: str = "websearch"  # websearch | plainto | to_tsquery
+    search_pg_trgm_enabled: bool = False
+    search_pg_trgm_min_similarity: float = 0.2
+    search_pg_trgm_top_n: int = 40
+    search_pg_trgm_alpha: float = 0.3
+    search_pg_trgm_blend_mode: str = "conditional"  # conditional | always | off
+    search_pg_trgm_min_bm25_results: int = 10
+
+    # Lecture aggregation
+    lecture_agg_mode: str = "sum"   # sum | topm_mean
+    lecture_topm: int = 3
+    lecture_chunk_cap: int = 0      # 0 = disabled
 
     # Embedding model
     embedding_model_name: str = "intfloat/multilingual-e5-base"
@@ -121,6 +137,16 @@ class ExperimentConfig:
 
     # PDF Processing
     pdf_parser_mode: str = "legacy"
+    classifier_allow_id_from_text: bool = False
+    classifier_require_verbatim_quote: bool = True
+    classifier_require_page_span: bool = True
+    classifier_rejudge_enabled: bool = True
+    classifier_rejudge_min_candidates: int = 3
+    classifier_rejudge_top_k: int = 8
+    classifier_rejudge_evidence_per_lecture: int = 6
+    classifier_rejudge_min_confidence_strict: float = 0.80
+    classifier_rejudge_allow_weak_match: bool = True
+    classifier_rejudge_min_confidence_weak: float = 0.65
 
     def __post_init__(self):
         """Validate after initialization."""
@@ -136,6 +162,30 @@ class ExperimentConfig:
             raise ValueError("AUTO_CONFIRM_V2_MIN_CHUNK_LEN must be >= 0")
         if self.rrf_k <= 0:
             raise ValueError("RRF_K must be > 0")
+        if self.search_backend not in ("auto", "postgres", "postgresql"):
+            raise ValueError(
+                "SEARCH_BACKEND must be one of auto|postgres|postgresql"
+            )
+        if self.search_pg_query_mode not in ("websearch", "plainto", "to_tsquery"):
+            raise ValueError(
+                "SEARCH_PG_QUERY_MODE must be one of websearch|plainto|to_tsquery"
+            )
+        if not 0.0 <= self.search_pg_trgm_min_similarity <= 1.0:
+            raise ValueError("SEARCH_PG_TRGM_MIN_SIMILARITY must be between 0.0 and 1.0")
+        if self.search_pg_trgm_top_n <= 0:
+            raise ValueError("SEARCH_PG_TRGM_TOP_N must be > 0")
+        if not 0.0 <= self.search_pg_trgm_alpha <= 10.0:
+            raise ValueError("SEARCH_PG_TRGM_ALPHA must be between 0.0 and 10.0")
+        if self.search_pg_trgm_blend_mode not in ("conditional", "always", "off"):
+            raise ValueError(
+                "SEARCH_PG_TRGM_BLEND_MODE must be one of conditional|always|off"
+            )
+        if self.lecture_agg_mode not in ("sum", "topm_mean"):
+            raise ValueError("LECTURE_AGG_MODE must be one of sum|topm_mean")
+        if self.lecture_topm <= 0:
+            raise ValueError("LECTURE_TOPM must be > 0")
+        if self.lecture_chunk_cap < 0:
+            raise ValueError("LECTURE_CHUNK_CAP must be >= 0")
         if self.embedding_dim <= 0:
             raise ValueError("EMBEDDING_DIM must be > 0")
         if not 0.0 <= self.hyde_embed_weight <= 1.0:
@@ -144,6 +194,22 @@ class ExperimentConfig:
             raise ValueError("HYDE_EMBED_WEIGHT_ORIG must be between 0.0 and 1.0")
         if self.hyde_strategy not in ("blend", "best_of_two"):
             raise ValueError("HYDE_STRATEGY must be 'blend' or 'best_of_two'")
+        if self.classifier_rejudge_min_candidates <= 0:
+            raise ValueError("CLASSIFIER_REJUDGE_MIN_CANDIDATES must be > 0")
+        if self.classifier_rejudge_top_k <= 0:
+            raise ValueError("CLASSIFIER_REJUDGE_TOP_K must be > 0")
+        if self.classifier_rejudge_evidence_per_lecture <= 0:
+            raise ValueError(
+                "CLASSIFIER_REJUDGE_EVIDENCE_PER_LECTURE must be > 0"
+            )
+        if not 0.0 <= self.classifier_rejudge_min_confidence_strict <= 1.0:
+            raise ValueError(
+                "CLASSIFIER_REJUDGE_MIN_CONFIDENCE_STRICT must be between 0.0 and 1.0"
+            )
+        if not 0.0 <= self.classifier_rejudge_min_confidence_weak <= 1.0:
+            raise ValueError(
+                "CLASSIFIER_REJUDGE_MIN_CONFIDENCE_WEAK must be between 0.0 and 1.0"
+            )
 
 
 @dataclass

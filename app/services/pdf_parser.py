@@ -32,6 +32,7 @@ LABEL_SPACE_FIX_ALPHA = re.compile(r"([A-Za-z])\s+([)\.])")
 def clean_text(s: str) -> str:
     s = s.replace("\u00A0", " ")
     s = CID_RE.sub(" ", s)
+    s = s.replace("\x00", "")
     s = re.sub(r"[\x00-\x1F\x7F]", " ", s)
     s = re.sub(r"[ \t]+", " ", s)
     s = s.strip()

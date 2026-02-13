@@ -247,7 +247,7 @@
                     <div class="dot {% if not db_ok %}warn{% endif %}"></div>
                     <div>{{ 'DB 연결 정상' if db_ok else 'DB 연결 실패' }}</div>
                 </div>
-                <span>{{ db_error if db_error else 'SQLite 연결이 정상입니다.' }}</span>
+                <span>{{ db_error if db_error else 'PostgreSQL 연결이 정상입니다.' }}</span>
             </div>
             <div class="card" style="animation-delay: 0.1s;">
                 <strong>{{ counts.blocks if counts.blocks is not none else '—' }}</strong>

@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+if [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+  PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python)"
+else
+  echo "[dev-test-backend] python interpreter not found." >&2
+  exit 1
+fi
+
+load_env_file() {
+  local file="$1"
+  if [[ -f "$file" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$file"
+    set +a
+  fi
+}
+
+# Load docker defaults first, then local overrides.
+load_env_file ".env.docker"
+load_env_file ".env"
+
+db_user="${POSTGRES_USER:-exam}"
+db_password="${POSTGRES_PASSWORD:-exam_dev_password}"
+db_name="${POSTGRES_DB:-exam_manager}"
+db_host="${POSTGRES_HOST:-127.0.0.1}"
+db_port="${POSTGRES_PORT:-5432}"
+test_db_name="${POSTGRES_TEST_DB:-${db_name}_test}"
+
+if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
+  export TEST_DATABASE_URL="postgresql+psycopg://${db_user}:${db_password}@${db_host}:${db_port}/${test_db_name}"
+fi
+
+echo "[dev-test-backend] starting db container"
+"$ROOT_DIR/scripts/dev-db" up -d db
+
+echo "[dev-test-backend] waiting for db to become ready"
+for _ in $(seq 1 30); do
+  if "$ROOT_DIR/scripts/dev-db" exec -T db sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1'; then
+    break
+  fi
+  sleep 1
+done
+
+if ! "$ROOT_DIR/scripts/dev-db" exec -T db sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1'; then
+  echo "[dev-test-backend] db is not ready after waiting." >&2
+  exit 1
+fi
+
+escaped_test_db_name="${test_db_name//\"/\"\"}"
+escaped_test_db_literal="${test_db_name//\'/\'\'}"
+echo "[dev-test-backend] ensuring test database: ${test_db_name}"
+"$ROOT_DIR/scripts/dev-db" exec -T db sh -lc "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -tAc \"SELECT 1 FROM pg_database WHERE datname='${escaped_test_db_literal}'\" | grep -q 1 || psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"CREATE DATABASE \\\"${escaped_test_db_name}\\\";\""
+
+echo "[dev-test-backend] TEST_DATABASE_URL=${TEST_DATABASE_URL}"
+if [[ $# -eq 0 ]]; then
+  set -- -q
+fi
+PYTHONPATH=. "$PYTHON_BIN" -m pytest "$@"

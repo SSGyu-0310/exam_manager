@@ -415,7 +415,7 @@ def submit(lecture_id):
         question_meta,
     )
     if error_code:
-        return jsonify({'success': False, 'error': '?°ì´?°ê? ?†ìŠµ?ˆë‹¤.'}), 400
+        return jsonify({'success': False, 'error': '답안 형식이 올바르지 않습니다.'}), 400
 
     _summary, items, counts = evaluate_practice_answers(questions, answers_v1 or {})
     results = build_legacy_results(questions, items, include_content=True)

@@ -155,12 +155,12 @@ class TestClone:
 
         # Verify ownership
         with app.app_context():
-            block = Block.query.get(data["data"]["blockIds"][0])
+            block = db.session.get(Block, data["data"]["blockIds"][0])
             assert block is not None
             assert block.user_id == regular_user.id
             assert block.name == "심혈관"
 
-            lecture = Lecture.query.get(data["data"]["lectureIds"][0])
+            lecture = db.session.get(Lecture, data["data"]["lectureIds"][0])
             assert lecture is not None
             assert lecture.user_id == regular_user.id
 

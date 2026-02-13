@@ -9,7 +9,6 @@ from flask import (
     flash,
     current_app,
     abort,
-    jsonify,
     session,
 )
 from werkzeug.utils import secure_filename
@@ -32,7 +31,12 @@ from app.services.markdown_images import strip_markdown_images
 from app.services.db_backup import maybe_backup_before_write
 from app.services.db_guard import guard_write_request
 from app.services.db_utils import is_postgres
+from app.services.pdf_import_service import save_parsed_questions
 from app.services.manage_service import get_dashboard_stats
+from app.services.api_response import (
+    success_response as _success_response,
+    error_response as _error_response,
+)
 from app.services.user_scope import (
     attach_current_user,
     current_user,
@@ -79,8 +83,38 @@ def _require_user_json():
         return None, error
     user = current_user()
     if user is None:
-        return None, ({"success": False, "error": "Authentication required."}, 401)
+        return None, _json_error(
+            "Authentication required.",
+            code="UNAUTHORIZED",
+            status=401,
+        )
     return user, None
+
+
+def _json_success(data=None, status=200, code=None, message=None, legacy=None):
+    merged_legacy = {"success": True}
+    if legacy:
+        merged_legacy.update(legacy)
+    return _success_response(
+        data=data,
+        status=status,
+        code=code,
+        message=message,
+        legacy=merged_legacy,
+    )
+
+
+def _json_error(message, code="BAD_REQUEST", status=400, data=None, legacy=None):
+    merged_legacy = {"success": False, "error": message}
+    if legacy:
+        merged_legacy.update(legacy)
+    return _error_response(
+        message=message,
+        code=code,
+        status=status,
+        data=data,
+        legacy=merged_legacy,
+    )
 
 
 def _resolve_subject_from_form(subject_value, user, is_public=False):
@@ -138,6 +172,17 @@ def _resolve_upload_folder() -> Path:
     if not upload_folder:
         upload_folder = Path(current_app.static_folder) / "uploads"
     return Path(upload_folder)
+
+
+def _should_keep_pdf_after_index() -> bool:
+    return bool(current_app.config.get("KEEP_PDF_AFTER_INDEX", False))
+
+
+def _remove_material_file(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        current_app.logger.warning("Lecture note file delete failed: %s", path)
 
 
 def _ensure_editable(resource, user):
@@ -329,16 +374,18 @@ def upload_lecture_note(lecture_id):
     _ensure_editable(lecture, user)
 
     if "pdf_file" not in request.files:
-        return jsonify({"success": False, "error": "PDF 파일이 필요합니다."}), 400
+        return _json_error("PDF 파일이 필요합니다.", code="PDF_REQUIRED", status=400)
 
     file = request.files["pdf_file"]
     if file.filename == "":
-        return jsonify({"success": False, "error": "파일명이 없습니다."}), 400
+        return _json_error("파일명이 없습니다.", code="FILE_NAME_REQUIRED", status=400)
 
     if not file.filename.lower().endswith(".pdf"):
-        return jsonify(
-            {"success": False, "error": "PDF 파일만 업로드 가능합니다."}
-        ), 400
+        return _json_error(
+            "PDF 파일만 업로드 가능합니다.",
+            code="INVALID_FILE_TYPE",
+            status=400,
+        )
 
     try:
         upload_folder = _resolve_upload_folder()
@@ -367,18 +414,31 @@ def upload_lecture_note(lecture_id):
         from app.services.lecture_indexer import index_material
 
         index_result = index_material(material)
+        if not _should_keep_pdf_after_index():
+            _remove_material_file(stored_path)
 
-        return jsonify(
-            {
-                "success": True,
+        material_payload = {
+            "materialId": material.id,
+            "chunks": index_result.get("chunks", 0),
+            "pages": index_result.get("pages", 0),
+        }
+        return _json_success(
+            data=material_payload,
+            code="LECTURE_NOTE_UPLOADED",
+            message="Lecture note uploaded.",
+            legacy={
                 "material_id": material.id,
-                "chunks": index_result.get("chunks", 0),
-                "pages": index_result.get("pages", 0),
-            }
+                "chunks": material_payload["chunks"],
+                "pages": material_payload["pages"],
+            },
         )
     except Exception as e:
         current_app.logger.exception("Lecture note indexing failed")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return _json_error(
+            str(e),
+            code="LECTURE_NOTE_INDEX_FAILED",
+            status=500,
+        )
 
 
 @manage_bp.route("/lecture/<int:lecture_id>/note-status")
@@ -413,7 +473,12 @@ def lecture_note_status(lecture_id):
             }
         )
 
-    return jsonify({"success": True, "materials": payload})
+    return _json_success(
+        data={"materials": payload},
+        code="LECTURE_NOTE_STATUS_OK",
+        message="Lecture note status fetched.",
+        legacy={"materials": payload},
+    )
 
 
 @manage_bp.route(
@@ -460,11 +525,19 @@ def delete_lecture_note(lecture_id, material_id):
 
         db.session.delete(material)
         db.session.commit()
-        return jsonify({"success": True})
+        return _json_success(
+            data={"id": material_id},
+            code="LECTURE_NOTE_DELETED",
+            message="Lecture note deleted.",
+        )
     except Exception as e:
         db.session.rollback()
         current_app.logger.exception("Failed to delete lecture note %s", material.id)
-        return jsonify({"success": False, "error": str(e)}), 500
+        return _json_error(
+            str(e),
+            code="LECTURE_NOTE_DELETE_FAILED",
+            status=500,
+        )
 
 
 @manage_bp.route("/lecture/<int:lecture_id>")
@@ -601,10 +674,15 @@ def eval_labeler():
                 top_n=80,
                 question_id=question.id,
             )
+            from config import get_config as _get_config
+            _cfg = _get_config().experiment
             candidates = retrieval.aggregate_candidates(
                 chunks,
                 top_k_lectures=5,
                 evidence_per_lecture=2,
+                agg_mode=_cfg.lecture_agg_mode,
+                topm=_cfg.lecture_topm,
+                chunk_cap=_cfg.lecture_chunk_cap,
             )
 
     exams = scope_model(PreviousExam, user).order_by(
@@ -709,7 +787,12 @@ def search_lectures():
     user = current_user()
     query = (request.args.get("q") or "").strip()
     if not query:
-        return jsonify({"items": []})
+        return _json_success(
+            data={"items": []},
+            code="LECTURE_SEARCH_EMPTY",
+            message="No query provided.",
+            legacy={"items": []},
+        )
 
     q = f"%{query}%"
     lecture_query = (
@@ -739,7 +822,12 @@ def search_lectures():
         }
         for lecture in lectures
     ]
-    return jsonify({"items": items})
+    return _json_success(
+        data={"items": items},
+        code="LECTURE_SEARCH_OK",
+        message="Lecture search completed.",
+        legacy={"items": items},
+    )
 
 
 # ===== 문제 관리 =====
@@ -822,6 +910,8 @@ def upload_pdf():
         if subject_value:
             _resolve_subject_from_form(subject_value, user, is_public=False)
 
+        tmp_path = None
+        crop_dir = None
         try:
             parser_mode = current_app.config.get("PDF_PARSER_MODE", "legacy")
             if parser_mode == "experimental":
@@ -830,8 +920,6 @@ def upload_pdf():
                 from app.services.pdf_parser import parse_pdf_to_questions
 
             # PDF 파일 임시 저장
-            tmp_path = None
-            crop_dir = None
             crop_question_count = 0
             crop_image_count = 0
             crop_question_images = {}
@@ -894,62 +982,13 @@ def upload_pdf():
                 current_app.logger.warning("PDF crop skipped: %s", exc)
                 flash(f"PDF crop 건너뜀: {exc}", "warning")
 
-            question_count = 0
-            choice_count = 0
-
-            for q_data in questions_data:
-                qnum = int(q_data["question_number"])
-                # Keep parser output in question.image_path.
-                # Cropped originals are exposed separately via original_image_url.
-                question_image_path = q_data.get("image_path")
-
-                # 문제 유형 결정
-                answer_count = len(q_data.get("answer_options", []))
-                has_options = len(q_data.get("options", [])) > 0
-
-                if not has_options:
-                    q_type = Question.TYPE_SHORT_ANSWER
-                elif answer_count > 1:
-                    q_type = Question.TYPE_MULTIPLE_RESPONSE
-                else:
-                    q_type = Question.TYPE_MULTIPLE_CHOICE
-
-                # Question 생성
-                question = Question(
-                    exam_id=exam.id,
-                    user_id=user.id,
-                    question_number=qnum,
-                    content=q_data.get("content", ""),
-                    image_path=question_image_path,
-                    examiner=q_data.get("examiner"),
-                    q_type=q_type,
-                    answer=",".join(map(str, q_data.get("answer_options", []))),
-                    correct_answer_text=q_data.get("answer_text")
-                    if q_type == Question.TYPE_SHORT_ANSWER
-                    else None,
-                    explanation=q_data.get("answer_text")
-                    if q_type != Question.TYPE_SHORT_ANSWER
-                    else None,
-                    is_classified=False,
-                    lecture_id=None,
-                )
-                db.session.add(question)
-                db.session.flush()
-
-                # Choice 생성
-                for opt in q_data.get("options", []):
-                    if opt.get("content") or opt.get("image_path"):
-                        choice = Choice(
-                            question_id=question.id,
-                            choice_number=opt["number"],
-                            content=opt.get("content", ""),
-                            image_path=opt.get("image_path"),
-                            is_correct=opt.get("is_correct", False),
-                        )
-                        db.session.add(choice)
-                        choice_count += 1
-
-                question_count += 1
+            question_count, choice_count = save_parsed_questions(
+                exam_id=exam.id,
+                user_id=user.id,
+                questions_data=questions_data,
+                crop_question_images=crop_question_images,
+                crop_is_reliable=crop_is_reliable,
+            )
 
             db.session.commit()
             flash(
@@ -969,6 +1008,12 @@ def upload_pdf():
                 )
             return redirect(url_for("manage.list_exams"))
 
+        except ValueError as e:
+            db.session.rollback()
+            if crop_dir:
+                shutil.rmtree(crop_dir, ignore_errors=True)
+            flash(str(e), "error")
+            return redirect(request.url)
         except ImportError as e:
             db.session.rollback()
             if crop_dir:
@@ -1199,21 +1244,33 @@ def move_questions():
     if auth_error is not None:
         return auth_error
 
-    data = request.json
+    data = request.get_json(silent=True) or {}
     question_ids = data.get("question_ids", [])
     target_lecture_id = data.get("target_lecture_id")
 
     if not question_ids:
-        return {"success": False, "error": "선택된 문제가 없습니다."}, 400
+        return _json_error(
+            "선택된 문제가 없습니다.",
+            code="QUESTION_IDS_REQUIRED",
+            status=400,
+        )
 
     if not target_lecture_id:
-        return {"success": False, "error": "이동할 강의가 지정되지 않았습니다."}, 400
+        return _json_error(
+            "이동할 강의가 지정되지 않았습니다.",
+            code="TARGET_LECTURE_REQUIRED",
+            status=400,
+        )
 
     lecture = get_scoped_by_id(
         Lecture, int(target_lecture_id), user, include_public=True
     )
     if not lecture:
-        return {"success": False, "error": "강의를 찾을 수 없습니다."}, 404
+        return _json_error(
+            "강의를 찾을 수 없습니다.",
+            code="LECTURE_NOT_FOUND",
+            status=404,
+        )
 
     try:
         updated_count = (
@@ -1229,10 +1286,15 @@ def move_questions():
             )
         )
         db.session.commit()
-        return {"success": True, "moved_count": updated_count}
+        return _json_success(
+            data={"movedCount": updated_count},
+            code="QUESTIONS_MOVED",
+            message="Questions moved.",
+            legacy={"moved_count": updated_count},
+        )
     except Exception as e:
         db.session.rollback()
-        return {"success": False, "error": str(e)}, 500
+        return _json_error(str(e), code="QUESTION_MOVE_FAILED", status=500)
 
 
 @manage_bp.route("/questions/reset", methods=["POST"])
@@ -1244,11 +1306,15 @@ def reset_questions():
     if auth_error is not None:
         return auth_error
 
-    data = request.json
+    data = request.get_json(silent=True) or {}
     question_ids = data.get("question_ids", [])
 
     if not question_ids:
-        return {"success": False, "error": "선택된 문제가 없습니다."}, 400
+        return _json_error(
+            "선택된 문제가 없습니다.",
+            code="QUESTION_IDS_REQUIRED",
+            status=400,
+        )
 
     try:
         updated_count = (
@@ -1264,10 +1330,15 @@ def reset_questions():
             )
         )
         db.session.commit()
-        return {"success": True, "reset_count": updated_count}
+        return _json_success(
+            data={"resetCount": updated_count},
+            code="QUESTIONS_RESET",
+            message="Questions reset.",
+            legacy={"reset_count": updated_count},
+        )
     except Exception as e:
         db.session.rollback()
-        return {"success": False, "error": str(e)}, 500
+        return _json_error(str(e), code="QUESTION_RESET_FAILED", status=500)
 
 
 @manage_bp.route("/upload-image", methods=["POST"])
@@ -1280,16 +1351,20 @@ def upload_image():
         return auth_error
 
     if "image" not in request.files:
-        return {"success": False, "error": "이미지가 없습니다."}, 400
+        return _json_error("이미지가 없습니다.", code="IMAGE_REQUIRED", status=400)
 
     file = request.files["image"]
     if file.filename == "":
-        return {"success": False, "error": "파일명이 없습니다."}, 400
+        return _json_error("파일명이 없습니다.", code="FILE_NAME_REQUIRED", status=400)
 
     # 고유 파일명 생성
     ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "png"
     if ext not in ["png", "jpg", "jpeg", "gif", "webp"]:
-        return {"success": False, "error": "허용되지 않는 이미지 형식입니다."}, 400
+        return _json_error(
+            "허용되지 않는 이미지 형식입니다.",
+            code="INVALID_IMAGE_TYPE",
+            status=400,
+        )
 
     filename = f"{uuid.uuid4().hex}.{ext}"
 
@@ -1306,6 +1381,11 @@ def upload_image():
         relative_folder = os.path.relpath(upload_folder, current_app.static_folder)
         relative_folder = relative_folder.replace("\\", "/").strip("/")
         image_url = url_for("static", filename=f"{relative_folder}/{filename}")
-        return {"success": True, "url": image_url, "filename": filename}
+        return _json_success(
+            data={"url": image_url, "filename": filename},
+            code="IMAGE_UPLOADED",
+            message="Image uploaded.",
+            legacy={"url": image_url, "filename": filename},
+        )
     except Exception as e:
-        return {"success": False, "error": str(e)}, 500
+        return _json_error(str(e), code="IMAGE_UPLOAD_FAILED", status=500)

@@ -5,6 +5,12 @@ import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/http";
 import { getUnclassifiedQueue } from "@/lib/api/exam";
 import type { BlockSummary, ExamSummary, UnclassifiedQuestion } from "@/lib/api/exam";
+import {
+  getApiEnvelopeData,
+  getApiEnvelopeMessage,
+  isApiEnvelopeOk,
+  type ApiEnvelope,
+} from "@/lib/api/contract";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,6 +41,30 @@ type RecentJob = {
   total_count?: number;
   success_count?: number;
 };
+
+type AiRecentPayload = {
+  jobs?: RecentJob[];
+};
+
+type AiStartPayload = {
+  job_id?: number;
+  status?: string;
+  reused?: boolean;
+};
+
+type AiStatusPayload = {
+  status?: string;
+  progress_percent?: number;
+  is_complete?: boolean;
+  error_message?: string;
+};
+
+type AiResultPayload = {
+  grouped_results?: unknown[];
+  summary?: AiStatus["summary"];
+};
+
+const previewRoute = (jobId: number) => `/manage/classifications/${jobId}`;
 
 const extractQuestionIds = (grouped: unknown[]) => {
   const ids: number[] = [];
@@ -96,11 +126,12 @@ export function UnclassifiedQueue() {
   useEffect(() => {
     const loadRecent = async () => {
       try {
-        const data = await apiFetch<{ success?: boolean; jobs?: RecentJob[] }>(
+        const payload = await apiFetch<ApiEnvelope<AiRecentPayload>>(
           "/ai/classify/recent",
           { cache: "no-store" }
         );
-        if (data.success && Array.isArray(data.jobs)) {
+        const data = getApiEnvelopeData(payload);
+        if (isApiEnvelopeOk(payload) && Array.isArray(data?.jobs)) {
           setRecentJobs(data.jobs);
         }
       } catch {
@@ -199,20 +230,21 @@ export function UnclassifiedQueue() {
       return;
     }
     try {
-      const response = await apiFetch<{
-        success?: boolean;
-        job_id?: number;
-        status?: string;
-        error?: string;
-      }>("/ai/classify/start", {
+      const payload = await apiFetch<ApiEnvelope<AiStartPayload>>("/ai/classify/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question_ids: Array.from(selected) }),
+        body: JSON.stringify({
+          question_ids: Array.from(selected),
+          force: true,
+          retry_failed: true,
+        }),
       });
-      if (!response.success || !response.job_id) {
-        throw new Error(response.error || t("classifications.errorAiStart"));
+      const data = getApiEnvelopeData(payload);
+      if (!isApiEnvelopeOk(payload) || !data?.job_id) {
+        throw new Error(getApiEnvelopeMessage(payload, t("classifications.errorAiStart")));
       }
-      setAiStatus({ jobId: response.job_id, status: response.status, error: null });
+      setAiStatus({ jobId: data.job_id, status: data.status, error: null });
+      window.location.href = previewRoute(data.job_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("classifications.errorAiStart"));
     }
@@ -222,33 +254,36 @@ export function UnclassifiedQueue() {
     if (!aiStatus.jobId) return;
     const poll = async () => {
       try {
-        const response = await apiFetch<{
-          success?: boolean;
-          status?: string;
-          progress_percent?: number;
-          is_complete?: boolean;
-          error_message?: string;
-        }>(`/ai/classify/status/${aiStatus.jobId}`, { cache: "no-store" });
-        if (!response.success) {
-          throw new Error(response.error_message || "AI status failed.");
+        const statusPayload = await apiFetch<ApiEnvelope<AiStatusPayload>>(
+          `/ai/classify/status/${aiStatus.jobId}`,
+          { cache: "no-store" }
+        );
+        const statusData = getApiEnvelopeData(statusPayload);
+        if (!isApiEnvelopeOk(statusPayload)) {
+          throw new Error(
+            getApiEnvelopeMessage(
+              statusPayload,
+              statusData?.error_message || "AI status failed."
+            )
+          );
         }
         setAiStatus((prev) => ({
           ...prev,
-          status: response.status,
-          progress: response.progress_percent,
-          error: response.error_message ?? null,
+          status: statusData?.status,
+          progress: statusData?.progress_percent,
+          error: statusData?.error_message ?? null,
         }));
-        if (response.is_complete) {
-          const result = await apiFetch<{
-            success?: boolean;
-            grouped_results?: unknown[];
-            summary?: AiStatus["summary"];
-          }>(`/ai/classify/result/${aiStatus.jobId}`, { cache: "no-store" });
-          if (result.success) {
+        if (statusData?.is_complete) {
+          const resultPayload = await apiFetch<ApiEnvelope<AiResultPayload>>(
+            `/ai/classify/result/${aiStatus.jobId}`,
+            { cache: "no-store" }
+          );
+          const resultData = getApiEnvelopeData(resultPayload);
+          if (isApiEnvelopeOk(resultPayload)) {
             setAiStatus((prev) => ({
               ...prev,
-              groupedResults: result.grouped_results ?? [],
-              summary: result.summary,
+              groupedResults: resultData?.grouped_results ?? [],
+              summary: resultData?.summary,
             }));
           }
         }
@@ -349,6 +384,9 @@ export function UnclassifiedQueue() {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
               {t("classifications.aiClassification")}
             </p>
+            <p className="text-xs text-muted-foreground">
+              {t("classifications.previewHint")}
+            </p>
             <div className="space-y-2 text-sm text-muted-foreground">
               <p>{t("classifications.selected")}: {selected.size}</p>
               {aiStatus.status && (
@@ -384,10 +422,17 @@ export function UnclassifiedQueue() {
                 </p>
                 <div className="mt-2 space-y-1">
                   {recentJobs.map((job) => (
-                    <div key={job.id} className="flex items-center justify-between">
+                    <button
+                      key={job.id}
+                      type="button"
+                      className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-left transition hover:bg-muted"
+                      onClick={() => {
+                        window.location.href = previewRoute(job.id);
+                      }}
+                    >
                       <span>#{job.id} · {job.created_at}</span>
                       <span>{job.status_label ?? job.status}</span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </div>

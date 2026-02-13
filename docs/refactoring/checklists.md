@@ -3,7 +3,7 @@
 리팩토링을 안전하게 진행하기 위한 점검 항목입니다. 작업 전/중/후로 나누어 체크하세요.
 
 ## 1) 작업 전 체크리스트
-- [ ] `data/exam.db` 백업 완료 (필요 시 `data/admin_local.db`도 백업)
+- [ ] `python scripts/backup_postgres.py --db "$DATABASE_URL"` 백업 완료
 - [ ] `.env`와 `next_app/.env.local` 값 기록
 - [ ] 현재 동작 기준선 확인 (PDF 업로드, 분류, AI, 연습)
 - [ ] 이번 리팩토링 대상 파일/모듈 범위 확정

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ChevronDown,
   ChevronRight,
+  FileText,
   GripVertical,
   Minus,
   Pencil,
@@ -20,14 +21,16 @@ import {
   deleteBlock,
   deleteLecture,
   getBlocks,
+  getLectureDetail,
   getLectures,
-  getLecture,
   getSubjects,
+  uploadLectureMaterial,
   updateSubject,
   updateBlock,
   updateLecture,
   type ManageBlock,
   type ManageLecture,
+  type ManageMaterial,
   type ManageSubject,
 } from "@/lib/api/manage";
 import { Badge } from "@/components/ui/badge";
@@ -78,6 +81,9 @@ export function CurriculumManager() {
   const [lectureLoading, setLectureLoading] = useState(false);
   const [lectureSaving, setLectureSaving] = useState(false);
   const [lectureError, setLectureError] = useState<string | null>(null);
+  const [lectureMaterials, setLectureMaterials] = useState<ManageMaterial[]>([]);
+  const [materialUploading, setMaterialUploading] = useState(false);
+  const [materialMessage, setMaterialMessage] = useState<string | null>(null);
 
   const [dragSubjectId, setDragSubjectId] = useState<number | null>(null);
   const [dragBlockId, setDragBlockId] = useState<number | null>(null);
@@ -144,18 +150,24 @@ export function CurriculumManager() {
     if (!activeLectureId) {
       setLectureDetail(null);
       setLectureError(null);
+      setLectureMaterials([]);
+      setMaterialMessage(null);
       return;
     }
     let cancelled = false;
     setLectureLoading(true);
     setLectureError(null);
-    getLecture(activeLectureId)
+    setMaterialMessage(null);
+    getLectureDetail(activeLectureId)
       .then((data) => {
-        if (!cancelled) setLectureDetail(data);
+        if (cancelled) return;
+        setLectureDetail(data.lecture);
+        setLectureMaterials(data.materials ?? []);
       })
       .catch((err) => {
         if (!cancelled) {
           setLectureDetail(null);
+          setLectureMaterials([]);
           setLectureError(err instanceof Error ? err.message : t("manage.lectureLoadError"));
         }
       })
@@ -166,6 +178,43 @@ export function CurriculumManager() {
       cancelled = true;
     };
   }, [activeLectureId, t]);
+
+  const reloadLectureDetail = async (lectureId: number) => {
+    const data = await getLectureDetail(lectureId);
+    setLectureDetail(data.lecture);
+    setLectureMaterials(data.materials ?? []);
+  };
+
+  const handleMaterialUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    if (!activeLectureId) return;
+    const file = event.target.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setLectureError(t("manage.lectureMaterialPdfOnly"));
+      return;
+    }
+
+    setMaterialUploading(true);
+    setLectureError(null);
+    setMaterialMessage(null);
+    try {
+      const formData = new FormData();
+      formData.append("pdf_file", file);
+      const result = await uploadLectureMaterial(activeLectureId, formData);
+      await reloadLectureDetail(activeLectureId);
+      setMaterialMessage(
+        `${t("manage.lectureMaterialIndexed")}: ${result.chunks ?? 0} chunks, ${result.pages ?? 0} pages`
+      );
+      await refreshData();
+    } catch (err) {
+      setLectureError(
+        err instanceof Error ? err.message : t("manage.lectureMaterialUploadFailed")
+      );
+    } finally {
+      setMaterialUploading(false);
+    }
+  };
 
   const lecturesByBlock = useMemo(() => {
     const map = new Map<number, ManageLecture[]>();
@@ -1113,6 +1162,60 @@ export function CurriculumManager() {
                       <Button onClick={handleSaveLecture} disabled={lectureSaving}>
                         {lectureSaving ? t("manage.lectureSaving") : t("manage.lectureSave")}
                       </Button>
+                    </div>
+
+                    <div className="space-y-3 rounded-lg border border-border/70 bg-muted/20 p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                          {t("manage.lectureMaterials")}
+                        </label>
+                        <Badge variant="neutral">{lectureMaterials.length}</Badge>
+                      </div>
+                      <Input
+                        type="file"
+                        accept="application/pdf"
+                        onChange={handleMaterialUpload}
+                        disabled={materialUploading}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {t("manage.lectureMaterialUploadHelp")}
+                      </p>
+                      {materialMessage && (
+                        <div className="rounded border border-success/40 bg-success/10 px-3 py-2 text-sm text-success">
+                          {materialMessage}
+                        </div>
+                      )}
+                      {lectureMaterials.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          {t("manage.lectureMaterialNone")}
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {lectureMaterials.map((material) => (
+                            <div
+                              key={material.id}
+                              className="flex items-center justify-between gap-3 rounded border border-border/60 bg-card/80 px-3 py-2"
+                            >
+                              <div className="min-w-0 flex items-center gap-2">
+                                <FileText className="h-4 w-4 text-muted-foreground" />
+                                <span className="truncate text-sm">
+                                  {material.originalFilename ?? "lecture_note.pdf"}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Badge
+                                  variant={material.status === "indexed" ? "success" : "neutral"}
+                                >
+                                  {material.status ?? "unknown"}
+                                </Badge>
+                                <span className="text-xs text-muted-foreground">
+                                  {material.chunks ?? 0} chunks
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : (

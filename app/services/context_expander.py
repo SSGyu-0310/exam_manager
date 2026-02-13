@@ -15,7 +15,6 @@ from sqlalchemy import text
 
 from app import db
 from app.models import LectureChunk
-from app.services.db_utils import is_postgres
 from app.services import retrieval
 
 
@@ -41,16 +40,17 @@ def _semantic_neighbors(
     if not match_query:
         return []
 
-    if is_postgres():
+    if retrieval.use_postgres_search_backend():
+        tsq_expr = retrieval.postgres_tsquery_expression("query")
         sql = text(
-            """
+            f"""
             SELECT c.id AS chunk_id,
                    c.page_start,
                    c.page_end,
                    c.content,
-                   ts_rank_cd(c.content_tsv, to_tsquery('simple', :query)) AS bm25_score
+                   ts_rank_cd(c.content_tsv, {tsq_expr}) AS bm25_score
             FROM lecture_chunks c
-            WHERE c.content_tsv @@ to_tsquery('simple', :query)
+            WHERE c.content_tsv @@ {tsq_expr}
               AND c.lecture_id = :lecture_id
             ORDER BY bm25_score DESC
             LIMIT :top_n

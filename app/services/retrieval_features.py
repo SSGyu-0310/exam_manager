@@ -58,6 +58,7 @@ def build_retrieval_artifacts(
     question_text: str,
     question_id: Optional[int],
     *,
+    lecture_ids: Optional[List[int]] = None,
     top_n: int = 80,
     top_k: int = 5,
 ) -> RetrievalArtifacts:
@@ -65,6 +66,7 @@ def build_retrieval_artifacts(
         question_text,
         top_n=top_n,
         question_id=question_id,
+        lecture_ids=lecture_ids,
     )
     embed_chunks = retrieval.search_chunks_embedding(
         question_text,
@@ -76,6 +78,7 @@ def build_retrieval_artifacts(
         question_text,
         top_n=top_n,
         question_id=question_id,
+        lecture_ids=lecture_ids,
     )
 
     bm25_topk = _ranked_list(bm25_chunks, "bm25_score", top_k)

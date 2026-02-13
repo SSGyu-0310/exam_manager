@@ -78,6 +78,22 @@ def main() -> None:
             )
             """,
         )))
+        checks.append(("pg_trgm extension", _fetch_scalar(
+            conn,
+            "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname='pg_trgm')",
+        )))
+        checks.append(("Trigram GIN index", _fetch_scalar(
+            conn,
+            """
+            SELECT EXISTS (
+              SELECT 1
+              FROM pg_indexes
+              WHERE schemaname='public'
+                AND tablename='lecture_chunks'
+                AND indexname='idx_lecture_chunks_content_trgm'
+            )
+            """,
+        )))
 
         try:
             preload = _fetch_scalar(conn, "SHOW shared_preload_libraries")

@@ -90,7 +90,7 @@ def test_user_id_payload_is_ignored(client, app):
     exam_id = payload["data"]["id"]
 
     with app.app_context():
-        exam = PreviousExam.query.get(exam_id)
+        exam = db.session.get(PreviousExam, exam_id)
         assert exam.user_id == user_a.id
 
 

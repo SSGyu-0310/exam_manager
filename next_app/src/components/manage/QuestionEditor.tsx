@@ -8,12 +8,19 @@ import type {
   ManageQuestionDetail,
 } from "@/lib/api/manage";
 import { updateQuestion } from "@/lib/api/manage";
+import { apiFetch } from "@/lib/http";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { resolveImageUrl } from "@/lib/image";
+import {
+  getApiEnvelopeData,
+  getApiEnvelopeMessage,
+  isApiEnvelopeOk,
+  type ApiEnvelope,
+} from "@/lib/api/contract";
 
 type QuestionEditorProps = {
   question: ManageQuestionDetail;
@@ -21,6 +28,7 @@ type QuestionEditorProps = {
 };
 
 type ChoiceState = ManageChoice & { tempId: string };
+type ImageUploadPayload = { url?: string; filename?: string };
 
 const buildChoices = (choices: ManageChoice[], fallbackCount = 5) => {
   if (choices.length) {
@@ -119,17 +127,20 @@ export function QuestionEditor({ question, lectures }: QuestionEditorProps) {
   const handleImageUpload = async (file: File) => {
     const formData = new FormData();
     formData.append("image", file, file.name || "image.png");
-    const response = await fetch("/api/proxy/manage/upload-image", {
+    const payload = await apiFetch<ApiEnvelope<ImageUploadPayload>>(
+      "/manage/upload-image",
+      {
       method: "POST",
       body: formData,
       credentials: "include",
-    });
-    if (!response.ok) {
-      throw new Error("Image upload failed.");
+      }
+    );
+    if (!isApiEnvelopeOk(payload)) {
+      throw new Error(getApiEnvelopeMessage(payload, "Image upload failed."));
     }
-    const data = (await response.json()) as { success?: boolean; url?: string; filename?: string; error?: string };
-    if (!data.success) {
-      throw new Error(data.error || "Image upload failed.");
+    const data = getApiEnvelopeData(payload);
+    if (!data?.url) {
+      throw new Error("Image upload failed.");
     }
     setImageUrl(resolveImageUrl(data.url));
     setUploadedImage(data.filename ?? null);

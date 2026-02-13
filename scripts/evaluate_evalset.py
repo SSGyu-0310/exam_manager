@@ -2,7 +2,7 @@
 Evaluate retrieval/classification against evaluation_labels.
 
 Usage:
-  python scripts/evaluate_evalset.py --db data/dev.db
+  python scripts/evaluate_evalset.py --db "postgresql+psycopg://user:pass@host:5432/dbname"
 """
 from __future__ import annotations
 
@@ -28,6 +28,33 @@ from app import db
 from app.models import EvaluationLabel, Question
 from app.services import retrieval, retrieval_features
 from app.services.classifier_cache import ClassifierResultCache, build_config_hash
+
+
+def _normalize_db_uri(db_value: str | None) -> str | None:
+    if not db_value:
+        return None
+    db_uri = db_value.strip()
+    if db_uri.startswith("postgres://"):
+        db_uri = db_uri.replace("postgres://", "postgresql+psycopg://", 1)
+    elif db_uri.startswith("postgresql://"):
+        db_uri = db_uri.replace("postgresql://", "postgresql+psycopg://", 1)
+    if not db_uri.startswith("postgresql+psycopg://"):
+        raise RuntimeError(
+            "--db must be a PostgreSQL URI (postgresql+psycopg://...)."
+        )
+    return db_uri
+
+
+def _resolve_db_uri(db_arg: str | None) -> str:
+    if db_arg:
+        db_uri = _normalize_db_uri(db_arg)
+    else:
+        from config import get_config
+
+        db_uri = _normalize_db_uri(str(get_config().runtime.db_uri))
+    if not db_uri:
+        raise RuntimeError("DATABASE_URL is required for this script.")
+    return db_uri
 
 
 def _parse_list(value: str, cast=float):
@@ -168,8 +195,7 @@ def _classify_worker(app, question_id: int, candidates: list[dict], expand_conte
         return question_id, result
 
 
-def evaluate(db_path: Path, args) -> dict:
-    db_uri = f"sqlite:///{db_path.resolve().as_posix()}"
+def evaluate(db_uri: str, args) -> dict:
     app = create_app("default", db_uri_override=db_uri, skip_migration_check=True)
 
     with app.app_context():
@@ -490,7 +516,7 @@ def evaluate(db_path: Path, args) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate eval labels.")
-    parser.add_argument("--db", default="data/dev.db", help="SQLite db path.")
+    parser.add_argument("--db", default=None, help="PostgreSQL URI override.")
     parser.add_argument(
         "--pred-field",
         default="ai_final_lecture_id",
@@ -533,11 +559,8 @@ def main() -> None:
     args.thresholds = _parse_list(args.thresholds, float)
     args.margins = _parse_list(args.margins, float)
 
-    db_path = Path(args.db)
-    if not db_path.exists():
-        raise FileNotFoundError(f"DB not found: {db_path}")
-
-    result = evaluate(db_path, args)
+    db_uri = _resolve_db_uri(args.db)
+    result = evaluate(db_uri, args)
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     report_dir = ROOT_DIR / "reports" / f"eval_{timestamp}"
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -554,7 +577,7 @@ def main() -> None:
     )
     summary = {
         "generated_at": timestamp,
-        "db": db_path.as_posix(),
+        "db": db_uri,
         "pred_field": args.pred_field,
         "retrieval_mode": result["retrieval_mode"],
         "total": result["total"],

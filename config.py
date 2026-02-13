@@ -45,6 +45,7 @@ class Config:
     # ========================================================================
     UPLOAD_FOLDER = _app_config.runtime.upload_folder
     MAX_CONTENT_LENGTH = _app_config.runtime.max_content_length
+    KEEP_PDF_AFTER_INDEX = _app_config.runtime.keep_pdf_after_index
     ALLOWED_EXTENSIONS = _app_config.runtime.allowed_extensions
 
     # ========================================================================
@@ -89,6 +90,11 @@ class Config:
     # ========================================================================
     RETRIEVAL_MODE = _app_config.experiment.retrieval_mode
     RRF_K = _app_config.experiment.rrf_k
+    SEARCH_BACKEND = _app_config.experiment.search_backend
+    SEARCH_PG_QUERY_MODE = _app_config.experiment.search_pg_query_mode
+    SEARCH_PG_TRGM_ENABLED = _app_config.experiment.search_pg_trgm_enabled
+    SEARCH_PG_TRGM_MIN_SIMILARITY = _app_config.experiment.search_pg_trgm_min_similarity
+    SEARCH_PG_TRGM_TOP_N = _app_config.experiment.search_pg_trgm_top_n
     EMBEDDING_MODEL_NAME = _app_config.experiment.embedding_model_name
     EMBEDDING_DIM = _app_config.experiment.embedding_dim
     EMBEDDING_TOP_N = _app_config.experiment.embedding_top_n
@@ -109,6 +115,28 @@ class Config:
     # PDF Processing
     # ========================================================================
     PDF_PARSER_MODE = _app_config.experiment.pdf_parser_mode
+    CLASSIFIER_ALLOW_ID_FROM_TEXT = _app_config.experiment.classifier_allow_id_from_text
+    CLASSIFIER_REQUIRE_VERBATIM_QUOTE = (
+        _app_config.experiment.classifier_require_verbatim_quote
+    )
+    CLASSIFIER_REQUIRE_PAGE_SPAN = _app_config.experiment.classifier_require_page_span
+    CLASSIFIER_REJUDGE_ENABLED = _app_config.experiment.classifier_rejudge_enabled
+    CLASSIFIER_REJUDGE_MIN_CANDIDATES = (
+        _app_config.experiment.classifier_rejudge_min_candidates
+    )
+    CLASSIFIER_REJUDGE_TOP_K = _app_config.experiment.classifier_rejudge_top_k
+    CLASSIFIER_REJUDGE_EVIDENCE_PER_LECTURE = (
+        _app_config.experiment.classifier_rejudge_evidence_per_lecture
+    )
+    CLASSIFIER_REJUDGE_MIN_CONFIDENCE_STRICT = (
+        _app_config.experiment.classifier_rejudge_min_confidence_strict
+    )
+    CLASSIFIER_REJUDGE_ALLOW_WEAK_MATCH = (
+        _app_config.experiment.classifier_rejudge_allow_weak_match
+    )
+    CLASSIFIER_REJUDGE_MIN_CONFIDENCE_WEAK = (
+        _app_config.experiment.classifier_rejudge_min_confidence_weak
+    )
 
     # ========================================================================
     # Admin & Security

@@ -6,7 +6,7 @@ import os
 import shutil
 from pathlib import Path
 
-from flask import Blueprint, request, jsonify, current_app, abort, url_for
+from flask import Blueprint, request, current_app, abort, url_for
 from sqlalchemy import func, case
 from sqlalchemy.orm import selectinload
 from werkzeug.utils import secure_filename
@@ -27,6 +27,7 @@ from app.services.exam_cleanup import delete_exam_with_assets
 from app.services.markdown_images import strip_markdown_images
 from app.services.db_guard import guard_write_request
 from app.services.block_sort import block_ordering
+from app.services.pdf_import_service import save_parsed_questions
 from app.services.user_scope import (
     attach_current_user,
     current_user,
@@ -39,6 +40,10 @@ from app.services.folder_scope import (
     resolve_folder_ids,
     resolve_lecture_ids,
     build_folder_tree,
+)
+from app.services.api_response import (
+    success_response as _success_response,
+    error_response as _error_response,
 )
 
 api_manage_bp = Blueprint("api_manage", __name__, url_prefix="/api/manage")
@@ -68,14 +73,19 @@ def guard_read_only():
 
 
 def ok(data=None, status=200):
-    return jsonify({"ok": True, "data": data}), status
+    return _success_response(data=data, status=status)
 
 
 def error_response(message, code="BAD_REQUEST", status=400, details=None):
-    payload = {"ok": False, "code": code, "message": message}
-    if details is not None:
-        payload["details"] = details
-    return jsonify(payload), status
+    data = {"details": details} if details is not None else None
+    legacy = {"details": details} if details is not None else None
+    return _error_response(
+        message=message,
+        code=code,
+        status=status,
+        data=data,
+        legacy=legacy,
+    )
 
 
 def _build_block_counts(block_ids, user):
@@ -200,6 +210,17 @@ def _resolve_upload_folder() -> Path:
     if not upload_folder:
         upload_folder = Path(current_app.static_folder) / "uploads"
     return Path(upload_folder)
+
+
+def _should_keep_pdf_after_index() -> bool:
+    return bool(current_app.config.get("KEEP_PDF_AFTER_INDEX", False))
+
+
+def _remove_material_file(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        current_app.logger.warning("Failed to delete uploaded material: %s", path)
 
 
 def _compose_exam_title(subject=None, year=None, term=None, fallback=None):
@@ -941,6 +962,8 @@ def upload_lecture_material(lecture_id):
         from app.services.lecture_indexer import index_material
 
         index_result = index_material(material)
+        if not _should_keep_pdf_after_index():
+            _remove_material_file(stored_path)
         chunk_count = LectureChunk.query.filter_by(material_id=material.id).count()
         return ok(
             {
@@ -1150,12 +1173,12 @@ def upload_pdf():
             db.session.add(subject)
             db.session.flush()
 
+    tmp_path = None
+    crop_dir = None
     try:
         from app.services.pdf_parser_factory import parse_pdf
 
         parser_mode = current_app.config.get("PDF_PARSER_MODE", "legacy")
-        tmp_path = None
-        crop_dir = None
         crop_question_count = 0
         crop_image_count = 0
         crop_meta_url = None
@@ -1221,59 +1244,13 @@ def upload_pdf():
         except RuntimeError as exc:
             current_app.logger.warning("PDF crop skipped: %s", exc)
 
-        question_count = 0
-        choice_count = 0
-
-        for q_data in questions_data:
-            qnum = int(q_data["question_number"])
-            # Keep parser output in question.image_path.
-            # Cropped originals are exposed separately via originalImageUrl.
-            question_image_path = q_data.get("image_path")
-
-            answer_count = len(q_data.get("answer_options", []))
-            has_options = len(q_data.get("options", [])) > 0
-
-            if not has_options:
-                q_type = Question.TYPE_SHORT_ANSWER
-            elif answer_count > 1:
-                q_type = Question.TYPE_MULTIPLE_RESPONSE
-            else:
-                q_type = Question.TYPE_MULTIPLE_CHOICE
-
-            question = Question(
-                exam_id=exam.id,
-                user_id=user.id,
-                question_number=qnum,
-                content=q_data.get("content", ""),
-                image_path=question_image_path,
-                examiner=q_data.get("examiner"),
-                q_type=q_type,
-                answer=",".join(map(str, q_data.get("answer_options", []))),
-                correct_answer_text=q_data.get("answer_text")
-                if q_type == Question.TYPE_SHORT_ANSWER
-                else None,
-                explanation=q_data.get("answer_text")
-                if q_type != Question.TYPE_SHORT_ANSWER
-                else None,
-                is_classified=False,
-                lecture_id=None,
-            )
-            db.session.add(question)
-            db.session.flush()
-
-            for opt in q_data.get("options", []):
-                if opt.get("content") or opt.get("image_path"):
-                    choice = Choice(
-                        question_id=question.id,
-                        choice_number=opt["number"],
-                        content=opt.get("content", ""),
-                        image_path=opt.get("image_path"),
-                        is_correct=opt.get("is_correct", False),
-                    )
-                    db.session.add(choice)
-                    choice_count += 1
-
-            question_count += 1
+        question_count, choice_count = save_parsed_questions(
+            exam_id=exam.id,
+            user_id=user.id,
+            questions_data=questions_data,
+            crop_question_images=crop_question_images,
+            crop_is_reliable=crop_is_reliable,
+        )
 
         db.session.commit()
         return ok(
@@ -1287,6 +1264,13 @@ def upload_pdf():
                 "cropMetaUrl": crop_meta_url,
             },
             status=201,
+        )
+    except ValueError as exc:
+        db.session.rollback()
+        if crop_dir:
+            shutil.rmtree(crop_dir, ignore_errors=True)
+        return error_response(
+            str(exc), code="PDF_PARSE_INVALID", status=400
         )
     except ImportError as exc:
         db.session.rollback()

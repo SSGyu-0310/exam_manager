@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { getApiEnvelopeMessage, type ApiEnvelope } from '@/lib/api/contract';
 
 export default function RegisterPage() {
     const [email, setEmail] = useState('');
@@ -24,8 +25,8 @@ export default function RegisterPage() {
             if (res.ok) {
                 router.push('/login');
             } else {
-                const data = await res.json();
-                setError(data.msg || 'Registration failed');
+                const payload = (await res.json()) as ApiEnvelope<unknown>;
+                setError(getApiEnvelopeMessage(payload, 'Registration failed'));
             }
         } catch (err) {
             setError('An unexpected error occurred');

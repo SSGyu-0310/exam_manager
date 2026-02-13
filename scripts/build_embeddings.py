@@ -4,7 +4,7 @@ Build embeddings for lecture chunks.
 SAFETY: DESTRUCTIVE (if --rebuild specified)
 
 Usage:
-  python scripts/build_embeddings.py --db data/dev.db --rebuild
+  python scripts/build_embeddings.py --db "postgresql+psycopg://user:pass@host:5432/dbname" --rebuild
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
 from app import create_app, db
-from app.models import LectureChunk, LectureChunkEmbedding
+from app.models import LectureChunk
 from app.services.embedding_utils import (
     DEFAULT_EMBEDDING_DIM,
     DEFAULT_EMBEDDING_MODEL_NAME,
@@ -30,11 +30,28 @@ from app.services.embedding_utils import (
 def _normalize_db_uri(db_value: str | None) -> str | None:
     if not db_value:
         return None
-    if "://" in db_value:
-        return db_value
-    path = Path(db_value).resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return f"sqlite:///{path.as_posix()}"
+    db_uri = db_value.strip()
+    if db_uri.startswith("postgres://"):
+        db_uri = db_uri.replace("postgres://", "postgresql+psycopg://", 1)
+    elif db_uri.startswith("postgresql://"):
+        db_uri = db_uri.replace("postgresql://", "postgresql+psycopg://", 1)
+    if not db_uri.startswith("postgresql+psycopg://"):
+        raise RuntimeError(
+            "--db must be a PostgreSQL URI (postgresql+psycopg://...)."
+        )
+    return db_uri
+
+
+def _resolve_db_uri(db_arg: str | None) -> str:
+    if db_arg:
+        db_uri = _normalize_db_uri(db_arg)
+    else:
+        from config import get_config
+
+        db_uri = _normalize_db_uri(str(get_config().runtime.db_uri))
+    if not db_uri:
+        raise RuntimeError("DATABASE_URL is required for this script.")
+    return db_uri
 
 
 def build_embeddings(
@@ -43,7 +60,15 @@ def build_embeddings(
     dim: int,
     batch_size: int,
     rebuild: bool,
+    dry_run: bool = False,
 ) -> None:
+    try:
+        from app.models import LectureChunkEmbedding
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            "LectureChunkEmbedding model is unavailable in current schema."
+        ) from exc
+
     app = create_app("default", db_uri_override=db_uri, skip_migration_check=True)
     with app.app_context():
         if rebuild:
@@ -103,7 +128,7 @@ def main() -> None:
         from _safety import print_script_header
 
     parser = argparse.ArgumentParser(description="Build lecture chunk embeddings.")
-    parser.add_argument("--db", default="data/dev.db", help="SQLite db path.")
+    parser.add_argument("--db", default=None, help="PostgreSQL URI override.")
     parser.add_argument(
         "--model", default=DEFAULT_EMBEDDING_MODEL_NAME, help="Embedding model name."
     )
@@ -124,11 +149,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    print_script_header("build_embeddings.py", args.db)
-
-    db_uri = _normalize_db_uri(args.db)
-    if not db_uri:
-        raise ValueError("DB path is required.")
+    db_uri = _resolve_db_uri(args.db)
+    print_script_header("build_embeddings.py", db_uri)
 
     build_embeddings(
         db_uri,

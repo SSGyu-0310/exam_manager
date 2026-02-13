@@ -23,7 +23,7 @@ def extract_pdf_pages(pdf_path: os.PathLike) -> List[Tuple[int, str]]:
     with pdfplumber.open(str(pdf_path)) as pdf:
         for page_num, page in enumerate(pdf.pages, start=1):
             text_content = page.extract_text() or ""
-            text_content = text_content.replace("\u00A0", " ")
+            text_content = text_content.replace("\u00A0", " ").replace("\x00", "")
             text_content = re.sub(r"[ \t]+", " ", text_content)
             text_content = re.sub(r"\n{3,}", "\n\n", text_content)
             text_content = text_content.strip()

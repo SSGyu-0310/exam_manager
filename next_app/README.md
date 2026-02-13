@@ -14,12 +14,21 @@ FLASK_BASE_URL=http://127.0.0.1:5000
 # NEXT_PUBLIC_SITE_URL=http://localhost:4000
 # NEXT_PUBLIC_APP_URL=http://localhost:4000
 ```
+or
+```bash
+cp next_app/.env.local.example next_app/.env.local
+```
 
 2) Install dependencies and run the dev server:
 
 ```bash
 npm install
 npm run dev
+```
+
+From project root, you can also run:
+```bash
+./scripts/dev-frontend
 ```
 
 3) Open:

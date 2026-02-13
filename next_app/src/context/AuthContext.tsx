@@ -2,12 +2,19 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { getApiEnvelopeData, isApiEnvelopeOk, type ApiEnvelope } from '@/lib/api/contract';
 
 interface User {
     id: number;
     email: string;
     is_admin: boolean;
 }
+
+type MePayload = {
+    id: number;
+    email: string;
+    is_admin: boolean;
+};
 
 interface AuthContextType {
     user: User | null;
@@ -41,8 +48,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 credentials: "include",
             });
             if (res.ok) {
-                const userData = await res.json();
-                setUser(userData);
+                const payload = (await res.json()) as ApiEnvelope<MePayload>;
+                if (!isApiEnvelopeOk(payload)) {
+                    setUser(null);
+                    return;
+                }
+                const data = getApiEnvelopeData(payload);
+                if (!data || typeof data.id !== "number") {
+                    setUser(null);
+                    return;
+                }
+                setUser({
+                    id: data.id,
+                    email: data.email,
+                    is_admin: Boolean(data.is_admin),
+                });
             } else {
                 setUser(null);
             }

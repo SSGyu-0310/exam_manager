@@ -8,9 +8,30 @@ import os
 from .base import (
     DEFAULT_RETRIEVAL_MODE,
     DEFAULT_RRF_K,
+    DEFAULT_SEARCH_BACKEND,
+    DEFAULT_SEARCH_PG_QUERY_MODE,
+    DEFAULT_SEARCH_PG_TRGM_ENABLED,
+    DEFAULT_SEARCH_PG_TRGM_MIN_SIMILARITY,
+    DEFAULT_SEARCH_PG_TRGM_TOP_N,
+    DEFAULT_SEARCH_PG_TRGM_ALPHA,
+    DEFAULT_SEARCH_PG_TRGM_BLEND_MODE,
+    DEFAULT_SEARCH_PG_TRGM_MIN_BM25_RESULTS,
+    DEFAULT_LECTURE_AGG_MODE,
+    DEFAULT_LECTURE_TOPM,
+    DEFAULT_LECTURE_CHUNK_CAP,
     DEFAULT_EMBEDDING_MODEL_NAME,
     DEFAULT_EMBEDDING_DIM,
     DEFAULT_EMBEDDING_TOP_N,
+    DEFAULT_CLASSIFIER_ALLOW_ID_FROM_TEXT,
+    DEFAULT_CLASSIFIER_REQUIRE_VERBATIM_QUOTE,
+    DEFAULT_CLASSIFIER_REQUIRE_PAGE_SPAN,
+    DEFAULT_CLASSIFIER_REJUDGE_ENABLED,
+    DEFAULT_CLASSIFIER_REJUDGE_MIN_CANDIDATES,
+    DEFAULT_CLASSIFIER_REJUDGE_TOP_K,
+    DEFAULT_CLASSIFIER_REJUDGE_EVIDENCE_PER_LECTURE,
+    DEFAULT_CLASSIFIER_REJUDGE_MIN_CONFIDENCE_STRICT,
+    DEFAULT_CLASSIFIER_REJUDGE_ALLOW_WEAK_MATCH,
+    DEFAULT_CLASSIFIER_REJUDGE_MIN_CONFIDENCE_WEAK,
     DEFAULT_HYDE_ENABLED,
     DEFAULT_HYDE_AUTO_GENERATE,
     DEFAULT_HYDE_PROMPT_VERSION,
@@ -118,6 +139,34 @@ def get_experiment_config() -> ExperimentConfig:
         ),
         retrieval_mode=os.environ.get("RETRIEVAL_MODE", DEFAULT_RETRIEVAL_MODE),
         rrf_k=_env_int("RRF_K", default=DEFAULT_RRF_K),
+        search_backend=os.environ.get("SEARCH_BACKEND", DEFAULT_SEARCH_BACKEND).strip().lower(),
+        search_pg_query_mode=os.environ.get(
+            "SEARCH_PG_QUERY_MODE", DEFAULT_SEARCH_PG_QUERY_MODE
+        ).strip().lower(),
+        search_pg_trgm_enabled=_env_flag(
+            "SEARCH_PG_TRGM_ENABLED", default=DEFAULT_SEARCH_PG_TRGM_ENABLED
+        ),
+        search_pg_trgm_min_similarity=_env_float(
+            "SEARCH_PG_TRGM_MIN_SIMILARITY",
+            default=DEFAULT_SEARCH_PG_TRGM_MIN_SIMILARITY,
+        ),
+        search_pg_trgm_top_n=_env_int(
+            "SEARCH_PG_TRGM_TOP_N", default=DEFAULT_SEARCH_PG_TRGM_TOP_N
+        ),
+        search_pg_trgm_alpha=_env_float(
+            "SEARCH_PG_TRGM_ALPHA", default=DEFAULT_SEARCH_PG_TRGM_ALPHA
+        ),
+        search_pg_trgm_blend_mode=os.environ.get(
+            "SEARCH_PG_TRGM_BLEND_MODE", DEFAULT_SEARCH_PG_TRGM_BLEND_MODE
+        ).strip().lower(),
+        search_pg_trgm_min_bm25_results=_env_int(
+            "SEARCH_PG_TRGM_MIN_BM25_RESULTS", default=DEFAULT_SEARCH_PG_TRGM_MIN_BM25_RESULTS
+        ),
+        lecture_agg_mode=os.environ.get(
+            "LECTURE_AGG_MODE", DEFAULT_LECTURE_AGG_MODE
+        ).strip().lower(),
+        lecture_topm=_env_int("LECTURE_TOPM", default=DEFAULT_LECTURE_TOPM),
+        lecture_chunk_cap=_env_int("LECTURE_CHUNK_CAP", default=DEFAULT_LECTURE_CHUNK_CAP),
         embedding_model_name=os.environ.get(
             "EMBEDDING_MODEL_NAME", DEFAULT_EMBEDDING_MODEL_NAME
         ),
@@ -152,6 +201,46 @@ def get_experiment_config() -> ExperimentConfig:
             "HYDE_EMBED_WEIGHT_ORIG", default=DEFAULT_HYDE_EMBED_WEIGHT_ORIG
         ),
         pdf_parser_mode=os.environ.get("PDF_PARSER_MODE", DEFAULT_PDF_PARSER_MODE),
+        classifier_allow_id_from_text=_env_flag(
+            "CLASSIFIER_ALLOW_ID_FROM_TEXT",
+            default=DEFAULT_CLASSIFIER_ALLOW_ID_FROM_TEXT,
+        ),
+        classifier_require_verbatim_quote=_env_flag(
+            "CLASSIFIER_REQUIRE_VERBATIM_QUOTE",
+            default=DEFAULT_CLASSIFIER_REQUIRE_VERBATIM_QUOTE,
+        ),
+        classifier_require_page_span=_env_flag(
+            "CLASSIFIER_REQUIRE_PAGE_SPAN",
+            default=DEFAULT_CLASSIFIER_REQUIRE_PAGE_SPAN,
+        ),
+        classifier_rejudge_enabled=_env_flag(
+            "CLASSIFIER_REJUDGE_ENABLED",
+            default=DEFAULT_CLASSIFIER_REJUDGE_ENABLED,
+        ),
+        classifier_rejudge_min_candidates=_env_int(
+            "CLASSIFIER_REJUDGE_MIN_CANDIDATES",
+            default=DEFAULT_CLASSIFIER_REJUDGE_MIN_CANDIDATES,
+        ),
+        classifier_rejudge_top_k=_env_int(
+            "CLASSIFIER_REJUDGE_TOP_K",
+            default=DEFAULT_CLASSIFIER_REJUDGE_TOP_K,
+        ),
+        classifier_rejudge_evidence_per_lecture=_env_int(
+            "CLASSIFIER_REJUDGE_EVIDENCE_PER_LECTURE",
+            default=DEFAULT_CLASSIFIER_REJUDGE_EVIDENCE_PER_LECTURE,
+        ),
+        classifier_rejudge_min_confidence_strict=_env_float(
+            "CLASSIFIER_REJUDGE_MIN_CONFIDENCE_STRICT",
+            default=DEFAULT_CLASSIFIER_REJUDGE_MIN_CONFIDENCE_STRICT,
+        ),
+        classifier_rejudge_allow_weak_match=_env_flag(
+            "CLASSIFIER_REJUDGE_ALLOW_WEAK_MATCH",
+            default=DEFAULT_CLASSIFIER_REJUDGE_ALLOW_WEAK_MATCH,
+        ),
+        classifier_rejudge_min_confidence_weak=_env_float(
+            "CLASSIFIER_REJUDGE_MIN_CONFIDENCE_WEAK",
+            default=DEFAULT_CLASSIFIER_REJUDGE_MIN_CONFIDENCE_WEAK,
+        ),
     )
 
 

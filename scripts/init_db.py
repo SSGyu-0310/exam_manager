@@ -2,12 +2,13 @@
 Initialize database schema via SQLAlchemy models.
 
 Usage:
-  python scripts/init_db.py --db path/to/exam.db
+  python scripts/init_db.py --db postgresql+psycopg://user:pass@host:5432/dbname
 """
 from __future__ import annotations
 
 import argparse
 import sys
+
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -20,16 +21,25 @@ from app import create_app, db
 def _normalize_db_uri(db_value: str | None) -> str | None:
     if not db_value:
         return None
-    if "://" in db_value:
-        return db_value
-    path = Path(db_value).resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return f"sqlite:///{path}"
+    db_uri = db_value.strip()
+    if db_uri.startswith("postgres://"):
+        db_uri = db_uri.replace("postgres://", "postgresql+psycopg://", 1)
+    elif db_uri.startswith("postgresql://"):
+        db_uri = db_uri.replace("postgresql://", "postgresql+psycopg://", 1)
+    if not db_uri.startswith("postgresql+psycopg://"):
+        raise RuntimeError(
+            "--db must be a PostgreSQL URI (postgresql+psycopg://...). "
+            "Non-PostgreSQL DB path/URI is no longer supported."
+        )
+    return db_uri
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Initialize SQLite schema.")
-    parser.add_argument("--db", help="Path to sqlite db file.")
+    parser = argparse.ArgumentParser(description="Initialize PostgreSQL schema.")
+    parser.add_argument(
+        "--db",
+        help="PostgreSQL URI override (postgresql+psycopg://...).",
+    )
     parser.add_argument(
         "--config",
         default="default",

@@ -5,7 +5,7 @@ Exam Manager uses a split frontend/backend architecture.
 ## Components
 - Frontend: Next.js App Router (`next_app/src/app`)
 - Backend: Flask API + legacy templates (`app/routes`, `app/templates`)
-- Database: Postgres for Docker deployment (SQLite migration script supported)
+- Database: PostgreSQL (runtime is Postgres-only)
 - Search: FTS (`lecture_chunks` + backend retrieval pipeline)
 
 ## Key directories

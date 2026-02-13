@@ -290,7 +290,7 @@ def review_history():
     })
 
 @api_dashboard_bp.route('/api/dashboard/config')
-def get_config():
+def get_dashboard_config():
     from flask import current_app
     return jsonify({
         'ok': True,

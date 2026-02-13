@@ -3,6 +3,7 @@
 Exam Manager 운영/구조/설정 문서 모음입니다.
 
 ## Setup
+- Local development: `docs/setup/local-dev.md`
 - Docker: `docs/setup/docker.md`
 - Env variables: `docs/setup/env.md`
 - WSL: `docs/setup/wsl.md`

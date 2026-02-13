@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-from flask import current_app, jsonify, request, g
+from flask import current_app, request, g
 from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
 from flask_jwt_extended.exceptions import JWTExtendedException, NoAuthorizationError
 from sqlalchemy import or_, false
 
+from app import db
 from app.models import User
+from app.services.api_response import error_response as _error_response
 
 _LOCALHOSTS = {"127.0.0.1", "::1"}
 
@@ -27,7 +29,12 @@ def _load_admin_user() -> Optional[User]:
 
 
 def _unauthorized(message: str = "Authentication required."):
-    return jsonify({"ok": False, "code": "UNAUTHORIZED", "message": message}), 401
+    return _error_response(
+        message=message,
+        code="UNAUTHORIZED",
+        status=401,
+        legacy={"msg": message},
+    )
 
 
 def attach_current_user(require: bool = False):
@@ -46,7 +53,7 @@ def attach_current_user(require: bool = False):
         identity = get_jwt_identity()
         if identity is not None:
             try:
-                user = User.query.get(int(identity))
+                user = db.session.get(User, int(identity))
             except (TypeError, ValueError):
                 user = None
 

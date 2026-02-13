@@ -67,7 +67,7 @@ The backend has been refactored to use a centralized configuration system and pr
 - CORS configuration now driven by `get_config()`
   - Environment variable: `CORS_ALLOWED_ORIGINS`
   - Defaults:
-    - Dev: `http://localhost:3000`
+    - Dev: `http://localhost:4000`
     - Prod: `https://your-domain.com` (placeholder to configure)
 
 - Health endpoint for monitoring:

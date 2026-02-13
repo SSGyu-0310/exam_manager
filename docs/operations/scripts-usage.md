@@ -1,217 +1,98 @@
-# Scripts Usage Guide
+# Scripts Usage Guide (Postgres)
 
-Exam Manager의 운영 스크립트 사용법과 설계 원칙입니다.
+Exam Manager 운영 스크립트 사용 가이드입니다.
 
 ## Script Design Principles
 
-1. **Public API 사용**: 스크립트는 내부 모듈의 private 함수/전역에 직접 의존하지 않고, 공용 서비스 함수를 호출합니다.
-2. **CLI 인터페이스 표준화**: `argparse`를 사용하여 일관된 인자 형식 유지
-3. **DB 경로 유연성**: `--db` 플래그로 대상 DB를 지정할 수 있어야 합니다.
-4. **코드 변경 없는 스크립트**: 리팩토링으로 인해 스크립트가 깨지 않도록 공용 API를 사용해야 합니다.
+1. Public API 우선: 스크립트는 공용 서비스/진입점만 호출합니다.
+2. CLI 표준화: `argparse` 기반 인자 규칙을 유지합니다.
+3. Postgres URI 기준: DB 대상은 `--db postgresql+psycopg://...` 형식으로 지정합니다.
+4. 명확한 실패: 미지원(legacy 경로 등) 입력은 즉시 에러 처리합니다.
 
 ## Scripts Summary
 
 | Script | Purpose | Public API | Dependencies |
 |---------|---------|-------------|--------------|
-| `verify_repo.py` | 리팩토링 검증 | `compileall`, `run_migrations`, `init_fts` | Standard library |
-| `init_db.py` | DB 초기화 | `create_app` | Flask-SQLAlchemy |
-| `run_migrations.py` | 마이그레이션 실행 | `sqlite3` | Standard library |
-| `init_fts.py` | FTS 인덱싱 | `create_app`, `LectureChunk` | Flask-SQLAlchemy |
-| `clone_db.py` | DB 복제 | `sqlite3` | Standard library |
-| `backup_db.py` | DB 백업 | `sqlite3` | Standard library |
-| `dump_retrieval_features.py` | 평가용 retrieval 피처 추출 | `retrieval_features`, `create_app`, `EvaluationLabel` | `app.services.retrieval_features` |
-| `build_embeddings.py` | 임베딩 빌드 | `embedding_utils`, `create_app`, `LectureChunk` | `app.services.embedding_utils` |
-| `evaluate_evalset.py` | 평가 스크립트 | `build_config_hash`, `ClassifierResultCache` | `app.services.classifier_cache` |
+| `verify_repo.py` | 리팩토링/운영 사전점검(ops preflight + 컴파일/DB/FTS) | `compileall`, `run_postgres_migrations`, `init_fts` | Standard library + project scripts |
+| `init_db.py` | 스키마 초기화 | `create_app` | Flask-SQLAlchemy |
+| `run_postgres_migrations.py` | Postgres 마이그레이션 실행 | migration executor | `psycopg` |
+| `run_migrations.py` | 호환 별칭(Postgres) | `run_postgres_migrations` | `psycopg` |
+| `init_fts.py` | FTS 동기화/재구성 | `create_app`, SQLAlchemy | Flask-SQLAlchemy |
+| `backup_postgres.py` | DB 백업(`pg_dump`) | subprocess | PostgreSQL client |
+| `backup_db.py` | 호환 별칭(Postgres + retention) | subprocess | PostgreSQL client |
 | `migrate_ai_fields.py` | AI 필드 마이그레이션 | `create_app`, `db` | Flask-SQLAlchemy |
-| `tune_autoconfirm_v2.py` | Auto-Confirm V2 튜닝 | - | Custom logic |
-| `drop_lecture_keywords.py` | 강의 키워드 테이블 삭제 | `create_app`, `db` | Flask-SQLAlchemy |
+| `dump_retrieval_features.py` | retrieval 피처 추출 | `retrieval_features`, `create_app`, `EvaluationLabel` | app services |
+| `build_embeddings.py` | 임베딩 빌드 | `embedding_utils`, `create_app`, `LectureChunk` | app services |
+| `build_queries.py` | HyDE-lite 질의 구축 | `query_transformer`, `create_app`, `QuestionQuery` | app services |
+| `evaluate_evalset.py` | 평가 스크립트 | `build_config_hash`, `ClassifierResultCache` | app services |
+| `tune_autoconfirm_v2.py` | auto-confirm 튜닝 | `retrieval_features`, `create_app`, `EvaluationLabel` | app services |
 
-## Script Usage
+## Core Usage
 
-### Verification & Setup
-
-#### verify_repo.py
-리팩토링 전후에 코드 상태를 검증합니다.
-
+### Verification & setup
 ```bash
-# Basic verification (compileall only)
+# compileall only
 python scripts/verify_repo.py
 
-# Full verification (with DB migrations/FTS)
-python scripts/verify_repo.py --db data/dev.db
+# ops preflight + compileall
+python scripts/verify_repo.py --ops-preflight
 
-# All checks (uses dev.db)
+# compileall + DB/FTS checks
+python scripts/verify_repo.py --db "$DATABASE_URL"
+
+# same as above, but reads DATABASE_URL from env when --db is omitted
 python scripts/verify_repo.py --all
 ```
 
-### Database Operations
-
-#### init_db.py
-DB 스키마를 초기화합니다.
-
+### Database operations
 ```bash
-# Initialize exam.db
-python scripts/init_db.py --db data/exam.db
+# schema init
+python scripts/init_db.py --db "$DATABASE_URL"
 
-# Initialize admin_local.db
-python scripts/init_db.py --db data/admin_local.db
+# migrations
+python scripts/run_postgres_migrations.py --db "$DATABASE_URL"
+
+# compatibility alias
+python scripts/run_migrations.py --db "$DATABASE_URL"
+
+# backup
+python scripts/backup_postgres.py --db "$DATABASE_URL"
+
+# backup compatibility alias with retention
+python scripts/backup_db.py --db "$DATABASE_URL" --keep 30
 ```
 
-#### run_migrations.py
-마이그레이션을 실행합니다.
-
+### Search & indexing
 ```bash
-# Run on specific DB
-python scripts/run_migrations.py --db data/dev.db
+# incremental sync
+python scripts/init_fts.py --db "$DATABASE_URL" --sync
 
-# Run on default DB (from config)
-python scripts/run_migrations.py
+# full rebuild
+python scripts/init_fts.py --db "$DATABASE_URL" --rebuild
 ```
 
-#### clone_db.py
-DB를 복제합니다.
-
+### Embeddings & features
 ```bash
-# Clone prod to dev
-python scripts/clone_db.py --db data/exam.db --out data/dev.db
+python scripts/build_embeddings.py --db "$DATABASE_URL" --rebuild
+python scripts/dump_retrieval_features.py --db "$DATABASE_URL" --out reports/retrieval_features_evalset.csv
 ```
 
-#### backup_db.py
-DB를 백업합니다.
-
+### AI & evaluation
 ```bash
-# Backup with 30 retention
-python scripts/backup_db.py --db data/exam.db --keep 30
-
-# Backup with custom directory
-python scripts/backup_db.py --db data/exam.db --keep 30 --dir custom_backups
+python scripts/evaluate_evalset.py --db "$DATABASE_URL"
+python scripts/tune_autoconfirm_v2.py --db "$DATABASE_URL"
 ```
 
-#### drop_lecture_keywords.py
-강의 키워드 테이블을 삭제합니다.
-
-```bash
-# Drop on specific DB
-python scripts/drop_lecture_keywords.py --db data/exam.db
-```
-
-### Search & Indexing
-
-#### init_fts.py
-FTS(Full-Text Search) 인덱스를 생성/재구축합니다.
-
-```bash
-# Sync (incremental update)
-python scripts/init_fts.py --db data/dev.db --sync
-
-# Rebuild (clear and rebuild all)
-python scripts/init_fts.py --db data/dev.db --rebuild
-```
-
-### Embeddings & Features
-
-#### build_embeddings.py
-강의 청크 임베딩을 빌드합니다.
-
-```bash
-# Rebuild embeddings (clear and rebuild)
-python scripts/build_embeddings.py --db data/dev.db --rebuild
-
-# Update existing embeddings (no --rebuild)
-python scripts/build_embeddings.py --db data/dev.db
-```
-
-#### dump_retrieval_features.py
-평가용 retrieval 피처를 추출합니다.
-
-```bash
-# Dump features to CSV
-python scripts/dump_retrieval_features.py --db data/dev.db --out reports/retrieval_features_evalset.csv
-```
-
-### AI & Evaluation
-
-#### evaluate_evalset.py
-AI 분류기 성능을 평가합니다.
-
-```bash
-# Run evaluation
-python scripts/evaluate_evalset.py
-```
-
-#### tune_autoconfirm_v2.py
-Auto-Confirm V2 파라미터를 튜닝합니다.
-
-```bash
-# Run tuning
-python scripts/tune_autoconfirm_v2.py
-```
-
-### Migration
-
-#### migrate_ai_fields.py
-AI 관련 DB 필드를 마이그레이션합니다.
-
-```bash
-# Run migration
-python scripts/migrate_ai_fields.py --db data/exam.db
-```
-
-## Public API Reference
-
-### `app.services.retrieval_features`
-
-```python
-# Get retrieval features for a question
-from app.services.retrieval_features import get_retrieval_features
-
-features = get_retrieval_features(
-    question_text="...",
-    db_session=session,
-    config=config
-)
-```
-
-### `app.services.embedding_utils`
-
-```python
-# Embedding utilities
-from app.services.embedding_utils import (
-    DEFAULT_EMBEDDING_MODEL_NAME,
-    DEFAULT_EMBEDDING_DIM,
-    embed_texts,
-    encode_embedding,
-)
-
-# Embed text list
-embeddings = embed_texts(texts, model_name, batch_size=32)
-```
-
-### `app.services.classifier_cache`
-
-```python
-# Classifier cache
-from app.services.classifier_cache import ClassifierResultCache, build_config_hash
-
-# Build config hash
-config_hash = build_config_hash(config_dict)
-
-# Use cache
-cache = ClassifierResultCache(path="path/to/cache.json")
-result = cache.get(question_id, config_hash, model_name)
-cache.set(question_id, config_hash, model_name, result_dict)
-cache.save()
-```
+## Legacy / migration-only scripts
+- `scripts/legacy/`: 과거 데이터 1회 이관 스크립트 모음
+- `scripts/legacy/compare_db_counts.py`: legacy DB/Postgres row count 비교
+- `scripts/legacy/migrate_user_data.py`: 과거 사용자 데이터 보정 스크립트
+- `scripts/clone_db.py`: legacy clone 경로 제거됨 (Postgres 운영에서는 사용하지 않음)
+- `scripts/drop_lecture_keywords.py`: deprecated (Postgres 스키마 변경은 migration SQL 사용)
 
 ## Best Practices
 
-1. **Always use `--db` flag**: 스크립트는 항상 `--db` 플래그를 지원하여 dev/prod 구분을 쉽게 합니다.
-2. **Use public APIs**: 내부 구현에 의존하지 말고 공용 함수/서비스를 사용합니다.
-3. **Handle errors gracefully**: 스크립트는 명확한 에러 메시지와 exit code를 제공해야 합니다.
-4. **Document output**: 생성되는 파일 경로를 명시적으로 출력합니다.
-
-## See Also
-
-- [Cache Policy](./cache-policy.md)
-- [Operations Overview](../README.md)
-- [Configuration Reference](../setup/config-reference.md)
+1. 프로덕션 작업 전 `backup_postgres.py` 먼저 실행합니다.
+2. 마이그레이션은 `run_postgres_migrations.py`를 표준으로 사용합니다.
+3. `--db`를 명시해 대상 DB를 항상 분리합니다.
+4. 스크립트 출력 경로/적용 건수 로그를 배포 기록에 남깁니다.
