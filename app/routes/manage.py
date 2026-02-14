@@ -663,27 +663,28 @@ def eval_labeler():
 
     label = None
     candidates = []
-    retrieval_mode = current_app.config.get("RETRIEVAL_MODE", "bm25")
+    retrieval_mode = (current_app.config.get("RETRIEVAL_MODE", "bm25") or "bm25").strip().lower()
+    if retrieval_mode != "bm25":
+        retrieval_mode = "bm25"
 
     if question:
         label = EvaluationLabel.query.filter_by(question_id=question.id).first()
-        if retrieval_mode == "bm25":
-            question_text = _build_question_text(question)
-            chunks = retrieval.search_chunks_bm25(
-                question_text,
-                top_n=80,
-                question_id=question.id,
-            )
-            from config import get_config as _get_config
-            _cfg = _get_config().experiment
-            candidates = retrieval.aggregate_candidates(
-                chunks,
-                top_k_lectures=5,
-                evidence_per_lecture=2,
-                agg_mode=_cfg.lecture_agg_mode,
-                topm=_cfg.lecture_topm,
-                chunk_cap=_cfg.lecture_chunk_cap,
-            )
+        question_text = _build_question_text(question)
+        chunks = retrieval.search_chunks_bm25(
+            question_text,
+            top_n=80,
+            question_id=question.id,
+        )
+        from config import get_config as _get_config
+        _cfg = _get_config().experiment
+        candidates = retrieval.aggregate_candidates(
+            chunks,
+            top_k_lectures=5,
+            evidence_per_lecture=2,
+            agg_mode=_cfg.lecture_agg_mode,
+            topm=_cfg.lecture_topm,
+            chunk_cap=_cfg.lecture_chunk_cap,
+        )
 
     exams = scope_model(PreviousExam, user).order_by(
         PreviousExam.created_at.desc()

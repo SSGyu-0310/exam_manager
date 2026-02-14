@@ -95,9 +95,6 @@ class Config:
     SEARCH_PG_TRGM_ENABLED = _app_config.experiment.search_pg_trgm_enabled
     SEARCH_PG_TRGM_MIN_SIMILARITY = _app_config.experiment.search_pg_trgm_min_similarity
     SEARCH_PG_TRGM_TOP_N = _app_config.experiment.search_pg_trgm_top_n
-    EMBEDDING_MODEL_NAME = _app_config.experiment.embedding_model_name
-    EMBEDDING_DIM = _app_config.experiment.embedding_dim
-    EMBEDDING_TOP_N = _app_config.experiment.embedding_top_n
     HYDE_ENABLED = _app_config.experiment.hyde_enabled
     HYDE_AUTO_GENERATE = _app_config.experiment.hyde_auto_generate
     HYDE_PROMPT_VERSION = _app_config.experiment.hyde_prompt_version
@@ -108,8 +105,6 @@ class Config:
     HYDE_MARGIN_EPS = _app_config.experiment.hyde_margin_eps
     HYDE_MAX_KEYWORDS = _app_config.experiment.hyde_max_keywords
     HYDE_MAX_NEGATIVE = _app_config.experiment.hyde_max_negative
-    HYDE_EMBED_WEIGHT = _app_config.experiment.hyde_embed_weight
-    HYDE_EMBED_WEIGHT_ORIG = _app_config.experiment.hyde_embed_weight_orig
 
     # ========================================================================
     # PDF Processing

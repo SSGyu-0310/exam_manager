@@ -543,40 +543,26 @@ class LectureRetriever:
         lecture_ids: Optional[List[int]] = None,
         evidence_per_lecture: int = 3,
     ) -> List[Dict]:
-        """FTS5 BM25/Hybrid 기반 후보 강의 검색"""
-        mode = get_config().experiment.retrieval_mode or "bm25"
+        """BM25 기반 후보 강의 검색."""
+        mode = (get_config().experiment.retrieval_mode or "bm25").strip().lower()
+        if mode != "bm25":
+            logging.warning("Unsupported RETRIEVAL_MODE=%s; forcing bm25.", mode)
 
-        if mode == "bm25":
-            chunks = retrieval.search_chunks_bm25(
-                question_text,
-                top_n=80,
-                question_id=question_id,
-                lecture_ids=lecture_ids,
-            )
-            cfg = get_config().experiment
-            return retrieval.aggregate_candidates(
-                chunks, top_k_lectures=top_k, evidence_per_lecture=evidence_per_lecture,
-                agg_mode=cfg.lecture_agg_mode,
-                topm=cfg.lecture_topm,
-                chunk_cap=cfg.lecture_chunk_cap,
-            )
-
-        if mode == "hybrid_rrf":
-            chunks = retrieval.search_chunks_hybrid_rrf(
-                question_text,
-                top_n=80,
-                question_id=question_id,
-                lecture_ids=lecture_ids,
-            )
-            cfg = get_config().experiment
-            return retrieval.aggregate_candidates_rrf(
-                chunks, top_k_lectures=top_k, evidence_per_lecture=evidence_per_lecture,
-                agg_mode=cfg.lecture_agg_mode,
-                topm=cfg.lecture_topm,
-                chunk_cap=cfg.lecture_chunk_cap,
-            )
-
-        return []
+        chunks = retrieval.search_chunks_bm25(
+            question_text,
+            top_n=80,
+            question_id=question_id,
+            lecture_ids=lecture_ids,
+        )
+        cfg = get_config().experiment
+        return retrieval.aggregate_candidates(
+            chunks,
+            top_k_lectures=top_k,
+            evidence_per_lecture=evidence_per_lecture,
+            agg_mode=cfg.lecture_agg_mode,
+            topm=cfg.lecture_topm,
+            chunk_cap=cfg.lecture_chunk_cap,
+        )
 
 
 # ============================================================

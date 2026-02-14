@@ -116,11 +116,6 @@ class ExperimentConfig:
     lecture_topm: int = 3
     lecture_chunk_cap: int = 0      # 0 = disabled
 
-    # Embedding model
-    embedding_model_name: str = "intfloat/multilingual-e5-base"
-    embedding_dim: int = 768
-    embedding_top_n: int = 300
-
     # HYDE (Hypothetical Document Embeddings)
     hyde_enabled: bool = False
     hyde_auto_generate: bool = False
@@ -132,8 +127,6 @@ class ExperimentConfig:
     hyde_margin_eps: float = 0.0
     hyde_max_keywords: int = 7
     hyde_max_negative: int = 6
-    hyde_embed_weight: float = 0.7
-    hyde_embed_weight_orig: float = 0.3
 
     # PDF Processing
     pdf_parser_mode: str = "legacy"
@@ -186,12 +179,6 @@ class ExperimentConfig:
             raise ValueError("LECTURE_TOPM must be > 0")
         if self.lecture_chunk_cap < 0:
             raise ValueError("LECTURE_CHUNK_CAP must be >= 0")
-        if self.embedding_dim <= 0:
-            raise ValueError("EMBEDDING_DIM must be > 0")
-        if not 0.0 <= self.hyde_embed_weight <= 1.0:
-            raise ValueError("HYDE_EMBED_WEIGHT must be between 0.0 and 1.0")
-        if not 0.0 <= self.hyde_embed_weight_orig <= 1.0:
-            raise ValueError("HYDE_EMBED_WEIGHT_ORIG must be between 0.0 and 1.0")
         if self.hyde_strategy not in ("blend", "best_of_two"):
             raise ValueError("HYDE_STRATEGY must be 'blend' or 'best_of_two'")
         if self.classifier_rejudge_min_candidates <= 0:

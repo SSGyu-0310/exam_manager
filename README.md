@@ -91,7 +91,7 @@ If you updated parser/crop logic, run these in Docker once:
 ## Local PDF Lab (Backend-only)
 빠른 파서 실험 루프:
 ```bash
-.venv/bin/python scripts/pdf_lab.py --pdf parse_lab/pdfs/sample.pdf --mode experimental --watch
+python scripts/pdf_lab.py --pdf parse_lab/pdfs/sample.pdf --mode experimental --watch
 ```
 
 산출물은 `parse_lab/output/lab_runs/` 아래에 run별로 저장됩니다.
@@ -103,7 +103,7 @@ If you updated parser/crop logic, run these in Docker once:
 
 # Optional: explicit URI
 TEST_DATABASE_URL=postgresql+psycopg://exam:<POSTGRES_PASSWORD>@127.0.0.1:5432/exam_manager_test \
-PYTHONPATH=. ./.venv/bin/pytest -q
+PYTHONPATH=. python -m pytest -q
 ```
 
 ## Legacy: one-time Historical Import (Optional)

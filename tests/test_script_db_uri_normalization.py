@@ -22,7 +22,6 @@ def _load_module(module_name: str, filename: str):
     [
         ("init_db", "init_db.py"),
         ("migrate_ai_fields", "migrate_ai_fields.py"),
-        ("build_embeddings", "build_embeddings.py"),
         ("build_queries", "build_queries.py"),
         ("dump_retrieval_features", "dump_retrieval_features.py"),
         ("tune_autoconfirm_v2", "tune_autoconfirm_v2.py"),
@@ -52,7 +51,6 @@ def test_normalize_db_uri_accepts_postgres_variants(module_name: str, filename: 
     [
         ("init_db_invalid", "init_db.py"),
         ("migrate_ai_fields_invalid", "migrate_ai_fields.py"),
-        ("build_embeddings_invalid", "build_embeddings.py"),
         ("build_queries_invalid", "build_queries.py"),
         ("dump_retrieval_features_invalid", "dump_retrieval_features.py"),
         ("tune_autoconfirm_v2_invalid", "tune_autoconfirm_v2.py"),

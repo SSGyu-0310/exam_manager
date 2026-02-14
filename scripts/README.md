@@ -49,7 +49,6 @@ DEV_DB_COMPOSE_FILE=docker-compose.local.yml ./scripts/dev-db up -d db
 - `scripts/validate_pdf_parser_manifest.py`: PDF 파서 결과를 체크표(expected/uploaded)와 비교
 - `scripts/pdf_lab.py`: 로컬 PDF 실험실 (파싱/이상치/diff/선택적 강의 분류)
 - `scripts/inspect_classification_job.py`: AI 분류 job의 미분류 원인/적용 가능 여부 진단 출력
-- `scripts/build_embeddings.py`: Postgres 기반 임베딩 구축
 - `scripts/build_queries.py`: Postgres 기반 질의 변환(HyDE-lite) 구축
 - `scripts/dump_retrieval_features.py`: Postgres 기반 retrieval feature 덤프
 - `scripts/evaluate_evalset.py`: Postgres 기반 평가 실행
@@ -64,31 +63,31 @@ DEV_DB_COMPOSE_FILE=docker-compose.local.yml ./scripts/dev-db up -d db
 ### Crop image backfill
 ```bash
 # dry-run
-.venv/bin/python scripts/backfill_crop_image_paths.py --config default
+python scripts/backfill_crop_image_paths.py --config default
 
 # apply
-.venv/bin/python scripts/backfill_crop_image_paths.py --config default --apply
+python scripts/backfill_crop_image_paths.py --config default --apply
 ```
 
 ## PDF Lab quick examples
 ```bash
 # 1) 단발 실행: 파싱 + 이상치 리포트
-.venv/bin/python scripts/pdf_lab.py --pdf parse_lab/pdfs/sample.pdf --mode legacy
+python scripts/pdf_lab.py --pdf parse_lab/pdfs/sample.pdf --mode legacy
 
 # 2) 비교 실행: experimental 결과를 legacy와 diff
-.venv/bin/python scripts/pdf_lab.py \
+python scripts/pdf_lab.py \
   --pdf parse_lab/pdfs/sample.pdf \
   --mode experimental \
   --compare-mode legacy
 
 # 3) 자동 재실행: parser 코드/대상 PDF 변경 감지
-.venv/bin/python scripts/pdf_lab.py \
+python scripts/pdf_lab.py \
   --pdf parse_lab/pdfs/sample.pdf \
   --mode experimental \
   --watch
 
 # 4) 강의 후보 + 분류기까지 확인 (GEMINI_API_KEY 필요)
-.venv/bin/python scripts/pdf_lab.py \
+python scripts/pdf_lab.py \
   --pdf parse_lab/pdfs/sample.pdf \
   --mode experimental \
   --with-classifier \
@@ -98,8 +97,8 @@ DEV_DB_COMPOSE_FILE=docker-compose.local.yml ./scripts/dev-db up -d db
 ## Classification diagnostics
 ```bash
 # job 요약 + 문항별 원인 태그
-.venv/bin/python scripts/inspect_classification_job.py --job-id 123 --config production
+python scripts/inspect_classification_job.py --job-id 123 --config production
 
 # 요약만 출력
-.venv/bin/python scripts/inspect_classification_job.py --job-id 123 --config production --no-rows
+python scripts/inspect_classification_job.py --job-id 123 --config production --no-rows
 ```

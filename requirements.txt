@@ -10,6 +10,5 @@ google-genai
 tenacity
 scikit-learn
 numpy<2
-sentence-transformers
 flask-jwt-extended
 psycopg[binary]

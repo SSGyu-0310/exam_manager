@@ -143,7 +143,9 @@ def _classify_one(
 def run_evaluation(app, args) -> Dict[str, Any]:
     """Run the full evaluation pipeline and produce structured logs + metrics."""
 
-    retrieval_mode = args.retrieval_mode or os.environ.get("RETRIEVAL_MODE", "bm25")
+    retrieval_mode = (args.retrieval_mode or os.environ.get("RETRIEVAL_MODE", "bm25")).strip().lower()
+    if retrieval_mode != "bm25":
+        retrieval_mode = "bm25"
     top_k = args.top_k
     evidence_per_lecture = args.evidence_per_lecture
     threshold = args.confidence_threshold
@@ -214,36 +216,20 @@ def run_evaluation(app, args) -> Dict[str, Any]:
             # ----- RETRIEVE stage with timing -----
             t_retrieve_start = time.perf_counter()
 
-            if retrieval_mode == "hybrid_rrf":
-                chunks = retrieval.search_chunks_hybrid_rrf(
-                    question_text,
-                    top_n=80,
-                    question_id=question.id,
-                    lecture_ids=scope_lecture_ids,
-                )
-                candidates = retrieval.aggregate_candidates_rrf(
-                    chunks,
-                    top_k_lectures=top_k,
-                    evidence_per_lecture=evidence_per_lecture,
-                    agg_mode=getattr(args, 'lecture_agg_mode', 'sum') or 'sum',
-                    topm=getattr(args, 'lecture_topm', 3) or 3,
-                    chunk_cap=getattr(args, 'lecture_chunk_cap', 0) or 0,
-                )
-            else:
-                chunks = retrieval.search_chunks_bm25(
-                    question_text,
-                    top_n=80,
-                    question_id=question.id,
-                    lecture_ids=scope_lecture_ids,
-                )
-                candidates = retrieval.aggregate_candidates(
-                    chunks,
-                    top_k_lectures=top_k,
-                    evidence_per_lecture=evidence_per_lecture,
-                    agg_mode=getattr(args, 'lecture_agg_mode', 'sum') or 'sum',
-                    topm=getattr(args, 'lecture_topm', 3) or 3,
-                    chunk_cap=getattr(args, 'lecture_chunk_cap', 0) or 0,
-                )
+            chunks = retrieval.search_chunks_bm25(
+                question_text,
+                top_n=80,
+                question_id=question.id,
+                lecture_ids=scope_lecture_ids,
+            )
+            candidates = retrieval.aggregate_candidates(
+                chunks,
+                top_k_lectures=top_k,
+                evidence_per_lecture=evidence_per_lecture,
+                agg_mode=getattr(args, 'lecture_agg_mode', 'sum') or 'sum',
+                topm=getattr(args, 'lecture_topm', 3) or 3,
+                chunk_cap=getattr(args, 'lecture_chunk_cap', 0) or 0,
+            )
 
             t_retrieve_ms = (time.perf_counter() - t_retrieve_start) * 1000.0
 
@@ -600,7 +586,7 @@ def _compute_and_write(
     summary = {
         "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "config": {
-            "retrieval_mode": args.retrieval_mode or os.environ.get("RETRIEVAL_MODE", "bm25"),
+            "retrieval_mode": retrieval_mode,
             "top_k": top_k,
             "evidence_per_lecture": args.evidence_per_lecture,
             "confidence_threshold": threshold,
@@ -847,7 +833,7 @@ def _write_baseline_report(path: Path, summary: Dict):
 
     run_flag = "--run-classifier " if cfg["run_classifier"] else ""
     reproduce_cmd = (
-        ".venv/bin/python scripts/eval_classifier_run.py "
+        "python scripts/eval_classifier_run.py "
         + "--question-ids-file evalset_question_ids.txt "
         + run_flag
         + "--top-k " + str(cfg["top_k"]) + " "
@@ -1031,7 +1017,7 @@ def main():
     )
     parser.add_argument("--output-dir", default="reports/baseline", help="Output directory.")
     parser.add_argument("--question-ids-file", default=None, help="Restrict to question IDs.")
-    parser.add_argument("--retrieval-mode", default=None, help="bm25 or hybrid_rrf.")
+    parser.add_argument("--retrieval-mode", default=None, help="bm25 only.")
     parser.add_argument("--top-k", type=int, default=8, help="Top-K lectures.")
     parser.add_argument("--evidence-per-lecture", type=int, default=3, help="Evidence snippets per lecture.")
     parser.add_argument("--confidence-threshold", type=float, default=0.7, help="Apply threshold.")

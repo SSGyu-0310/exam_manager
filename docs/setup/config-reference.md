@@ -93,16 +93,12 @@ Exam Manager의 환경 설정에 대한 상세 레퍼런스입니다.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `RETRIEVAL_MODE` | `bm25` | 검색 모드 (`bm25`, `hybrid_rrf`) |
+| `RETRIEVAL_MODE` | `bm25` | 검색 모드 (`bm25`) |
 | `SEARCH_BACKEND` | `auto` | 검색 백엔드 (`auto`, `postgres`) |
 | `SEARCH_PG_QUERY_MODE` | `websearch` | Postgres tsquery 모드 (`websearch`, `plainto`, `to_tsquery`) |
 | `SEARCH_PG_TRGM_ENABLED` | `False` | Postgres에서 pg_trgm fallback 사용 여부 |
 | `SEARCH_PG_TRGM_MIN_SIMILARITY` | `0.2` | pg_trgm fallback 최소 유사도 |
 | `SEARCH_PG_TRGM_TOP_N` | `40` | pg_trgm fallback 검색 상한 |
-| `RRF_K` | `60` | RRF K 파라미터 (hybrid_rrf에서만 사용) |
-| `EMBEDDING_MODEL_NAME` | `intfloat/multilingual-e5-base` | Embedding 모델명 |
-| `EMBEDDING_DIM` | `768` | Embedding 차원 |
-| `EMBEDDING_TOP_N` | `300` | Embedding top-N |
 
 ### HYDE (Hypothetical Document Embeddings)
 
@@ -118,8 +114,6 @@ Exam Manager의 환경 설정에 대한 상세 레퍼런스입니다.
 | `HYDE_MARGIN_EPS` | `0.0` | HYDE 마진 EPS |
 | `HYDE_MAX_KEYWORDS` | `7` | HYDE 최대 키워드 |
 | `HYDE_MAX_NEGATIVE` | `6` | HYDE 최대 네거티브 |
-| `HYDE_EMBED_WEIGHT` | `0.7` | HYDE Embedding 가중치 |
-| `HYDE_EMBED_WEIGHT_ORIG` | `0.3` | HYDE 원본 Embedding 가중치 |
 
 ### PDF Processing
 

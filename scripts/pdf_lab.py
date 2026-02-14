@@ -680,7 +680,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--retrieval-mode",
-        choices=("bm25", "hybrid_rrf"),
+        choices=("bm25",),
         default=None,
         help="Override retrieval mode.",
     )

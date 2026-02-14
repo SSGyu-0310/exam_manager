@@ -160,8 +160,6 @@ def _classifier_config_hash(app, retrieval_mode: str, max_k: int, evidence_per_l
         "auto_confirm_v2_max_bm25_rank": int(app.config.get("AUTO_CONFIRM_V2_MAX_BM25_RANK", 5)),
         "auto_confirm_v2_delta_uncertain": float(app.config.get("AUTO_CONFIRM_V2_DELTA_UNCERTAIN", 0.03)),
         "auto_confirm_v2_min_chunk_len": int(app.config.get("AUTO_CONFIRM_V2_MIN_CHUNK_LEN", 200)),
-        "embedding_model": app.config.get("EMBEDDING_MODEL_NAME"),
-        "embedding_top_n": int(app.config.get("EMBEDDING_TOP_N", 300)),
         "rrf_k": int(app.config.get("RRF_K", 60)),
         "hyde_enabled": bool(app.config.get("HYDE_ENABLED", False)),
         "hyde_strategy": app.config.get("HYDE_STRATEGY", "blend"),
@@ -201,7 +199,9 @@ def evaluate(db_uri: str, args) -> dict:
     with app.app_context():
         current_threshold = float(app.config.get("AI_CONFIDENCE_THRESHOLD", 0.7))
         current_margin = float(app.config.get("AI_AUTO_APPLY_MARGIN", 0.2))
-        retrieval_mode = args.retrieval_mode or app.config.get("RETRIEVAL_MODE", "bm25")
+        retrieval_mode = (args.retrieval_mode or app.config.get("RETRIEVAL_MODE", "bm25")).strip().lower()
+        if retrieval_mode != "bm25":
+            retrieval_mode = "bm25"
         labels_query = EvaluationLabel.query.join(Question).order_by(EvaluationLabel.id.asc())
         if args.question_ids_file:
             ids = _load_question_ids(args.question_ids_file)
@@ -264,20 +264,12 @@ def evaluate(db_uri: str, args) -> dict:
                 top_k=max_k,
             )
 
-            if retrieval_mode == "hybrid_rrf":
-                chunks = artifacts.hybrid_chunks
-                candidates = retrieval.aggregate_candidates_rrf(
-                    chunks,
-                    top_k_lectures=max_k,
-                    evidence_per_lecture=evidence_per_lecture,
-                )
-            else:
-                chunks = artifacts.bm25_chunks
-                candidates = retrieval.aggregate_candidates(
-                    chunks,
-                    top_k_lectures=max_k,
-                    evidence_per_lecture=evidence_per_lecture,
-                )
+            chunks = artifacts.bm25_chunks
+            candidates = retrieval.aggregate_candidates(
+                chunks,
+                top_k_lectures=max_k,
+                evidence_per_lecture=evidence_per_lecture,
+            )
 
             candidate_ids = [c.get("id") for c in candidates]
             rank = None
@@ -526,7 +518,7 @@ def main() -> None:
     parser.add_argument(
         "--retrieval-mode",
         default=None,
-        help="bm25 or hybrid_rrf (default: use config).",
+        help="bm25 only (default: use config).",
     )
     parser.add_argument("--include-ambiguous", action="store_true", help="Include ambiguous labels.")
     parser.add_argument("--max-failures", type=int, default=15, help="Max failures per report.")

@@ -9,8 +9,8 @@
   -> AsyncBatchProcessor.start_classification_job()
   -> AsyncBatchProcessor._process_job()
     -> LectureRetriever.find_candidates()
-      -> retrieval.search_chunks_bm25() or retrieval.search_chunks_hybrid_rrf()
-      -> retrieval.aggregate_candidates() / aggregate_candidates_rrf()
+      -> retrieval.search_chunks_bm25()
+      -> retrieval.aggregate_candidates()
     -> (optional) context_expander.expand_candidates()
     -> GeminiClassifier.classify_single()
       -> _build_classification_prompt()
@@ -34,7 +34,6 @@
 - Postgres FTS SQL: `app/services/retrieval.py:439` `_search_chunks_bm25_postgres`
 - Postgres trigram fallback SQL: `app/services/retrieval.py:480` `_search_chunks_trgm_postgres`
 - 후보 집계: `app/services/retrieval.py:857` `aggregate_candidates`
-- RRF 후보 집계: `app/services/retrieval.py:934` `aggregate_candidates_rrf`
 
 ### 1-3. Candidate Lectures 포맷/후처리 추적
 

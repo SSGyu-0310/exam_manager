@@ -241,13 +241,12 @@ app/
 │   ├── pdf_cropper.py         # PDF image cropping
 │   ├── markdown_images.py       # Image processing
 │   ├── ai_classifier.py         # AI classification
-│   ├── retrieval.py            # Search/retrieval (BM25/Semantic)
+│   ├── retrieval.py            # Search/retrieval (BM25)
 │   ├── context_expander.py      # Context expansion
 │   ├── query_transformer.py     # Query transformation
 │   ├── lecture_indexer.py      # FTS indexing
 │   ├── practice_filters.py      # Practice filtering
 │   ├── classifier_cache.py     # AI classifier caching
-│   ├── embedding_utils.py      # Embedding utilities
 │   └── db_guard.py            # DB read-only guard
 ├── models.py              # SQLAlchemy models
 ├── templates/             # Legacy Jinja2 templates

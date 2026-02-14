@@ -19,9 +19,6 @@ from .base import (
     DEFAULT_LECTURE_AGG_MODE,
     DEFAULT_LECTURE_TOPM,
     DEFAULT_LECTURE_CHUNK_CAP,
-    DEFAULT_EMBEDDING_MODEL_NAME,
-    DEFAULT_EMBEDDING_DIM,
-    DEFAULT_EMBEDDING_TOP_N,
     DEFAULT_CLASSIFIER_ALLOW_ID_FROM_TEXT,
     DEFAULT_CLASSIFIER_REQUIRE_VERBATIM_QUOTE,
     DEFAULT_CLASSIFIER_REQUIRE_PAGE_SPAN,
@@ -41,8 +38,6 @@ from .base import (
     DEFAULT_HYDE_MARGIN_EPS,
     DEFAULT_HYDE_MAX_KEYWORDS,
     DEFAULT_HYDE_MAX_NEGATIVE,
-    DEFAULT_HYDE_EMBED_WEIGHT,
-    DEFAULT_HYDE_EMBED_WEIGHT_ORIG,
     DEFAULT_PDF_PARSER_MODE,
     DEFAULT_AUTO_CONFIRM_V2_ENABLED,
     DEFAULT_AUTO_CONFIRM_V2_DELTA,
@@ -167,11 +162,6 @@ def get_experiment_config() -> ExperimentConfig:
         ).strip().lower(),
         lecture_topm=_env_int("LECTURE_TOPM", default=DEFAULT_LECTURE_TOPM),
         lecture_chunk_cap=_env_int("LECTURE_CHUNK_CAP", default=DEFAULT_LECTURE_CHUNK_CAP),
-        embedding_model_name=os.environ.get(
-            "EMBEDDING_MODEL_NAME", DEFAULT_EMBEDDING_MODEL_NAME
-        ),
-        embedding_dim=_env_int("EMBEDDING_DIM", default=DEFAULT_EMBEDDING_DIM),
-        embedding_top_n=_env_int("EMBEDDING_TOP_N", default=DEFAULT_EMBEDDING_TOP_N),
         hyde_enabled=_env_flag("HYDE_ENABLED", default=DEFAULT_HYDE_ENABLED),
         hyde_auto_generate=_env_flag(
             "HYDE_AUTO_GENERATE", default=DEFAULT_HYDE_AUTO_GENERATE
@@ -193,12 +183,6 @@ def get_experiment_config() -> ExperimentConfig:
         ),
         hyde_max_negative=_env_int(
             "HYDE_MAX_NEGATIVE", default=DEFAULT_HYDE_MAX_NEGATIVE
-        ),
-        hyde_embed_weight=_env_float(
-            "HYDE_EMBED_WEIGHT", default=DEFAULT_HYDE_EMBED_WEIGHT
-        ),
-        hyde_embed_weight_orig=_env_float(
-            "HYDE_EMBED_WEIGHT_ORIG", default=DEFAULT_HYDE_EMBED_WEIGHT_ORIG
         ),
         pdf_parser_mode=os.environ.get("PDF_PARSER_MODE", DEFAULT_PDF_PARSER_MODE),
         classifier_allow_id_from_text=_env_flag(

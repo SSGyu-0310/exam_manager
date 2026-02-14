@@ -168,8 +168,6 @@ def baseline_get_dashboard_stats(user) -> dict:
 def _baseline_chunk_relevance(chunk: dict) -> float:
     if chunk.get("rrf_score") is not None:
         return float(chunk.get("rrf_score") or 0.0)
-    if chunk.get("embedding_score") is not None:
-        return float(chunk.get("embedding_score") or 0.0)
     if chunk.get("bm25_score") is not None:
         return float(chunk.get("bm25_score") or 0.0)
     return 0.0

@@ -156,7 +156,7 @@ python scripts/evaluate_evalset.py --db "$DATABASE_URL"
 python scripts/evaluate_evalset.py \
   --db "$DATABASE_URL" \
   --run-classifier \
-  --retrieval-mode hybrid_rrf \
+  --retrieval-mode bm25 \
   --max-workers 4
 ```
 

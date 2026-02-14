@@ -22,7 +22,6 @@ Exam Manager 운영 스크립트 사용 가이드입니다.
 | `backup_db.py` | 호환 별칭(Postgres + retention) | subprocess | PostgreSQL client |
 | `migrate_ai_fields.py` | AI 필드 마이그레이션 | `create_app`, `db` | Flask-SQLAlchemy |
 | `dump_retrieval_features.py` | retrieval 피처 추출 | `retrieval_features`, `create_app`, `EvaluationLabel` | app services |
-| `build_embeddings.py` | 임베딩 빌드 | `embedding_utils`, `create_app`, `LectureChunk` | app services |
 | `build_queries.py` | HyDE-lite 질의 구축 | `query_transformer`, `create_app`, `QuestionQuery` | app services |
 | `evaluate_evalset.py` | 평가 스크립트 | `build_config_hash`, `ClassifierResultCache` | app services |
 | `tune_autoconfirm_v2.py` | auto-confirm 튜닝 | `retrieval_features`, `create_app`, `EvaluationLabel` | app services |
@@ -71,9 +70,8 @@ python scripts/init_fts.py --db "$DATABASE_URL" --sync
 python scripts/init_fts.py --db "$DATABASE_URL" --rebuild
 ```
 
-### Embeddings & features
+### Retrieval features
 ```bash
-python scripts/build_embeddings.py --db "$DATABASE_URL" --rebuild
 python scripts/dump_retrieval_features.py --db "$DATABASE_URL" --out reports/retrieval_features_evalset.csv
 ```
 

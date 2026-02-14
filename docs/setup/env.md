@@ -52,7 +52,7 @@ Required for full stack:
 | `NEXT_PUBLIC_APP_URL` | Next base URL fallback | `http://localhost:4000` |
 | `GEMINI_API_KEY` | Enable AI features | unset |
 | `KEEP_PDF_AFTER_INDEX` | Keep uploaded lecture PDFs after indexing (`1` keeps, `0` deletes) | `0` |
-| `RETRIEVAL_MODE` | Retrieval mode (`bm25`, `hybrid_rrf`) | `bm25` |
+| `RETRIEVAL_MODE` | Retrieval mode (`bm25`) | `bm25` |
 | `SEARCH_BACKEND` | Search backend (`auto`, `postgres`) | `postgres` (docker env) |
 | `SEARCH_PG_QUERY_MODE` | Postgres tsquery mode (`websearch`, `plainto`, `to_tsquery`) | `websearch` |
 | `SEARCH_PG_TRGM_ENABLED` | Enable pg_trgm fallback (`0/1`) | `0` |

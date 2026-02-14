@@ -39,26 +39,20 @@ This document summarizes the refactoring work completed based on `refactoring_go
 
 **Updated Destructive Scripts with Safety Guards:**
 
-1. **`scripts/build_embeddings.py`**
-   - Added SAFETY docstring: "DESTRUCTIVE (if --rebuild specified)"
-   - Added `--dry-run` and `--yes-i-really-mean-it` CLI flags
-   - Wrapped rebuild operations with `require_confirmation()`
-   - Dry-run shows what would be done without writing
-
-2. **`scripts/init_fts.py`**
+1. **`scripts/init_fts.py`**
    - Added SAFETY docstring: "DESTRUCTIVE (if --rebuild specified)"
    - Added `--dry-run` and `--yes-i-really-mean-it` CLI flags
    - Wrapped FTS table clear operation with `require_confirmation()`
    - Dry-run shows what would be done without writing
 
-3. **`scripts/drop_lecture_keywords.py`**
+2. **`scripts/drop_lecture_keywords.py`**
    - Added SAFETY docstring: "DESTRUCTIVE (modifies database schema)"
    - Added `--dry-run` and `--yes-i-really-mean-it` CLI flags
    - Wrapped schema modification with `require_confirmation()`
    - Dry-run shows what would be done without writing
    - Added print_script_header() for standardized output
 
-4. **`scripts/build_queries.py`**
+3. **`scripts/build_queries.py`**
    - Added SAFETY docstring: "DESTRUCTIVE (if --force specified)"
    - Added `--dry-run` and `--yes-i-really-mean-it` CLI flags
    - Wrapped query deletion with `require_confirmation()`
