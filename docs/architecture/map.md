@@ -1,305 +1,88 @@
-# Architecture Map - Feature to Code Mapping
+# Architecture Map - Route to Feature
 
-Exam Manager의 기능을 Next.js 페이지, Flask 라우트/API, 서비스/모델로 매핑한 문서입니다.
+현재 코드 기준으로 Next 페이지/Flask 라우트/API를 기능 단위로 매핑한 문서입니다.
 
-## Legend
+## 1) Frontend Route Map (Next.js)
 
-| Symbol | Meaning |
-|--------|---------|
-| ✅ | 구현됨 |
-| ❌ | 미구현 |
-| 🔄 | 파트적으로 구현됨 |
+| Route | 주요 기능 | 연동 API |
+| --- | --- | --- |
+| `/login`, `/register` | 인증 | `/api/auth/*` |
+| `/dashboard` | 학습 대시보드 | `/api/dashboard/stats`, `/api/dashboard/progress`, `/api/dashboard/bookmarks` |
+| `/dashboard/activity` | 최근 활동 상세 | `/api/review/history` |
+| `/learn/practice` | 강의 선택형 연습 진입 | `/api/practice/lectures` |
+| `/practice/start` | 연습 시작(모드/시험 필터) | `/api/practice/lecture/<id>` |
+| `/practice/session/[sessionId]` | 문제 풀이/제출 | `/api/practice/lecture/<id>/questions`, `/api/practice/exam/<id>/questions`, `/api/practice/*/submit` |
+| `/practice/session/[sessionId]/result` | 결과 상세 | `/api/practice/lecture/<id>/result`, `/api/practice/exam/<id>/result` |
+| `/review/notes` | 복습 노트/오답 | `/api/review/notes` |
+| `/review/weakness` | 약점 분석 | `/api/review/weakness` |
+| `/review/history` | 세션 이력 | `/api/review/history` |
+| `/manage` | 커리큘럼 관리(Subject/Block/Lecture) | `/api/manage/subjects`, `/api/manage/blocks`, `/api/manage/lectures` |
+| `/manage/exams` | 시험 목록 + PDF 업로드 | `/api/manage/exams`, `/api/manage/upload-pdf` |
+| `/exam/[id]` | 시험 상세/문항 목록 | `/api/manage/exams/<id>` |
+| `/manage/questions/[id]/edit` | 문제 상세 수정 | `/api/manage/questions/<id>` |
+| `/manage/classifications`, `/exam/unclassified` | 미분류 큐/대량 작업/AI 분류 | `/api/exam/unclassified`, `/exam/questions/bulk-classify`, `/manage/questions/move`, `/manage/questions/reset`, `/ai/classify/*` |
+| `/manage/classifications/[jobId]` | AI 분류 결과 미리보기 | `/ai/classify/result/<job_id>`, `/ai/classify/diagnostics/<job_id>` |
+| `/manage/settings` | 사용자/시스템 설정 보기 | `/api/dashboard/config`, `/api/auth/logout` |
+| `/templates`, `/templates/[id]` | 공개 커리큘럼 템플릿 조회/복제 | `/api/public/curriculums*` |
 
-## Overview
+모든 서버 호출은 Next proxy (`next_app/src/app/api/proxy/[...path]/route.ts`)를 통해 Flask로 전달됩니다.
 
-| Frontend | Backend Routes | JSON API | Services/Models |
-|-----------|----------------|------------|-----------------|
-| Next.js (App Router) | Flask (Blueprint) | REST/JSON | Business Logic |
+## 2) Backend Blueprint Map (Flask)
 
-## Feature Mapping
+| Blueprint file | Prefix | 역할 |
+| --- | --- | --- |
+| `app/routes/main.py` | `/` | 랜딩/헬스체크 |
+| `app/routes/api_auth.py` | `/api/auth` | 인증(회원가입/로그인/로그아웃/me) |
+| `app/routes/api_manage.py` | `/api/manage` | 관리 API (커리큘럼/시험/문항/업로드) |
+| `app/routes/api_exam.py` | `/api/exam` | 미분류 큐 API |
+| `app/routes/ai.py` | `/ai` | AI 분류 배치/진단/적용, 텍스트 교정 |
+| `app/routes/api_practice.py` | `/api/practice` | 연습 문제/제출/결과/세션 조회 |
+| `app/routes/api_dashboard.py` | none (absolute route) | 대시보드/복습 지표 API |
+| `app/routes/api_questions.py` | `/api/questions` | 문제 증거(evidence) 조회 |
+| `app/routes/api_public_curriculum.py` | `/api/public/curriculums` | 공개 템플릿 조회/복제 |
+| `app/routes/api_admin_curriculum.py` | `/api/admin/public/curriculums` | 공개 템플릿 관리자 API |
+| `app/routes/manage.py` | `/manage` | Legacy 관리 UI + 일부 JSON 엔드포인트 |
+| `app/routes/exam.py` | `/exam` | Legacy 시험 UI + bulk classify JSON |
+| `app/routes/practice.py` | `/practice` | Legacy 연습 UI |
 
-### 1. Block Management (과목/주제 블록 CRUD)
+## 3) Core Data Flows
 
-| Description | Next.js | Flask UI | API | Service | Model |
-|-------------|-----------|-----------|------|---------|--------|
-| Block 목록 | `/manage/blocks` | `/manage` | `GET /api/manage/blocks` | - | `Block` |
-| Block 생성 | `/manage/blocks/new` | `/manage` | `POST /api/manage/blocks` | - | `Block` |
-| Block 수정 | `/manage/blocks/[id]/edit` | `/manage` | `PUT /api/manage/blocks/<id>` | - | `Block` |
+### PDF 업로드 -> 시험/문항 생성
 
-**Files:**
-- Next.js: `next_app/src/app/manage/blocks/page.tsx`, `blocks/new/page.tsx`, `blocks/[id]/edit/page.tsx`
-- Components: `next_app/src/components/manage/BlocksTable.tsx`, `BlockForm.tsx`
-- API: `app/routes/api_manage.py`
-- Model: `app/models.py` (Block class)
+1. Next `/manage/exams`에서 PDF 업로드
+2. `POST /api/manage/upload-pdf`
+3. 파싱/크롭/저장 서비스 실행
+   - `pdf_parser_factory`
+   - `pdf_cropper`
+   - `pdf_import_service.save_parsed_questions`
+4. `PreviousExam`, `Question`, `Choice` 저장
 
----
+### 미분류 큐 -> 수동/AI 분류
 
-### 2. Lecture Management (강의 관리)
+1. 큐 조회: `GET /api/exam/unclassified`
+2. 수동 작업
+   - 대량 분류: `POST /exam/questions/bulk-classify`
+   - 대량 이동: `POST /manage/questions/move`
+   - 초기화: `POST /manage/questions/reset`
+3. AI 작업
+   - 시작: `POST /ai/classify/start`
+   - 상태/결과: `GET /ai/classify/status/<id>`, `GET /ai/classify/result/<id>`
+   - 적용: `POST /ai/classify/apply`
 
-| Description | Next.js | Flask UI | API | Service | Model |
-|-------------|-----------|-----------|------|---------|--------|
-| 강의 목록 (블록별) | `/manage/blocks/[id]/lectures` | `/manage` | `GET /api/manage/blocks/<id>/lectures` | - | `Lecture` |
-| 강의 생성 | `/manage/blocks/[id]/lectures/new` | `/manage` | `POST /api/manage/lectures` | - | `Lecture` |
-| 강의 수정 | `/manage/lectures/[id]` | `/manage/lecture/<id>` | `PUT /api/manage/lectures/<id>` | - | `Lecture` |
-| 강의 상세 | `/manage/lectures/[id]` | `/manage/lecture/<id>` | `GET /api/manage/lectures/<id>` | `lecture_indexer` | `Lecture`, `LectureMaterial`, `LectureChunk` |
+### 연습 -> 제출 -> 결과
 
-**Files:**
-- Next.js: `next_app/src/app/manage/blocks/[id]/lectures/page.tsx`, `lectures/new/page.tsx`, `manage/lectures/[id]/page.tsx`
-- Components: `next_app/src/components/manage/LectureForm.tsx`
-- API: `app/routes/api_manage.py`
-- Services: `app/services/lecture_indexer.py` (FTS)
-- Model: `app/models.py` (Lecture, LectureMaterial, LectureChunk)
+1. 강의/시험 문제 조회
+   - `GET /api/practice/lecture/<id>/questions`
+   - `GET /api/practice/exam/<id>/questions`
+2. 제출
+   - `POST /api/practice/lecture/<id>/submit`
+   - `POST /api/practice/exam/<id>/submit`
+3. 결과
+   - `GET /api/practice/lecture/<id>/result`
+   - `GET /api/practice/exam/<id>/result`
 
----
+## 4) Known Partial Areas
 
-### 3. Exam Management (기출 시험 CRUD)
-
-| Description | Next.js | Flask UI | API | Service | Model |
-|-------------|-----------|-----------|------|---------|--------|
-| 시험 목록 | `/manage/exams` | `/manage` | `GET /api/manage/exams` | - | `PreviousExam` |
-| 시험 생성 | `/manage/exams/new` | `/manage` | `POST /api/manage/exams` | - | `PreviousExam` |
-| 시험 수정 | `/manage/exams/[id]/edit` | - | `PUT /api/manage/exams/<id>` | - | `PreviousExam` |
-| 시험 상세 | `/manage/exams/[id]` | - | `GET /api/manage/exams/<id>` | - | `PreviousExam` |
-
-**Files:**
-- Next.js: `next_app/src/app/manage/exams/page.tsx`, `exams/new/page.tsx`, `exams/[id]/edit/page.tsx`, `exams/[id]/page.tsx`
-- Components: `next_app/src/components/manage/ExamsTable.tsx`, `ExamForm.tsx`
-- API: `app/routes/api_manage.py`
-- Model: `app/models.py` (PreviousExam)
-
----
-
-### 4. PDF Upload & Parsing
-
-| Description | Next.js | Flask UI | API | Service | Model |
-|-------------|-----------|-----------|------|---------|--------|
-| PDF 업로드 → 문제 생성 | `/manage/upload-pdf` | - | `POST /api/manage/upload-pdf` | `pdf_parser`, `pdf_cropper`, `markdown_images` | `PreviousExam`, `Question`, `Choice` |
-
-**Files:**
-- Next.js: `next_app/src/app/manage/upload-pdf/page.tsx`
-- Components: `next_app/src/components/manage/UploadPdfForm.tsx`
-- API: `app/routes/api_manage.py`
-- Services: `app/services/pdf_parser.py`, `app/services/pdf_cropper.py`, `app/services/markdown_images.py`
-- Model: `app/models.py` (PreviousExam, Question, Choice)
-
----
-
-### 5. Question Management (문제 편집)
-
-| Description | Next.js | Flask UI | API | Service | Model |
-|-------------|-----------|-----------|------|---------|--------|
-| 문제 수정 (이미지 포함) | `/manage/questions/[id]/edit` | `/manage/question/<id>/edit` | `PUT /api/manage/questions/<id>` | `markdown_images` | `Question`, `Choice` |
-| 대량 분류 (move) | - | `/exam/unclassified` | `POST /manage/questions/move` | - | `Question` |
-| 대량 초기화 (reset) | - | `/exam/unclassified` | `POST /manage/questions/reset` | - | `Question` |
-
-**Files:**
-- Next.js: `next_app/src/app/manage/questions/[id]/edit/page.tsx`
-- Components: `next_app/src/components/manage/QuestionEditor.tsx`
-- API: `app/routes/api_manage.py`, `app/routes/manage.py` (bulk)
-- Service: `app/services/markdown_images.py`
-- Model: `app/models.py` (Question, Choice)
-
----
-
-### 6. Unclassified Queue (미분류 큐)
-
-| Description | Next.js | Flask UI | API | Service | Model |
-|-------------|-----------|-----------|------|---------|--------|
-| 미분류 문제 목록 | `/exam/unclassified` | `/exam/unclassified` | `GET /api/exam/unclassified` | - | `Question` |
-| 문제 분류 (단건) | `/exam/unclassified` | `/exam/unclassified` | `POST /api/manage/questions/<id>` | - | `Question` |
-| 일괄 분류/이동 | `/exam/unclassified` | `/exam/unclassified` | `POST /manage/questions/move` | - | `Question` |
-| 일괄 초기화 | `/exam/unclassified` | `/exam/unclassified` | `POST /manage/questions/reset` | - | `Question` |
-
-**Files:**
-- Next.js: `next_app/src/app/exam/unclassified/page.tsx`
-- Components: `next_app/src/components/exam/UnclassifiedQueue.tsx`
-- Flask: `app/routes/exam.py`, `app/routes/manage.py`
-- API: `app/routes/api_manage.py`, `app/routes/api_exam.py`
-- Model: `app/models.py` (Question)
-
----
-
-### 7. AI Classification (AI 분류)
-
-| Description | Next.js | Flask UI | API | Service | Model |
-|-------------|-----------|-----------|------|---------|--------|
-| AI 분류 시작 | - | `/exam/unclassified` | `POST /ai/classify/start` | `ai_classifier`, `retrieval`, `context_expander` | `Question` |
-| AI 분류 상태 | - | - | `GET /ai/classify/status/<id>` | - | `Question` |
-| AI 분류 결과 | - | `/ai/classify/preview/<id>` | `GET /ai/classify/result/<id>` | - | `Question` |
-| AI 결과 적용 | `/exam/unclassified` | - | `POST /ai/classify/apply` | - | `Question` |
-| 최근 분류 작업 | - | - | `GET /ai/classify/recent` | - | `Question` |
-
-**Files:**
-- Next.js: `next_app/src/app/exam/unclassified/page.tsx`
-- Flask: `app/routes/ai.py`
-- API: `app/routes/ai.py`
-- Services: `app/services/ai_classifier.py`, `app/services/retrieval.py`, `app/services/context_expander.py`
-- Model: `app/models.py` (Question)
-
----
-
-### 8. Practice Mode (연습 모드)
-
-| Description | Next.js | Flask UI | API | Service | Model |
-|-------------|-----------|-----------|------|---------|--------|
-| 연습 시작 (강의 선택) | `/practice/start` | `/practice` | `GET /api/practice/lectures` | - | `Lecture`, `Question` |
-| 연습 세션 시작 | `/practice/start` | `/practice/lecture/<id>` | - | `practice_filters` | `PracticeSession`, `PracticeAnswer` |
-| 연습 문제 목록 | - | `/practice/lecture/<id>` | `GET /api/practice/lecture/<id>/questions` | `practice_filters` | `Lecture`, `Question` |
-| 연습 제출 | `/practice/session/[sessionId]` | `/practice/lecture/<id>` | `POST /api/practice/lecture/<id>/submit` | - | `PracticeSession`, `PracticeAnswer` |
-| 연습 결과 | `/practice/session/[sessionId]/result` | `/practice/lecture/<id>` | `GET /api/practice/lecture/<id>/result` | - | `PracticeSession`, `PracticeAnswer` |
-| 연습 세션 목록 | - | `/practice/sessions` | `GET /api/practice/sessions` | - | `PracticeSession` |
-| 특정 세션 | - | `/practice/sessions` | `GET /api/practice/sessions/<id>` | - | `PracticeSession` |
-
-**Files:**
-- Next.js: `next_app/src/app/practice/start/page.tsx`, `practice/session/[sessionId]/page.tsx`, `practice/session/[sessionId]/result/page.tsx`, `lectures/page.tsx`
-- Components: `next_app/src/components/practice/*` (StartCard, QuestionView, ResultSummary, etc.)
-- Flask: `app/routes/practice.py`
-- API: `app/routes/api_practice.py`
-- Service: `app/services/practice_filters.py`
-- Model: `app/models.py` (PracticeSession, PracticeAnswer)
-
----
-
-### 9. Lecture Note Indexing (강의 노트 FTS)
-
-| Description | Next.js | Flask UI | API | Service | Model |
-|-------------|-----------|-----------|------|---------|--------|
-| 노트 업로드/인덱싱 | `/manage/lectures/[id]` | `/manage/lecture/<id>` | `POST /api/manage/lectures/<id>/materials` | `lecture_indexer` | `LectureMaterial`, `LectureChunk` |
-| FTS 검색 (내부) | - | - | - | `retrieval` | `LectureChunk` |
-
-**Files:**
-- Next.js: `next_app/src/app/manage/lectures/[id]/page.tsx`
-- Flask: `app/routes/manage.py` (legacy lecture detail)
-- API: `app/routes/api_manage.py`
-- Services: `app/services/lecture_indexer.py`, `app/services/retrieval.py`
-- Model: `app/models.py` (LectureMaterial, LectureChunk)
-
----
-
-### 10. AI Text Correction (AI 텍스트 교정)
-
-| Description | Next.js | Flask UI | API | Service | Model |
-|-------------|-----------|-----------|------|---------|--------|
-| 텍스트 교정 | - | - | `POST /ai/correct-text` | `ai_classifier` | - |
-
-**Files:**
-- API: `app/routes/ai.py`
-- Service: `app/services/ai_classifier.py`
-
----
-
-### 11. Dashboard (대시보드)
-
-| Description | Next.js | Flask UI | API | Service | Model |
-|-------------|-----------|-----------|------|---------|--------|
-| 통계/요약 | `/manage` | `/manage` | `GET /api/manage/*` (통계) | - | `Block`, `Lecture`, `PreviousExam`, `Question` |
-
-**Files:**
-- Next.js: `next_app/src/app/manage/page.tsx`
-- Components: `next_app/src/components/manage/StatCard.tsx`
-- Flask: `app/routes/manage.py`
-- API: `app/routes/api_manage.py`
-- Model: `app/models.py`
-
----
-
-## File Structure Summary
-
-### Frontend (Next.js)
-```
-next_app/src/
-├── app/
-│   ├── manage/           # 관리 화면
-│   ├── exam/             # 시험/미분류 화면
-│   ├── lectures/         # 연습 시작 화면
-│   ├── practice/         # 연습 세션 화면
-│   └── layout.tsx
-└── components/
-    ├── manage/           # 관리 컴포넌트
-    ├── exam/             # 시험 컴포넌트
-    ├── practice/         # 연습 컴포넌트
-    ├── lectures/         # 연습 강의 카드
-    └── ui/               # 기본 UI 컴포넌트
-```
-
-### Backend (Flask)
-```
-app/
-├── routes/
-│   ├── manage.py              # Legacy UI + bulk operations
-│   ├── api_manage.py         # CRUD API (blocks/lectures/exams/questions)
-│   ├── api_questions.py      # Question-specific operations
-│   ├── api_exam.py          # Exam-related API
-│   ├── api_practice.py      # Practice API
-│   ├── exam.py              # Exam/Legacy UI
-│   ├── ai.py               # AI classification
-│   ├── practice.py          # Practice/Legacy UI
-│   ├── parse_pdf_questions.py # CLI utility
-│   └── crop.py             # PDF cropping
-├── services/
-│   ├── pdf_parser.py           # PDF parsing (legacy/experimental)
-│   ├── pdf_cropper.py         # PDF image cropping
-│   ├── markdown_images.py       # Image processing
-│   ├── ai_classifier.py         # AI classification
-│   ├── retrieval.py            # Search/retrieval (BM25)
-│   ├── context_expander.py      # Context expansion
-│   ├── query_transformer.py     # Query transformation
-│   ├── lecture_indexer.py      # FTS indexing
-│   ├── practice_filters.py      # Practice filtering
-│   ├── classifier_cache.py     # AI classifier caching
-│   └── db_guard.py            # DB read-only guard
-├── models.py              # SQLAlchemy models
-├── templates/             # Legacy Jinja2 templates
-└── static/                # Static files (uploads)
-```
-
-## Data Flow Examples
-
-### PDF Upload → Exam Creation
-```
-Next.js (upload-pdf page)
-  → POST /api/manage/upload-pdf
-  → pdf_parser.parse_pdf_to_questions()
-  → pdf_cropper.crop_pdf_to_questions()
-  → markdown_images.process_images()
-  → DB: PreviousExam, Question, Choice
-  → Response: exam_id
-```
-
-### AI Classification Flow
-```
-Flask (bulk action) or Next.js
-  → POST /ai/classify/start
-  → ai_classifier.start_batch()
-  → retrieval.search_candidates()
-  → context_expander.expand_context()
-  → ai_classifier.classify_question() (Gemini API)
-  → Store temporary results
-  → GET /ai/classify/result/<id> (preview)
-  → POST /ai/classify/apply (apply to DB)
-```
-
-### Practice Session Flow
-```
-Next.js (start page)
-  → GET /api/practice/lectures
-  → Next.js (session page)
-  → POST /api/practice/lecture/<id>/submit
-  → DB: PracticeSession, PracticeAnswer
-  → GET /api/practice/lecture/<id>/result
-```
-
-## Missing/Incomplete Features
-
-| Feature | Status | Notes |
-|----------|--------|--------|
-| Next.js 세션 생성 API | ❌ | 클라이언트 fallback 모드 사용 |
-| Next.js 강의 노트 업로드 UI | ❌ | Legacy에서만 제공 |
-| Next.js AI 분류 상세 미리보기 UI | ❌ | Legacy에서만 제공 |
-| 로그인/인증 | ❌ | `TODO`에 명시됨 |
-| 배포/CI 설정 | ❌ | `TODO`에 명시됨 |
-
-## See Also
-- [Architecture Overview](./overview.md)
-- [Configuration Reference](../setup/config-reference.md)
-- [Refactoring Guide](../refactoring/README.md)
+- Next 연습 시작 시 서버 세션 생성 엔드포인트가 불완전해서 클라이언트 fallback 세션을 병행 사용합니다.
+- 일부 페이지(`/learn/recommended` 등)는 준비 상태 UI를 제공합니다.
+- Legacy Flask UI는 여전히 유효하며 Next UI와 함께 운용됩니다.
