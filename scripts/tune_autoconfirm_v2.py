@@ -2,7 +2,7 @@
 Grid search auto-confirm v2 thresholds on evalset without LLM calls.
 
 Usage:
-  python scripts/tune_autoconfirm_v2.py --db data/dev.db --precision-target 0.86
+  python scripts/tune_autoconfirm_v2.py --db "postgresql+psycopg://user:pass@host:5432/dbname" --precision-target 0.86
 """
 from __future__ import annotations
 
@@ -22,6 +22,33 @@ load_dotenv(ROOT_DIR / ".env")
 from app import create_app
 from app.models import EvaluationLabel, Question
 from app.services import retrieval_features
+
+
+def _normalize_db_uri(db_value: str | None) -> str | None:
+    if not db_value:
+        return None
+    db_uri = db_value.strip()
+    if db_uri.startswith("postgres://"):
+        db_uri = db_uri.replace("postgres://", "postgresql+psycopg://", 1)
+    elif db_uri.startswith("postgresql://"):
+        db_uri = db_uri.replace("postgresql://", "postgresql+psycopg://", 1)
+    if not db_uri.startswith("postgresql+psycopg://"):
+        raise RuntimeError(
+            "--db must be a PostgreSQL URI (postgresql+psycopg://...)."
+        )
+    return db_uri
+
+
+def _resolve_db_uri(db_arg: str | None) -> str:
+    if db_arg:
+        db_uri = _normalize_db_uri(db_arg)
+    else:
+        from config import get_config
+
+        db_uri = _normalize_db_uri(str(get_config().runtime.db_uri))
+    if not db_uri:
+        raise RuntimeError("DATABASE_URL is required for this script.")
+    return db_uri
 
 
 def _parse_grid(raw: str) -> list[float]:
@@ -95,7 +122,7 @@ def _build_question_text(question: Question) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tune auto-confirm v2 thresholds.")
-    parser.add_argument("--db", default="data/dev.db", help="SQLite db path.")
+    parser.add_argument("--db", default=None, help="PostgreSQL URI override.")
     parser.add_argument("--precision-target", type=float, default=0.86, help="Minimum precision.")
     parser.add_argument("--delta-grid", default="0.0:0.2:0.01", help="Delta grid (list or start:stop:step).")
     parser.add_argument(
@@ -106,17 +133,14 @@ def main() -> None:
     parser.add_argument("--out", default="reports/autoconfirm_v2_tuning.md", help="Markdown output path.")
     parser.add_argument("--include-ambiguous", action="store_true", help="Include ambiguous labels.")
     args = parser.parse_args()
-
-    db_path = Path(args.db)
-    if not db_path.exists():
-        raise FileNotFoundError(f"DB not found: {db_path}")
+    db_uri = _resolve_db_uri(args.db)
 
     deltas = _parse_grid(args.delta_grid)
     ranks = _parse_int_grid(args.bm25_rank_grid)
     if not deltas or not ranks:
         raise ValueError("Invalid grids for delta or bm25 rank.")
 
-    app = create_app("default", db_uri_override=f"sqlite:///{db_path.resolve().as_posix()}")
+    app = create_app("default", db_uri_override=db_uri, skip_migration_check=True)
 
     rows = []
     total_eval = 0
@@ -161,7 +185,7 @@ def main() -> None:
                     if features.get("hybrid_top1_lecture_id") == item["gold_lecture_id"]:
                         auto_correct += 1
                 precision = auto_correct / auto_total if auto_total else 0.0
-                coverage = auto_total / total if total else 0.0
+                coverage = auto_total / total_eval if total_eval else 0.0
                 rows.append(
                     {
                         "delta": delta,
@@ -184,7 +208,7 @@ def main() -> None:
         "# Auto-confirm v2 tuning report",
         "",
         f"- generated_at: {timestamp} UTC",
-        f"- db: {db_path.as_posix()}",
+        f"- db: {db_uri}",
         f"- total_eval: {total_eval}",
     ]
     lines.append(f"- precision_target: {args.precision_target}")

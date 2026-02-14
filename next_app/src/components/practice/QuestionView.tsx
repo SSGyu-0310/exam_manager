@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ChoiceList } from "@/components/practice/ChoiceList";
 import type { AnswerPayload, PracticeQuestion } from "@/components/practice/types";
+import { resolveImageUrl } from "@/lib/image";
 
 type QuestionViewProps = {
   question: PracticeQuestion;
@@ -29,7 +30,7 @@ export function QuestionView({
   const selectedValues =
     answer && answer.type === "mcq" && Array.isArray(answer.value) ? answer.value : [];
   const shortAnswerValue = answer && answer.type === "short" ? answer.value : "";
-  const image = question.imageUrl ?? question.image;
+  const image = resolveImageUrl(question.imageUrl ?? question.image);
 
   return (
     <div className="space-y-6">

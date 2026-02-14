@@ -17,10 +17,10 @@
 ## 시작 전 준비
 0) 리팩토링 전 검증 ( 필수)
 - `python scripts/verify_repo.py` 실행해 기본 컴파일 체크 통과 확인
-- DB 관련 리팩토링 시 `python scripts/verify_repo.py --all` 또는 `--db data/dev.db` 실행
+- DB 관련 리팩토링 시 `python scripts/verify_repo.py --all` 또는 `--db "$DATABASE_URL"` 실행
 
 1) 데이터 백업
-- `data/exam.db`를 복사해 스냅샷 확보
+- `python scripts/backup_postgres.py --db "$DATABASE_URL"`로 스냅샷 확보
 
 2) 환경 고정
 - `.env`와 `next_app/.env.local`의 현재 값 기록

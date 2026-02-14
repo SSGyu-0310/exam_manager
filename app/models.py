@@ -1,19 +1,87 @@
 """데이터베이스 모델 정의 - 블록제 수업 기출 학습 시스템"""
 from datetime import datetime
 from app import db
+from werkzeug.security import generate_password_hash, check_password_hash
+
+
+class User(db.Model):
+    """사용자 모델"""
+    __tablename__ = 'users'
+
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(200))
+    is_admin = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    def __repr__(self):
+        return f'<User {self.email}>'
+
+
+class PublicCurriculumTemplate(db.Model):
+    """Public curriculum template for cloning into user's private workspace"""
+    __tablename__ = 'public_curriculum_templates'
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(300), nullable=False)
+    school_tag = db.Column(db.String(100))
+    grade_tag = db.Column(db.String(50))
+    subject_tag = db.Column(db.String(100))
+    description = db.Column(db.Text)
+    payload_json = db.Column(db.Text, nullable=False)
+    published = db.Column(db.Boolean, default=False)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    creator = db.relationship('User', backref='created_templates')
+
+    def __repr__(self):
+        return f'<PublicCurriculumTemplate {self.id}:{self.title}>'
+
+
+class Subject(db.Model):
+    """과목 모델 - 블록의 상위 단위"""
+    __tablename__ = 'subjects'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('users.id'), nullable=True, index=True
+    )  # public when null
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<Subject {self.name}>'
 
 
 class Block(db.Model):
-    """블록(과목) 모델 - 여러 강의를 포함하는 상위 단위"""
+    """블록 모델 - 과목 아래의 상위 단위"""
     __tablename__ = 'blocks'
     
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('users.id'), nullable=True, index=True
+    )  # TODO: MVP 이후 nullable=False
     name = db.Column(db.String(200), nullable=False)  # 예: 심혈관학, 호흡기학
+    subject = db.Column(db.String(100))  # 과목명 (예: 생리학)
+    subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=True)
     description = db.Column(db.Text)
     order = db.Column(db.Integer, default=0)  # 표시 순서
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
+    subject_ref = db.relationship('Subject', backref='blocks')
+
     # 관계: 블록 → 강의들
     lectures = db.relationship('Lecture', backref='block', lazy='dynamic', 
                                cascade='all, delete-orphan', order_by='Lecture.order')
@@ -22,6 +90,10 @@ class Block(db.Model):
     
     def __repr__(self):
         return f'<Block {self.name}>'
+
+    @property
+    def is_public(self):
+        return self.user_id is None
     
     @property
     def lecture_count(self):
@@ -65,6 +137,9 @@ class Lecture(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     block_id = db.Column(db.Integer, db.ForeignKey('blocks.id'), nullable=False)
     folder_id = db.Column(db.Integer, db.ForeignKey('block_folders.id'), nullable=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('users.id'), nullable=True, index=True
+    )  # public when null
     title = db.Column(db.String(300), nullable=False)  # 예: 심전도의 원리
     professor = db.Column(db.String(100))  # 교수명
     order = db.Column(db.Integer, default=0)  # 강의 순서 (1강, 2강...)
@@ -97,6 +172,10 @@ class Lecture(db.Model):
     
     def __repr__(self):
         return f'<Lecture {self.order}. {self.title}>'
+
+    @property
+    def is_public(self):
+        return self.user_id is None
     
     @property
     def question_count(self):
@@ -156,6 +235,9 @@ class PreviousExam(db.Model):
     __tablename__ = 'previous_exams'
     
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('users.id'), nullable=True, index=True
+    )  # TODO: MVP 이후 nullable=False
     title = db.Column(db.String(300), nullable=False)  # 예: 21년 생리학 1차
     exam_date = db.Column(db.Date)  # 시험 날짜
     subject = db.Column(db.String(100))  # 과목명 (생리학, 해부학 등)
@@ -191,6 +273,13 @@ class PreviousExam(db.Model):
 class Question(db.Model):
     """문제 모델 - 기출문제 개별 항목"""
     __tablename__ = 'questions'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'exam_id',
+            'question_number',
+            name='uq_questions_exam_question_number',
+        ),
+    )
     
     # 문제 유형 상수
     TYPE_MULTIPLE_CHOICE = 'multiple_choice'      # 단일 정답 객관식
@@ -201,28 +290,33 @@ class Question(db.Model):
     
     # 원본 시험지와의 관계 (필수)
     exam_id = db.Column(db.Integer, db.ForeignKey('previous_exams.id'), nullable=False)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('users.id'), nullable=True, index=True
+    )  # TODO: MVP 이후 nullable=False
     question_number = db.Column(db.Integer, nullable=False)  # 문제 번호
     
     # 강의 분류 (선택적 - 분류 전에는 null)
     lecture_id = db.Column(db.Integer, db.ForeignKey('lectures.id'), nullable=True)
-    is_classified = db.Column(db.Boolean, default=False)  # 분류 완료 여부
+    is_classified = db.Column(db.Boolean, default=False, nullable=False)  # 분류 완료 여부
     
     # AI 분류 결과 및 이력
     ai_suggested_lecture_id = db.Column(db.Integer, db.ForeignKey('lectures.id'))
+    ai_final_lecture_id = db.Column(db.Integer, db.ForeignKey('lectures.id'))
     ai_suggested_lecture_title_snapshot = db.Column(db.String(300))  # 강의 삭제/변경 대비 스냅샷
     ai_confidence = db.Column(db.Float)  # 0.0 ~ 1.0 신뢰도
     ai_reason = db.Column(db.Text)  # AI 분류 근거
     ai_model_name = db.Column(db.String(100))  # 사용된 모델명
     ai_classified_at = db.Column(db.DateTime)  # AI 분류 시점
     # 상태: 'manual'(기본), 'ai_suggested'(AI제안), 'ai_confirmed'(사용자승인), 'ai_rejected'(거절)
-    classification_status = db.Column(db.String(20), default='manual')
+    classification_status = db.Column(db.String(20), default='manual', nullable=False)
     
     # 문제 유형
-    q_type = db.Column(db.String(50), default=TYPE_MULTIPLE_CHOICE)
+    q_type = db.Column(db.String(50), default=TYPE_MULTIPLE_CHOICE, nullable=False)
     
     # 문제 내용
     content = db.Column(db.Text)  # 문제 텍스트
     image_path = db.Column(db.String(500))  # 문제 이미지 경로
+    examiner = db.Column(db.String(120))  # 출제자명 (예: 홍장원)
     
     # 정답 및 해설
     answer = db.Column(db.String(500))  # 객관식 정답 (번호, 복수일 경우 콤마 구분)
@@ -233,8 +327,13 @@ class Question(db.Model):
     difficulty = db.Column(db.Integer, default=3)  # 난이도 (1-5)
     tags = db.Column(db.String(500))  # 태그 (콤마 구분)
     
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
     
     # 관계: 문제 → 선택지
     choices = db.relationship('Choice', backref='question', lazy='dynamic',
@@ -332,6 +431,14 @@ class Question(db.Model):
 class QuestionChunkMatch(db.Model):
     """문제-강의 청크 매칭(증거) 저장"""
     __tablename__ = 'question_chunk_matches'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'question_id',
+            'chunk_id',
+            'source',
+            name='uq_question_chunk_matches_question_chunk_source',
+        ),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     question_id = db.Column(db.Integer, db.ForeignKey('questions.id'), nullable=False)
@@ -342,10 +449,10 @@ class QuestionChunkMatch(db.Model):
     page_end = db.Column(db.Integer)
     snippet = db.Column(db.Text)
     score = db.Column(db.Float)
-    source = db.Column(db.String(20), default='ai')
+    source = db.Column(db.String(20), default='ai', nullable=False)
     job_id = db.Column(db.Integer, db.ForeignKey('classification_jobs.id'))
-    is_primary = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    is_primary = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     lecture = db.relationship('Lecture')
     chunk = db.relationship(
@@ -396,6 +503,9 @@ class PracticeSession(db.Model):
     __tablename__ = 'practice_sessions'
 
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('users.id'), nullable=True, index=True
+    )  # TODO: MVP 이후 nullable=False
     lecture_id = db.Column(db.Integer, db.ForeignKey('lectures.id'), nullable=True)
     mode = db.Column(db.String(50), default='practice')
     lecture_ids_json = db.Column(db.Text)
@@ -447,18 +557,24 @@ class ClassificationJob(db.Model):
     STATUS_PENDING = 'pending'
     STATUS_PROCESSING = 'processing'
     STATUS_COMPLETED = 'completed'
+    STATUS_CANCELLED = 'cancelled'
     STATUS_FAILED = 'failed'
     
     id = db.Column(db.Integer, primary_key=True)
-    status = db.Column(db.String(20), default=STATUS_PENDING)
-    total_count = db.Column(db.Integer, default=0)  # 총 문제 수
-    processed_count = db.Column(db.Integer, default=0)  # 처리된 문제 수
-    success_count = db.Column(db.Integer, default=0)  # 성공한 분류 수
-    failed_count = db.Column(db.Integer, default=0)  # 실패한 분류 수
+    status = db.Column(db.String(20), default=STATUS_PENDING, nullable=False)
+    total_count = db.Column(db.Integer, default=0, nullable=False)  # 총 문제 수
+    processed_count = db.Column(db.Integer, default=0, nullable=False)  # 처리된 문제 수
+    success_count = db.Column(db.Integer, default=0, nullable=False)  # 성공한 분류 수
+    failed_count = db.Column(db.Integer, default=0, nullable=False)  # 실패한 분류 수
     error_message = db.Column(db.Text)  # 전체 작업 실패 시 에러 메시지
     result_json = db.Column(db.Text)  # 분류 결과 JSON (미리보기용)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
     completed_at = db.Column(db.DateTime)  # 완료 시점
     
     def __repr__(self):
@@ -473,7 +589,11 @@ class ClassificationJob(db.Model):
     
     @property
     def is_complete(self):
-        return self.status in (self.STATUS_COMPLETED, self.STATUS_FAILED)
+        return self.status in (
+            self.STATUS_COMPLETED,
+            self.STATUS_CANCELLED,
+            self.STATUS_FAILED,
+        )
 
 
 class EvaluationLabel(db.Model):
@@ -489,6 +609,7 @@ class EvaluationLabel(db.Model):
     gold_lecture_id = db.Column(db.Integer, db.ForeignKey('lectures.id'))
     gold_pages = db.Column(db.Text)
     note = db.Column(db.Text)
+    source = db.Column(db.String(50))
     is_ambiguous = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

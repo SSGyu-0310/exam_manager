@@ -20,7 +20,7 @@
         }
 
         .container {
-            max-width: 800px;
+            max-width: 1280px;
             margin: 0 auto;
             padding: 2rem;
         }
@@ -75,11 +75,19 @@
             background: rgba(0, 0, 0, 0.3);
             color: #fff;
             font-size: 1rem;
+            font-family: inherit;
         }
 
         .form-group textarea {
             resize: vertical;
             min-height: 100px;
+        }
+
+        .form-group textarea.long-textarea {
+            resize: none;
+            overflow: hidden;
+            min-height: 160px;
+            line-height: 1.6;
         }
 
         .form-group input:focus,
@@ -210,16 +218,32 @@
             margin-bottom: 1rem;
         }
 
-        /* 연습 모드에서 정답 체크박스 숨기기 */
-        .practice-mode .choice-row input[type="checkbox"],
-        .practice-mode .choice-row label:last-child {
-            display: none;
-        }
-
         .shortcut-hint {
             font-size: 0.8rem;
             color: #888;
             margin-right: 1rem;
+        }
+
+        .shortcut-details {
+            margin: 0.75rem 0 1rem;
+            font-size: 0.85rem;
+            color: #888;
+        }
+
+        .shortcut-details summary {
+            cursor: pointer;
+            color: #aaa;
+        }
+
+        .shortcut-list {
+            margin-top: 0.5rem;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 0.25rem 1rem;
+        }
+
+        .shortcut-list span {
+            display: block;
         }
 
         /* 선택지 관리 버튼 */
@@ -288,6 +312,34 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.6rem;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+
+        @media (max-width: 900px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .edit-grid {
+            display: grid;
+            grid-template-columns: 1.35fr 1.05fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+
+        @media (max-width: 900px) {
+            .edit-grid {
+                grid-template-columns: 1fr;
+            }
         }
 
         /* 이미지 접기/펼치기 */
@@ -423,6 +475,10 @@
             border: none;
         }
 
+        .explanation-hidden {
+            display: none;
+        }
+
         .btn-apply {
             background: #2ecc71;
             color: white;
@@ -452,22 +508,7 @@
                 {% if from_practice %}
                 <input type="hidden" name="from_practice" value="1">
                 {% endif %}
-                <!-- 문제 이미지 (접기/펼치기) -->
-                <div class="form-group">
-                    <button type="button" class="image-toggle-btn" id="imageToggleBtn" onclick="toggleImage()"
-                        {% if not question.image_path %}style="display:none"{% endif %}>
-                        🖼️ 문제 이미지 보기/숨기기
-                    </button>
-                    <div class="image-collapsible" id="imageCollapsible">
-                        <img
-                            src="{{ url_for('static', filename='uploads/' + question.image_path) if question.image_path else '' }}"
-                            class="question-image" id="questionImagePreview" alt="문제 이미지"
-                            {% if not question.image_path %}style="display:none"{% endif %}>
-                        <div class="image-actions">
-                            <button type="button" class="image-remove-btn" onclick="removeQuestionImage()">이미지 제거</button>
-                        </div>
-                    </div>
-                </div>
+                
                 {% if original_image_url %}
                 <div class="form-group">
                     <button type="button" class="image-toggle-btn" id="originalImageToggleBtn"
@@ -486,6 +527,8 @@
                 <input type="hidden" name="uploaded_image" id="uploadedImage" value="">
                 <input type="hidden" name="remove_image" id="removeImage" value="0">
 
+
+                <div class="form-row">
                 <!-- 문제 유형 선택 -->
                 <div class="form-group">
                     <label>문제 유형</label>
@@ -515,10 +558,12 @@
                 <div class="form-group">
                     <label for="lecture_id">강의 분류</label>
                     <select name="lecture_id" id="lecture_id" class="lecture-select">
-                        <option value="">-- 현재 유지 ({{ question.lecture.block.name if question.lecture else '미분류' }} > {{
+                        <option value="">-- 현재 유지 ({{
+                            (question.lecture.block.subject or '과목 미지정') if question.lecture else '미분류' }} > {{
+                            question.lecture.block.name if question.lecture else '-' }} > {{
                             question.lecture.title if question.lecture else '-' }}) --</option>
                         {% for block in blocks %}
-                        <optgroup label="{{ block.name }}">
+                        <optgroup label="{{ (block.subject or '과목 미지정') }} · {{ block.name }}">
                             {% for lecture in block.lectures %}
                             <option value="{{ lecture.id }}" {{ 'selected' if question.lecture and
                                 question.lecture.id==lecture.id else '' }}>
@@ -529,68 +574,113 @@
                         {% endfor %}
                     </select>
                 </div>
+                </div>
 
                 <!-- 문제 내용 -->
-                <div class="form-group">
-                    <div class="content-header">
-                        <label for="content">문제 내용</label>
-                        <button type="button" class="ai-correct-btn" onclick="aiCorrectText()">✨ AI 교정</button>
-                    </div>
-                    <textarea id="content" name="content" rows="4">{{ question.content or '' }}</textarea>
-                </div>
-
-                <!-- 주관식 정답 -->
-                <div class="short-answer-section {{ 'active' if question.q_type == 'short_answer' else '' }}"
-                    id="shortAnswerSection">
-                    <div class="form-group">
-                        <label for="correct_answer_text">정답</label>
-                        <input type="text" id="correct_answer_text" name="correct_answer_text"
-                            value="{{ question.correct_answer_text or question.answer or '' }}">
-                    </div>
-                </div>
-
-                <!-- 객관식 선택지 -->
-                <div class="choices-section {{ 'active' if question.q_type != 'short_answer' else '' }}"
-                    id="choicesSection">
-                    <div class="form-group">
-                        <div class="choices-header">
-                            <label>선택지</label>
-                        </div>
-                        <div id="choicesContainer">
-                            {% for choice in question.choices %}
-                            <div class="choice-row" data-choice-id="{{ choice.id }}">
-                                <span class="choice-num">{{ choice.choice_number }}.</span>
-                                <textarea class="choice-input" name="choice_{{ choice.choice_number }}"
-                                    oninput="autoResize(this)">{{ choice.content }}</textarea>
-                                <input type="checkbox" name="correct_answers" value="{{ choice.choice_number }}"
-                                    {{ 'checked' if choice.is_correct else '' }}>
-                                <label>정답</label>
-                                <button type="button" class="choice-delete-btn" onclick="deleteChoice(this)">✕</button>
+                                <div class="edit-grid">
+                    <div class="content-column">
+        <div class="form-group">
+                            <div class="content-header">
+                                <label for="content">문제 내용</label>
+                                <button type="button" class="ai-correct-btn" onclick="aiCorrectText()">✨ AI 교정</button>
                             </div>
-                            {% endfor %}
-                            {% if not question.choices %}
-                            {% for i in range(1, 6) %}
-                            <div class="choice-row">
-                                <span class="choice-num">{{ i }}.</span>
-                                <textarea class="choice-input" name="choice_{{ i }}"
-                                    oninput="autoResize(this)"></textarea>
-                                <input type="checkbox" name="correct_answers" value="{{ i }}">
-                                <label>정답</label>
-                                <button type="button" class="choice-delete-btn" onclick="deleteChoice(this)">✕</button>
-                            </div>
-                            {% endfor %}
-                            {% endif %}
+                            <textarea id="content" name="content" rows="4" class="long-textarea" data-auto-resize="true">{{ question.content or '' }}</textarea>
+<!-- 문제 이미지 (접기/펼치기) -->
+                <div class="form-group">
+                    <button type="button" class="image-toggle-btn" id="imageToggleBtn" onclick="toggleImage()"
+                        {% if not question.image_path %}style="display:none"{% endif %}>
+                        🖼️ 문제 이미지 보기/숨기기
+                    </button>
+                    <div class="image-collapsible{% if question.image_path %} open{% endif %}" id="imageCollapsible">
+                        <img
+                            src="{{ url_for('static', filename='uploads/' + question.image_path) if question.image_path else '' }}"
+                            class="question-image" id="questionImagePreview" alt="문제 이미지"
+                            {% if not question.image_path %}style="display:none"{% endif %}>
+                        <div class="image-actions">
+                            <button type="button" class="image-remove-btn" onclick="removeQuestionImage()">이미지 제거</button>
                         </div>
-                        <button type="button" class="add-choice-btn" onclick="addChoice()">+ 선택지 추가</button>
-                        <input type="hidden" name="deleted_choices" id="deletedChoices" value="">
                     </div>
                 </div>
 
-                <!-- 해설/메모 -->
-                <div class="form-group">
+                        </div>
+
+                        <!-- 주관식 정답 -->
+                        
+                    </div>
+                    <div class="choices-column">
+        <div class="short-answer-section {{ 'active' if question.q_type == 'short_answer' else '' }}"
+                            id="shortAnswerSection">
+                            <div class="form-group">
+                                <label for="correct_answer_text">정답</label>
+                                <input type="text" id="correct_answer_text" name="correct_answer_text"
+                                    value="{{ question.correct_answer_text or question.answer or '' }}">
+                            </div>
+                        </div>
+
+                        <!-- 객관식 선택지 -->
+                        
+
+        <div class="choices-section {{ 'active' if question.q_type != 'short_answer' else '' }}"
+                            id="choicesSection">
+                            <div class="form-group">
+                                <div class="choices-header">
+                                    <label>선택지</label>
+                                </div>
+                                <div id="choicesContainer">
+                                    {% for choice in question.choices %}
+                                    <div class="choice-row" data-choice-id="{{ choice.id }}">
+                                        <span class="choice-num">{{ choice.choice_number }}.</span>
+                                        <textarea class="choice-input" name="choice_{{ choice.choice_number }}"
+                                            oninput="autoResize(this)">{{ choice.content }}</textarea>
+                                        <input type="checkbox" name="correct_answers" value="{{ choice.choice_number }}"
+                                            {{ 'checked' if choice.is_correct else '' }}>
+                                        <label>정답</label>
+                                        <button type="button" class="choice-delete-btn" onclick="deleteChoice(this)">✕</button>
+                                    </div>
+                                    {% endfor %}
+                                    {% if not question.choices %}
+                                    {% for i in range(1, 6) %}
+                                    <div class="choice-row">
+                                        <span class="choice-num">{{ i }}.</span>
+                                        <textarea class="choice-input" name="choice_{{ i }}"
+                                            oninput="autoResize(this)"></textarea>
+                                        <input type="checkbox" name="correct_answers" value="{{ i }}">
+                                        <label>정답</label>
+                                        <button type="button" class="choice-delete-btn" onclick="deleteChoice(this)">✕</button>
+                                    </div>
+                                    {% endfor %}
+                                    {% endif %}
+                                </div>
+                                <button type="button" class="add-choice-btn" onclick="addChoice()">+ 선택지 추가</button>
+                                <input type="hidden" name="deleted_choices" id="deletedChoices" value="">
+                            </div>
+                        </div>
+
+                        <!-- 해설/메모 -->
+                        
+                    </div>
+                </div>
+<div class="form-group explanation-hidden">
                     <label for="explanation">해설/메모</label>
-                    <textarea id="explanation" name="explanation" rows="3">{{ question.explanation or '' }}</textarea>
+                    <textarea id="explanation" name="explanation" rows="3" class="long-textarea" data-auto-resize="true">{{ question.explanation or '' }}</textarea>
                 </div>
+
+                <details class="shortcut-details" id="shortcutHelp">
+                    <summary>Shortcuts (Ctrl+Alt)</summary>
+                    <div class="shortcut-list">
+                        <span>1/2/3: question type</span>
+                        <span>Q: focus question</span>
+                        <span>L: focus lecture</span>
+                        <span>R: focus short answer</span>
+                        <span>A: add choice</span>
+                        <span>D: delete choice</span>
+                        <span>Up/Down: move between choices</span>
+                        <span>C: toggle correct</span>
+                        <span>I: toggle question image</span>
+                        <span>O: toggle original image</span>
+                        <span>M: AI correct</span>
+                    </div>
+                </details>
 
                 <div class="form-actions">
                     <span class="shortcut-hint">Ctrl+Enter로 저장</span>
@@ -612,6 +702,7 @@
         // 페이지 로드 시 선택지 번호 정리 (빈 번호가 있는 경우 대비)
         document.addEventListener('DOMContentLoaded', function () {
             renumberChoices();
+            enableAutoResize();
             bindImagePasteTargets();
         });
 
@@ -650,6 +741,7 @@
                         const content = document.getElementById('content');
                         const appendText = '\n\n--- 기존 선택지 ---\n' + choiceTexts.join('\n');
                         content.value = content.value + appendText;
+                        autoResize(content);
                         previousType = 'short_answer';
                     } else {
                         // 이전 상태로 되돌리기
@@ -734,6 +826,142 @@
         function autoResize(el) {
             el.style.height = 'auto';
             el.style.height = el.scrollHeight + 'px';
+        }
+
+        function enableAutoResize() {
+            document.querySelectorAll('textarea[data-auto-resize="true"]').forEach((el) => {
+                autoResize(el);
+                el.addEventListener('input', function () {
+                    autoResize(el);
+                });
+            });
+        }
+
+        function focusFieldById(id) {
+            const field = document.getElementById(id);
+            if (!field) return false;
+            field.focus();
+            return true;
+        }
+
+        function setQuestionTypeShortcut(type) {
+            const map = {
+                mc: 'multiple_choice',
+                mr: 'multiple_response',
+                short: 'short_answer'
+            };
+            const value = map[type];
+            const input = value
+                ? document.querySelector(`input[name="q_type"][value="${value}"]`)
+                : null;
+            if (!input) return false;
+            input.checked = true;
+            toggleQuestionType(type);
+            return true;
+        }
+
+        function isChoicesSectionActive() {
+            const section = document.getElementById('choicesSection');
+            return section && section.classList.contains('active');
+        }
+
+        function getChoiceRows() {
+            return Array.from(document.querySelectorAll('#choicesContainer .choice-row'));
+        }
+
+        function getActiveChoiceRow() {
+            const active = document.activeElement;
+            if (!active || !active.closest) return null;
+            return active.closest('#choicesContainer .choice-row');
+        }
+
+        function focusChoiceInput(row) {
+            if (!row) return false;
+            const input = row.querySelector('textarea.choice-input');
+            if (!input) return false;
+            input.focus();
+            return true;
+        }
+
+        function addChoiceAndFocus() {
+            if (!isChoicesSectionActive()) return false;
+            addChoice();
+            const rows = getChoiceRows();
+            return focusChoiceInput(rows[rows.length - 1]);
+        }
+
+        function deleteActiveChoice() {
+            if (!isChoicesSectionActive()) return false;
+            const row = getActiveChoiceRow();
+            if (!row) return false;
+            const btn = row.querySelector('.choice-delete-btn');
+            if (!btn) return false;
+            deleteChoice(btn);
+            return true;
+        }
+
+        function toggleActiveChoiceCorrect() {
+            if (!isChoicesSectionActive()) return false;
+            const row = getActiveChoiceRow();
+            if (!row) return false;
+            const checkbox = row.querySelector('input[type="checkbox"]');
+            if (!checkbox || checkbox.offsetParent === null) return false;
+            checkbox.click();
+            return true;
+        }
+
+        function focusChoiceByOffset(offset) {
+            if (!isChoicesSectionActive()) return false;
+            const rows = getChoiceRows();
+            if (!rows.length) return false;
+            const activeRow = getActiveChoiceRow();
+            let index = activeRow ? rows.indexOf(activeRow) : -1;
+            if (index === -1) {
+                index = offset > 0 ? -1 : rows.length;
+            }
+            let nextIndex = index + offset;
+            if (nextIndex < 0) nextIndex = 0;
+            if (nextIndex >= rows.length) nextIndex = rows.length - 1;
+            return focusChoiceInput(rows[nextIndex]);
+        }
+
+        function focusShortAnswer() {
+            const section = document.getElementById('shortAnswerSection');
+            if (!section || !section.classList.contains('active')) return false;
+            return focusFieldById('correct_answer_text');
+        }
+
+        function handleEditShortcuts(e) {
+            if (e.isComposing) return false;
+            if (!e.ctrlKey || !e.altKey || e.shiftKey || e.metaKey) return false;
+
+            const key = e.key.toLowerCase();
+
+            if (key === '1') return setQuestionTypeShortcut('mc');
+            if (key === '2') return setQuestionTypeShortcut('mr');
+            if (key === '3') return setQuestionTypeShortcut('short');
+            if (key === 'q') return focusFieldById('content');
+            if (key === 'l') return focusFieldById('lecture_id');
+            if (key === 'r') return focusShortAnswer();
+            if (key === 'a') return addChoiceAndFocus();
+            if (key === 'd') return deleteActiveChoice();
+            if (key === 'c') return toggleActiveChoiceCorrect();
+            if (key === 'i') {
+                toggleImage();
+                return true;
+            }
+            if (key === 'o') {
+                toggleOriginalImage();
+                return true;
+            }
+            if (key === 'm') {
+                aiCorrectText();
+                return true;
+            }
+            if (key === 'arrowup') return focusChoiceByOffset(-1);
+            if (key === 'arrowdown') return focusChoiceByOffset(1);
+
+            return false;
         }
 
         function bindImagePasteTargets() {
@@ -902,6 +1130,11 @@
                 e.preventDefault();
                 renumberChoices();
                 document.getElementById('editForm').submit();
+                return;
+            }
+
+            if (handleEditShortcuts(e)) {
+                e.preventDefault();
             }
         });
 
@@ -954,7 +1187,9 @@
         }
 
         function applyCorrectedText() {
-            document.getElementById('content').value = correctedTextCache;
+            const content = document.getElementById('content');
+            content.value = correctedTextCache;
+            autoResize(content);
             closeCorrectionModal();
         }
     </script>

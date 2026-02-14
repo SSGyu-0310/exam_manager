@@ -7,6 +7,9 @@ import argparse
 import re
 import fitz  # PyMuPDF
 
+QUESTION_NUM_RE = re.compile(r"^\s*(\d{1,3})\.(?!\d)(?:\s+.*)?$")
+WHITESPACE_RE = re.compile(r"\s+")
+
 
 def is_grayish(col, gray_min=0.70, gray_max=0.95, equal_tol=0.06):
     if not col:
@@ -56,6 +59,90 @@ def count_text_chars_in_rect(page: fitz.Page, rect: fitz.Rect) -> int:
     return len(txt)
 
 
+def has_image_block_in_rect(page: fitz.Page, rect: fitz.Rect) -> bool:
+    """Return True when at least one image block exists in the clipped rect."""
+    d = page.get_text("dict", clip=rect) or {}
+    for block in d.get("blocks", []):
+        if block.get("type") != 1:
+            continue
+        bbox = block.get("bbox")
+        if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+            return True
+    return False
+
+
+def find_question_markers(page: fitz.Page, rect: fitz.Rect) -> list[tuple[int, float]]:
+    """
+    Find question-number line markers inside a segment.
+    Returns [(qnum, y0), ...] sorted by y.
+    """
+    data = page.get_text("dict", clip=rect) or {}
+    markers: list[tuple[int, float]] = []
+
+    for block in data.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = line.get("spans") or []
+            if not spans:
+                continue
+            text = "".join((span.get("text") or "") for span in spans)
+            text = WHITESPACE_RE.sub(" ", text).strip()
+            if not text:
+                continue
+            m = QUESTION_NUM_RE.match(text)
+            if not m:
+                continue
+            y0 = min(float(span["bbox"][1]) for span in spans)
+            markers.append((int(m.group(1)), y0))
+
+    markers.sort(key=lambda item: item[1])
+    dedup: list[tuple[int, float]] = []
+    for qnum, y0 in markers:
+        if dedup and abs(y0 - dedup[-1][1]) < 1.0:
+            continue
+        dedup.append((qnum, y0))
+    return dedup
+
+
+def split_segment_by_markers(
+    rect: fitz.Rect,
+    markers: list[tuple[int, float]],
+    start_pad: float = 2.0,
+    split_pad: float = 1.0,
+    min_height: float = 8.0,
+) -> list[tuple[fitz.Rect, int | None]]:
+    """
+    Split one grayline segment into multiple question segments when
+    multiple question-number markers are detected.
+    """
+    if not markers:
+        return [(rect, None)]
+
+    if len(markers) == 1:
+        qnum, y0 = markers[0]
+        start_y = max(rect.y0, y0 - start_pad)
+        return [(fitz.Rect(rect.x0, start_y, rect.x1, rect.y1), qnum)]
+
+    split_points = [rect.y0]
+    for _, y0 in markers[1:]:
+        split_points.append(max(rect.y0, min(rect.y1, y0 - split_pad)))
+    split_points.append(rect.y1)
+
+    result: list[tuple[fitz.Rect, int | None]] = []
+    marker_idx = 0
+    for i in range(len(split_points) - 1):
+        y0 = split_points[i]
+        y1 = split_points[i + 1]
+        if y1 <= y0 + min_height:
+            continue
+        qnum = markers[min(marker_idx, len(markers) - 1)][0]
+        result.append((fitz.Rect(rect.x0, y0, rect.x1, y1), qnum))
+        marker_idx += 1
+
+    return result or [(rect, markers[0][0])]
+
+
 def is_choices_only_segment(page: fitz.Page, rect: fitz.Rect) -> bool:
     """
     선지만 있는 세그먼트인지 확인.
@@ -84,36 +171,54 @@ def is_choices_only_segment(page: fitz.Page, rect: fitz.Rect) -> bool:
     return False
 
 
-def extract_question_number(page: fitz.Page, rect: fitz.Rect) -> int | None:
+def extract_question_number(
+    page: fitz.Page,
+    rect: fitz.Rect,
+    expected_qnum: int | None = None,
+) -> int | None:
     """
     세그먼트에서 PDF 원본 문제 번호 추출.
     "1. 다음 중..." 형태에서 1을 추출.
     문제 번호가 없으면 None 반환.
     """
-    txt = page.get_text("text", clip=rect) or ""
-    txt = txt.strip()
-    if not txt:
+    markers = find_question_markers(page, rect)
+    if not markers:
         return None
-    
-    # 문제 번호 패턴: "1." "12." "123." 등 (번호 + 점 + 공백)
-    match = re.match(r'^\s*(\d+)\.\s', txt)
-    if match:
-        return int(match.group(1))
-    
-    return None
+
+    nums = [qnum for qnum, _ in markers]
+    if expected_qnum is None:
+        return nums[0]
+
+    if expected_qnum in nums:
+        return expected_qnum
+
+    forward = [n for n in nums if expected_qnum <= n <= expected_qnum + 12]
+    if forward:
+        return min(forward)
+
+    backward = [n for n in nums if expected_qnum - 3 <= n < expected_qnum]
+    if backward:
+        return max(backward)
+
+    return nums[0]
 
 
 def content_bbox_in_rect(page: fitz.Page, rect: fitz.Rect) -> fitz.Rect | None:
     """
-    Compute union bbox of text spans within rect.
-    If there is no text in rect, return None.
-    (You can extend to include images/drawings if you need.)
+    Compute union bbox of text/image content within rect.
+    If there is no content in rect, return None.
     """
     d = page.get_text("dict", clip=rect)
     boxes = []
 
     for b in d.get("blocks", []):
-        if b.get("type") != 0:
+        btype = b.get("type")
+        if btype == 1:
+            bbox = b.get("bbox")
+            if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+                boxes.append(fitz.Rect(*bbox))
+            continue
+        if btype != 0:
             continue
         for line in b.get("lines", []):
             for span in line.get("spans", []):
@@ -158,7 +263,7 @@ def crop_with_merge_contentaware(pdf_path: str,
                                  pad_top: float = 2.0,
                                  pad_bottom: float = 2.0,
                                  # content filtering
-                                 min_chars: int = 30,
+                                 min_chars: int = 20,
                                  min_height: float = 60.0,
                                  # tight crop padding around actual content bbox
                                  tight_pad: float = 6.0,
@@ -171,7 +276,7 @@ def crop_with_merge_contentaware(pdf_path: str,
     questions = []
     current = None
     prev_page_open = False
-    qnum = 1
+    next_qnum = 1
     # Page 1 헤더 스킵을 위한 플래그
     first_question_found = False
 
@@ -217,56 +322,69 @@ def crop_with_merge_contentaware(pdf_path: str,
         is_first_content_found = False
         
         for rect in raw_segments:
-            # PDF 원본 문제 번호 추출 (필터링 전에 확인하여 중요 세그먼트 보호)
-            pdf_qnum = extract_question_number(page, rect)
+            marker_based_segments = split_segment_by_markers(
+                rect,
+                find_question_markers(page, rect),
+            )
+            for seg_rect, marker_qnum in marker_based_segments:
+                # PDF 원본 문제 번호 추출 (필터링 전에 확인하여 중요 세그먼트 보호)
+                pdf_qnum = marker_qnum
+                if pdf_qnum is None:
+                    pdf_qnum = extract_question_number(
+                        page, seg_rect, expected_qnum=next_qnum
+                    )
 
-            # Continuation filtering logic:
-            is_continuation_candidate = (prev_page_open and not is_first_content_found)
-            
-            current_min_height = 15.0 if is_continuation_candidate else min_height
-            current_min_chars = 10 if is_continuation_candidate else min_chars
-            
-            # 문제 번호가 있으면 필터링 무시하고 살림 (Q82 등 짧은 문제 보호)
-            if pdf_qnum is None:
-                if rect.height < current_min_height:
+                # Continuation filtering logic:
+                is_continuation_candidate = (prev_page_open and not is_first_content_found)
+
+                current_min_height = 15.0 if is_continuation_candidate else min_height
+                current_min_chars = 10 if is_continuation_candidate else min_chars
+
+                # 문제 번호가 있으면 필터링 무시하고 살림 (Q82 등 짧은 문제 보호)
+                if pdf_qnum is None:
+                    if seg_rect.height < current_min_height:
+                        continue
+
+                    n_chars = count_text_chars_in_rect(page, seg_rect)
+                    if n_chars < current_min_chars and not has_image_block_in_rect(
+                        page, seg_rect
+                    ):
+                        # 거의 공백(상/하단 여백)이라면 버림
+                        continue
+
+                # 유효한 컨텐츠를 찾았으므로 플래그 설정
+                is_first_content_found = True
+
+                cb = content_bbox_in_rect(page, seg_rect)
+                if cb is None:
                     continue
 
-                n_chars = count_text_chars_in_rect(page, rect)
-                if n_chars < current_min_chars:
-                    # 거의 공백(상/하단 여백)이라면 버림
-                    continue
-            
-            # 유효한 컨텐츠를 찾았으므로 플래그 설정
-            is_first_content_found = True
+                # crop rectangle: full width or tight crop
+                if full_width:
+                    crop_rect = fitz.Rect(
+                        0.0,
+                        max(0.0, cb.y0 - tight_pad),
+                        W,
+                        min(H, cb.y1 + tight_pad),
+                    )
+                else:
+                    crop_rect = fitz.Rect(
+                        max(0.0, cb.x0 - tight_pad),
+                        max(0.0, cb.y0 - tight_pad),
+                        min(W, cb.x1 + tight_pad),
+                        min(H, cb.y1 + tight_pad),
+                    )
 
-            cb = content_bbox_in_rect(page, rect)
-            if cb is None:
-                continue
+                # 선지만 있는 세그먼트인지 확인
+                is_choices_only = is_choices_only_segment(page, seg_rect)
 
-            # crop rectangle: full width or tight crop
-            if full_width:
-                crop_rect = fitz.Rect(
-                    0.0,
-                    max(0.0, cb.y0 - tight_pad),
-                    W,
-                    min(H, cb.y1 + tight_pad),
+                segments.append(
+                    {
+                        "rect": crop_rect,
+                        "is_choices_only": is_choices_only,
+                        "pdf_qnum": pdf_qnum,
+                    }
                 )
-            else:
-                crop_rect = fitz.Rect(
-                    max(0.0, cb.x0 - tight_pad),
-                    max(0.0, cb.y0 - tight_pad),
-                    min(W, cb.x1 + tight_pad),
-                    min(H, cb.y1 + tight_pad),
-                )
-
-            # 선지만 있는 세그먼트인지 확인
-            is_choices_only = is_choices_only_segment(page, rect)
-            
-            segments.append({
-                "rect": crop_rect, 
-                "is_choices_only": is_choices_only,
-                "pdf_qnum": pdf_qnum
-            })
 
         if not segments:
             prev_page_open = False
@@ -296,7 +414,7 @@ def crop_with_merge_contentaware(pdf_path: str,
             only_one_segment = (len(segments) == 1)
             if not (only_one_segment and page_open):
                 # 이어지는 문제가 이번 페이지에서 완료됨
-                qnum += 1
+                next_qnum = max(next_qnum, int(current.get("qnum") or 0) + 1)
                 
         elif first_seg_is_choices_only and current is not None:
             # 이전 페이지에서 회색선으로 분리되었지만, 첫 세그먼트가 선지만 있음
@@ -308,7 +426,7 @@ def crop_with_merge_contentaware(pdf_path: str,
             only_one_segment = (len(segments) == 1)
             if not (only_one_segment and page_open):
                 # 이 문제가 완료됨
-                qnum += 1
+                next_qnum = max(next_qnum, int(current.get("qnum") or 0) + 1)
 
         # 중간 세그먼트들: 각각 새 문제 (마지막 세그먼트 제외)
         last_seg_idx = len(segments) - 1
@@ -374,7 +492,8 @@ def crop_with_merge_contentaware(pdf_path: str,
                 continue
             
             # 새 문제 번호 결정: PDF 원본 번호 우선, 없으면 순차 번호 사용
-            new_qnum = pdf_qnum if pdf_qnum is not None else qnum
+            new_qnum = pdf_qnum if pdf_qnum is not None else next_qnum
+            next_qnum = max(next_qnum, int(new_qnum) + 1)
             
             # 마지막 세그먼트가 다음 페이지로 이어지는 경우
             if is_last_segment and page_open:
@@ -382,22 +501,16 @@ def crop_with_merge_contentaware(pdf_path: str,
                 current = {"qnum": new_qnum, "parts": []}
                 questions.append(current)
                 save_part(current, page, seg_rect, pi)
-                # qnum은 PDF 문제번호가 없을 때만 증가 (다음 fallback용)
-                if pdf_qnum is None:
-                    pass  # 다음 페이지에서 완료 후 증가
             else:
                 # 일반 세그먼트: 완결된 문제
                 current = {"qnum": new_qnum, "parts": []}
                 questions.append(current)
                 save_part(current, page, seg_rect, pi)
-                # qnum은 PDF 문제번호가 없을 때 증가 (다음 fallback용)
-                if pdf_qnum is None:
-                    qnum += 1
                 # 완결된 문제이므로 current 유지 (선지만 있는 다음 세그먼트가 병합될 수 있도록)
 
         prev_page_open = page_open
 
-        if max_questions is not None and qnum > max_questions:
+        if max_questions is not None and len(questions) >= max_questions:
             break
 
     meta = {
@@ -509,7 +622,7 @@ if __name__ == "__main__":
     ap.add_argument("--out", default="exam_crops")
     ap.add_argument("--dpi", type=int, default=200)
     ap.add_argument("--max-questions", type=int, default=None)
-    ap.add_argument("--min-chars", type=int, default=30, help="Segments with fewer chars are treated as margins and skipped")
+    ap.add_argument("--min-chars", type=int, default=20, help="Segments with fewer chars are treated as margins and skipped")
     ap.add_argument("--min-height", type=float, default=60.0)
     ap.add_argument("--tight-pad", type=float, default=6.0)
     ap.add_argument("--top-gap", type=float, default=40.0)

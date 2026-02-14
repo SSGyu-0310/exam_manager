@@ -1,7 +1,7 @@
 """데이터베이스 스키마 마이그레이션 - AI 분류 필드 추가"""
-from pathlib import Path
 import argparse
 import sys
+from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -13,11 +13,17 @@ from sqlalchemy import text
 def _normalize_db_uri(db_value: str | None) -> str | None:
     if not db_value:
         return None
-    if "://" in db_value:
-        return db_value
-    path = Path(db_value).resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return f"sqlite:///{path}"
+    db_uri = db_value.strip()
+    if db_uri.startswith("postgres://"):
+        db_uri = db_uri.replace("postgres://", "postgresql+psycopg://", 1)
+    elif db_uri.startswith("postgresql://"):
+        db_uri = db_uri.replace("postgresql://", "postgresql+psycopg://", 1)
+    if not db_uri.startswith("postgresql+psycopg://"):
+        raise RuntimeError(
+            "--db must be a PostgreSQL URI (postgresql+psycopg://...). "
+            "Non-PostgreSQL DB path/URI is no longer supported."
+        )
+    return db_uri
 
 
 def migrate(db_uri: str | None = None, config_name: str = "default"):
@@ -29,26 +35,29 @@ def migrate(db_uri: str | None = None, config_name: str = "default"):
     with app.app_context():
         # Add new columns to questions table
         columns_to_add = [
-            'ALTER TABLE questions ADD COLUMN ai_suggested_lecture_id INTEGER REFERENCES lectures(id)',
-            'ALTER TABLE questions ADD COLUMN ai_suggested_lecture_title_snapshot VARCHAR(300)',
-            'ALTER TABLE questions ADD COLUMN ai_confidence FLOAT',
-            'ALTER TABLE questions ADD COLUMN ai_reason TEXT',
-            'ALTER TABLE questions ADD COLUMN ai_model_name VARCHAR(100)',
-            'ALTER TABLE questions ADD COLUMN ai_classified_at DATETIME',
-            'ALTER TABLE questions ADD COLUMN classification_status VARCHAR(20) DEFAULT "manual"',
+            "ALTER TABLE questions ADD COLUMN ai_suggested_lecture_id INTEGER REFERENCES lectures(id)",
+            "ALTER TABLE questions ADD COLUMN ai_final_lecture_id INTEGER REFERENCES lectures(id)",
+            "ALTER TABLE questions ADD COLUMN ai_suggested_lecture_title_snapshot VARCHAR(300)",
+            "ALTER TABLE questions ADD COLUMN ai_confidence FLOAT",
+            "ALTER TABLE questions ADD COLUMN ai_reason TEXT",
+            "ALTER TABLE questions ADD COLUMN ai_model_name VARCHAR(100)",
+            "ALTER TABLE questions ADD COLUMN ai_classified_at TIMESTAMP",
+            "ALTER TABLE questions ADD COLUMN classification_status VARCHAR(20) DEFAULT 'manual'",
         ]
         
         for col_sql in columns_to_add:
             try:
                 db.session.execute(text(col_sql))
-                col_name = col_sql.split('ADD COLUMN ')[1].split()[0]
-                print(f'Added: {col_name}')
+                col_name = col_sql.split("ADD COLUMN ")[1].split()[0]
+                print(f"Added: {col_name}")
             except Exception as e:
-                col_name = col_sql.split('ADD COLUMN ')[1].split()[0]
-                if 'duplicate column' in str(e).lower():
-                    print(f'Already exists: {col_name}')
+                db.session.rollback()
+                col_name = col_sql.split("ADD COLUMN ")[1].split()[0]
+                msg = str(e).lower()
+                if "duplicate column" in msg or "already exists" in msg:
+                    print(f"Already exists: {col_name}")
                 else:
-                    print(f'Skipped {col_name}: {e}')
+                    print(f"Skipped {col_name}: {e}")
         
         # Create classification_jobs table if not exists
         db.create_all()
@@ -59,7 +68,10 @@ def migrate(db_uri: str | None = None, config_name: str = "default"):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--db", help="Path to sqlite db file.")
+    parser.add_argument(
+        "--db",
+        help="PostgreSQL URI override (postgresql+psycopg://...).",
+    )
     parser.add_argument(
         "--config",
         default="default",

@@ -1,98 +1,171 @@
-# Ops Playbook (SQLite)
+# Release Operations Checklist (Postgres)
 
-## Standard change checklist (Dev -> Prod)
-- [ ] Clone prod -> dev: `python scripts/clone_db.py --db data/exam.db --out data/dev.db`
-- [ ] Run migrations on dev: `python scripts/run_migrations.py --db data/dev.db`
-- [ ] Rebuild FTS on dev (if needed): `python scripts/init_fts.py --db data/dev.db --rebuild`
-- [ ] Verify dev results (UI + quick queries)
-- [ ] Hot backup prod: `python scripts/backup_db.py --db data/exam.db --keep 30`
-- [ ] Run migrations on prod: `python scripts/run_migrations.py --db data/exam.db`
-- [ ] Rebuild FTS on prod (if needed): `python scripts/init_fts.py --db data/exam.db --rebuild`
-- [ ] Verify prod results (UI + quick queries)
+Final deploy-readiness checklist and rollback runbook.
 
-## Emergency recovery (<=5 steps)
-1) Roll back feature flags: `AI_AUTO_APPLY=0`, `RETRIEVAL_MODE=bm25`
-2) Block writes: `DB_READ_ONLY=1`
-3) Restore latest backup:
-```bash
-copy backups/exam.db.YYYYMMDD_HHMMSS data/exam.db
-```
-4) Check migration status:
-```bash
-sqlite3 data/exam.db "SELECT version, applied_at FROM schema_migrations ORDER BY applied_at DESC;"
-```
-5) Rebuild FTS:
-```bash
-python scripts/init_fts.py --db data/exam.db --rebuild
+## 0) HTTP request log standard
+
+- Format: JSON line (machine-parseable).
+- Required fields:
+  - `request_id`: Correlation ID from `X-Request-ID` header or generated UUID.
+  - `route`: Flask route rule (fallback: request path).
+  - `status`: HTTP status code.
+  - `latency`: Request latency in milliseconds.
+  - `error_code`: API code for failures, `HTTP_<status>` fallback, `null` for success.
+- Example:
+```json
+{"request_id":"8fe6034b249d45f6be08b9267f444e18","route":"/api/manage/upload-pdf","status":201,"latency":24.37,"error_code":null}
 ```
 
-## Destructive changes (drop/alter) standard
-SQLite requires a table rebuild for column drops or type changes. Example:
-```sql
-BEGIN;
-CREATE TABLE questions_new (
-    id INTEGER PRIMARY KEY,
-    exam_id INTEGER NOT NULL,
-    question_number INTEGER NOT NULL,
-    lecture_id INTEGER,
-    is_classified BOOLEAN DEFAULT 0
-    -- add remaining columns here
-);
-INSERT INTO questions_new (id, exam_id, question_number, lecture_id, is_classified)
-SELECT id, exam_id, question_number, lecture_id, is_classified
-FROM questions;
-DROP TABLE questions;
-ALTER TABLE questions_new RENAME TO questions;
-CREATE INDEX IF NOT EXISTS idx_questions_exam_id ON questions(exam_id);
-COMMIT;
+## 1) Pre-deploy gate (ordered)
+
+- [ ] Confirm release owner, rollback owner, and incident channel.
+- [ ] Confirm target env is loaded (`DATABASE_URL`, `FLASK_CONFIG`, secrets).
+- [ ] Confirm migration guard flags:
+  - `CHECK_PENDING_MIGRATIONS=1`
+  - `FAIL_ON_PENDING_MIGRATIONS=1` (production)
+- [ ] Confirm write safety flags match rollout plan:
+  - `DB_READ_ONLY` (normally `0` before release)
+  - `AI_AUTO_APPLY`
+  - `RETRIEVAL_MODE`
+- [ ] Verify tooling availability: `pg_dump`, `pg_restore`, `psql`.
+- [ ] Run repository baseline checks:
+```bash
+python scripts/verify_repo.py --ops-preflight
+```
+- [ ] Create pre-deploy DB backup:
+```bash
+python scripts/backup_postgres.py --db "$DATABASE_URL"
+```
+- [ ] Record backup file path and release timestamp.
+
+## Backup/restore rehearsal drill (non-prod target)
+
+Run this drill regularly against a dedicated restore DB.
+
+1. Prepare DB URLs.
+```bash
+export DATABASE_URL="postgresql+psycopg://user:pass@host:5432/exam_prod_like"
+export LIBPQ_DATABASE_URL="${DATABASE_URL/postgresql+psycopg:\/\//postgresql://}"
+export DRILL_DB_NAME="exam_restore_drill"
+export DRILL_DATABASE_URL="postgresql+psycopg://user:pass@host:5432/${DRILL_DB_NAME}"
+export DRILL_DATABASE_URL_LIBPQ="${DRILL_DATABASE_URL/postgresql+psycopg:\/\//postgresql://}"
+export POSTGRES_ADMIN_URL="postgresql://user:pass@host:5432/postgres"
+```
+2. Run preflight tooling checks.
+```bash
+python scripts/verify_repo.py --ops-preflight
+```
+3. Take a backup and capture the newest artifact.
+```bash
+python scripts/backup_postgres.py --db "$DATABASE_URL"
+LATEST_DUMP="$(ls -1t backups/*.dump | head -n 1)"
+pg_restore --list "$LATEST_DUMP" > /tmp/exam_restore_drill.list
+```
+4. Recreate drill DB and restore.
+```bash
+psql "$POSTGRES_ADMIN_URL" -c "DROP DATABASE IF EXISTS ${DRILL_DB_NAME};"
+psql "$POSTGRES_ADMIN_URL" -c "CREATE DATABASE ${DRILL_DB_NAME};"
+pg_restore --clean --if-exists --no-owner --no-privileges --dbname "$DRILL_DATABASE_URL_LIBPQ" "$LATEST_DUMP"
+```
+5. Validate post-restore state.
+```bash
+python scripts/run_postgres_migrations.py --db "$DRILL_DATABASE_URL"
+python scripts/init_fts.py --db "$DRILL_DATABASE_URL" --sync
+psql "$DRILL_DATABASE_URL_LIBPQ" -c "SELECT version, applied_at FROM schema_migrations ORDER BY applied_at DESC LIMIT 20;"
 ```
 
-## FTS notes
-- Rebuild required when:
-  - `lecture_chunks` schema changes
-  - chunking logic changes (page boundaries/normalization)
-  - bulk edits/deletes bypass the indexer
-- Command (supports `--db`):
+## 2) Deploy execution (ordered)
+
+1. Apply Postgres migrations:
 ```bash
-python scripts/init_fts.py --db data/exam.db --rebuild
+python scripts/run_postgres_migrations.py --db "$DATABASE_URL"
 ```
-- Verification after rebuild:
+2. Sync FTS metadata:
 ```bash
-sqlite3 data/exam.db "SELECT count(*) FROM lecture_chunks_fts;"
+python scripts/init_fts.py --db "$DATABASE_URL" --sync
 ```
-  - Also run a known query in the UI to confirm candidates appear.
-
-## Startup safety checks
-- Pending migrations are checked on app start (`app/__init__.py` -> `app/services/migrations.py`).
-- Flags:
-  - `CHECK_PENDING_MIGRATIONS=1` (default) to enable detection
-  - `FAIL_ON_PENDING_MIGRATIONS=1` to abort in production when pending/mismatched
-- Backup enforcement on writes:
-  - `AUTO_BACKUP_BEFORE_WRITE=1` enables hot backups per write
-  - `ENFORCE_BACKUP_BEFORE_WRITE=1` blocks prod writes if backups are disabled
-
-## Read-only / safety flags
-- `DB_READ_ONLY=1` blocks write paths (uploads, indexing, classification apply, practice submit).
-- `AI_AUTO_APPLY=0` prevents automatic classification apply.
-- `RETRIEVAL_MODE=bm25` (default) or `off` to disable retrieval.
-- Optional hot backup hook: `AUTO_BACKUP_BEFORE_WRITE=1` and `AUTO_BACKUP_KEEP=30`.
-
-## Embedding config (hybrid_rrf)
-- `EMBEDDING_MODEL_NAME` defaults to `intfloat/multilingual-e5-base`.
-- `EMBEDDING_DIM` must match the model dimension (e.g., 768 for E5 base).
-- `EMBEDDING_TOP_N` controls how many BM25 chunks get embedding rerank (default 300).
-- Rebuild embeddings after any model change: `python scripts/build_embeddings.py --db data/dev.db --rebuild`.
-
-## Manual verification (no automated tests)
-- [ ] Open `/manage` and confirm CRUD still works (dev only).
-- [ ] Run a known FTS query and check candidate results.
-- [ ] Start an AI classification job and ensure apply respects `AI_AUTO_APPLY`.
-
-## Example Commands (5)
+3. Deploy/restart services:
 ```bash
-python scripts/clone_db.py --db data/exam.db --out data/dev.db
-python scripts/run_migrations.py --db data/dev.db
-python scripts/init_fts.py --db data/dev.db --rebuild
-python scripts/backup_db.py --db data/exam.db --keep 30
-DB_READ_ONLY=1 python run.py
+./scripts/dc up -d --build
+```
+4. Verify app health and startup migration checks:
+```bash
+./scripts/dc logs --tail=200 api
+```
+
+## 3) Post-deploy verification (must pass)
+
+- [ ] API health check returns success.
+- [ ] `/manage` CRUD smoke path works.
+- [ ] Retrieval returns expected candidates for a known query.
+- [ ] AI classification flow behaves as expected for current `AI_AUTO_APPLY`.
+- [ ] No migration mismatch errors in API logs.
+
+## 4) No-Go / blocking conditions
+
+Treat release as `No-Go` immediately if any item below is true:
+- [ ] Backup command fails or backup file is missing/corrupt.
+- [ ] Migration command fails or reports checksum/version mismatch.
+- [ ] API cannot start cleanly after deploy.
+- [ ] Core smoke flows (auth/manage/retrieval) fail.
+- [ ] Rollback backup candidate cannot be identified.
+
+## 5) Rollback completeness checklist
+
+Rollback is complete only when all items are checked:
+- [ ] Trigger condition and incident timestamp recorded.
+- [ ] Writes blocked (`DB_READ_ONLY=1`) and high-risk auto actions disabled (`AI_AUTO_APPLY=0`).
+- [ ] DB restore performed from known-good dump.
+- [ ] `schema_migrations` state verified after restore.
+- [ ] FTS re-synced after restore.
+- [ ] API/UI smoke checks pass on rolled-back state.
+- [ ] Release status communicated (`rolled back`) with backup file and verification evidence.
+
+## 6) Rollback procedure (validated commands)
+
+1. Freeze risky behavior and block writes.
+```bash
+# apply in deployment env, then restart services
+export DB_READ_ONLY=1
+export AI_AUTO_APPLY=0
+export RETRIEVAL_MODE=bm25
+```
+2. Convert SQLAlchemy URI for libpq CLI tools (`pg_restore`, `psql`).
+```bash
+export LIBPQ_DATABASE_URL="${DATABASE_URL/postgresql+psycopg:\/\//postgresql://}"
+```
+3. Select restore target dump and verify file exists.
+```bash
+ls -lh backups/*.dump | tail -n 10
+export BACKUP_FILE="backups/<db>_YYYYMMDD_HHMMSS.dump"
+test -f "$BACKUP_FILE"
+```
+4. Restore database.
+```bash
+pg_restore --clean --if-exists --no-owner --no-privileges --dbname "$LIBPQ_DATABASE_URL" "$BACKUP_FILE"
+```
+5. Verify migration state after restore.
+```bash
+psql "$LIBPQ_DATABASE_URL" -c "SELECT version, applied_at FROM schema_migrations ORDER BY applied_at DESC LIMIT 20;"
+```
+6. Re-sync FTS metadata.
+```bash
+python scripts/init_fts.py --db "$DATABASE_URL" --sync
+```
+7. Run smoke checks and keep `DB_READ_ONLY=1` until verification passes.
+8. Re-open writes only after explicit go decision (`DB_READ_ONLY=0` + restart).
+
+## 7) Destructive-change standard
+
+- Keep schema changes in `migrations/postgres/*.sql`.
+- Include related index/constraint changes in the same migration unit.
+- Apply in dev/staging first, then production.
+
+## 8) Canonical operation commands
+
+```bash
+python scripts/backup_postgres.py --db "$DATABASE_URL"
+python scripts/run_postgres_migrations.py --db "$DATABASE_URL"
+python scripts/init_fts.py --db "$DATABASE_URL" --sync
+./scripts/dc up -d --build
 ```

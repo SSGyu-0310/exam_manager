@@ -111,7 +111,7 @@ export function useLectureQuestionCounts(lectures: NormalizedLecture[]) {
             initialCount: lecture.questionCount,
           };
         })
-        .filter((entry): entry is { id: string | number; key: string; initialCount?: number } =>
+        .filter((entry): entry is { id: string | number; key: string; initialCount: number | undefined } =>
           Boolean(entry)
         ),
     [lectures]

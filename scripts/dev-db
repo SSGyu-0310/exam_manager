@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+if [[ -z "${ENV_FILE:-}" ]]; then
+  if [[ -f ".env.docker" ]]; then
+    ENV_FILE=".env.docker"
+  elif [[ -f ".env" ]]; then
+    ENV_FILE=".env"
+  else
+    echo "[dev-db] env file not found." >&2
+    echo "[dev-db] create one first: cp .env.docker.example .env.docker" >&2
+    echo "[dev-db] or: cp .env.example .env" >&2
+    exit 1
+  fi
+fi
+
+export ENV_FILE
+
+if [[ -n "${DEV_DB_COMPOSE_FILE:-}" ]]; then
+  exec "$ROOT_DIR/scripts/dc" -f "$DEV_DB_COMPOSE_FILE" "$@"
+fi
+
+exec "$ROOT_DIR/scripts/dc" -f docker-compose.yml -f docker-compose.host-db.yml "$@"

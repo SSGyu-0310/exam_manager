@@ -59,9 +59,25 @@
             transition: transform 0.2s, box-shadow 0.2s;
         }
 
+        .nav-links button {
+            padding: 1rem 2rem;
+            background: linear-gradient(135deg, #2c3e50 0%, #4b79a1 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
         .nav-links a:hover {
             transform: translateY(-3px);
             box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .nav-links button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px rgba(44, 62, 80, 0.4);
         }
 
         .status {
@@ -88,6 +104,7 @@
             ✅ 시스템이 정상 작동 중입니다
         </div>
     </div>
+    <script src="{{ url_for('static', filename='js/duck_quack.js') }}"></script>
 </body>
 
 </html>

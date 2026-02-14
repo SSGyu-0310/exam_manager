@@ -1,9 +1,8 @@
-import Link from "next/link";
-
 import { getExamDetail } from "@/lib/api/manage";
+import { composeExamTitle } from "@/lib/examTitle";
 import { ExamQuestionTable } from "@/components/exam/ExamQuestionTable";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { ExamEditButton } from "@/components/manage/ExamEditButton";
 import { Card, CardContent } from "@/components/ui/card";
 
 type PageProps = {
@@ -21,32 +20,39 @@ export default async function ManageExamDetailPage({ params }: PageProps) {
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
-              Exam detail
+              시험지 상세
             </p>
             <h2 className="text-2xl font-semibold text-foreground">{exam.title}</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              {[exam.subject, exam.term, exam.examDate].filter(Boolean).join(" · ")}
+              {composeExamTitle({
+                subject: exam.subject,
+                year: exam.year,
+                term: exam.term,
+              })}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            <Badge variant="neutral">{exam.questionCount ?? 0} questions</Badge>
-            <Badge variant="success">{exam.classifiedCount ?? 0} classified</Badge>
-            <Badge variant="danger">{exam.unclassifiedCount ?? 0} unclassified</Badge>
-            <Button size="sm" asChild>
-              <Link href={`/manage/exams/${exam.id}/edit`}>Edit exam</Link>
-            </Button>
+            <Badge variant="neutral">전체 {exam.questionCount ?? 0}문항</Badge>
+            <Badge variant="success">분류 {exam.classifiedCount ?? 0}문항</Badge>
+            <Badge variant="danger">미분류 {exam.unclassifiedCount ?? 0}문항</Badge>
+            <ExamEditButton examId={exam.id} />
           </div>
         </div>
 
-        <ExamQuestionTable questions={data.questions} showActions />
+        <ExamQuestionTable
+          questions={data.questions}
+          showActions
+          questionDetailBasePath="/manage/questions"
+          editBasePath="/manage/questions"
+        />
       </div>
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to load exam.";
+    const message = error instanceof Error ? error.message : "시험지 정보를 불러오지 못했습니다.";
     return (
       <Card className="border border-danger/30 bg-danger/10">
         <CardContent className="space-y-2 p-6">
-          <p className="text-lg font-semibold text-foreground">Exam unavailable</p>
+          <p className="text-lg font-semibold text-foreground">시험지 정보를 불러올 수 없습니다</p>
           <p className="text-sm text-muted-foreground">{message}</p>
         </CardContent>
       </Card>

@@ -164,12 +164,13 @@ Exam Manager의 기능을 Next.js 페이지, Flask 라우트/API, 서비스/모�
 
 | Description | Next.js | Flask UI | API | Service | Model |
 |-------------|-----------|-----------|------|---------|--------|
-| 노트 업로드/인덱싱 | - | `/manage/lecture/<id>` | - | `lecture_indexer` | `LectureMaterial`, `LectureChunk` |
+| 노트 업로드/인덱싱 | `/manage/lectures/[id]` | `/manage/lecture/<id>` | `POST /api/manage/lectures/<id>/materials` | `lecture_indexer` | `LectureMaterial`, `LectureChunk` |
 | FTS 검색 (내부) | - | - | - | `retrieval` | `LectureChunk` |
 
 **Files:**
-- Flask: `app/routes/manage.py` (lecture detail)
-- API: N/A (internal service use)
+- Next.js: `next_app/src/app/manage/lectures/[id]/page.tsx`
+- Flask: `app/routes/manage.py` (legacy lecture detail)
+- API: `app/routes/api_manage.py`
 - Services: `app/services/lecture_indexer.py`, `app/services/retrieval.py`
 - Model: `app/models.py` (LectureMaterial, LectureChunk)
 
@@ -240,13 +241,12 @@ app/
 │   ├── pdf_cropper.py         # PDF image cropping
 │   ├── markdown_images.py       # Image processing
 │   ├── ai_classifier.py         # AI classification
-│   ├── retrieval.py            # Search/retrieval (BM25/Semantic)
+│   ├── retrieval.py            # Search/retrieval (BM25)
 │   ├── context_expander.py      # Context expansion
 │   ├── query_transformer.py     # Query transformation
 │   ├── lecture_indexer.py      # FTS indexing
 │   ├── practice_filters.py      # Practice filtering
 │   ├── classifier_cache.py     # AI classifier caching
-│   ├── embedding_utils.py      # Embedding utilities
 │   └── db_guard.py            # DB read-only guard
 ├── models.py              # SQLAlchemy models
 ├── templates/             # Legacy Jinja2 templates

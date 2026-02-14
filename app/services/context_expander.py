@@ -40,21 +40,38 @@ def _semantic_neighbors(
     if not match_query:
         return []
 
-    sql = text(
-        """
-        SELECT c.id AS chunk_id,
-               c.page_start,
-               c.page_end,
-               c.content,
-               bm25(lecture_chunks_fts) AS bm25_score
-        FROM lecture_chunks_fts
-        JOIN lecture_chunks c ON c.id = lecture_chunks_fts.chunk_id
-        WHERE lecture_chunks_fts MATCH :query
-          AND c.lecture_id = :lecture_id
-        ORDER BY bm25_score
-        LIMIT :top_n
-        """
-    )
+    if retrieval.use_postgres_search_backend():
+        tsq_expr = retrieval.postgres_tsquery_expression("query")
+        sql = text(
+            f"""
+            SELECT c.id AS chunk_id,
+                   c.page_start,
+                   c.page_end,
+                   c.content,
+                   ts_rank_cd(c.content_tsv, {tsq_expr}) AS bm25_score
+            FROM lecture_chunks c
+            WHERE c.content_tsv @@ {tsq_expr}
+              AND c.lecture_id = :lecture_id
+            ORDER BY bm25_score DESC
+            LIMIT :top_n
+            """
+        )
+    else:
+        sql = text(
+            """
+            SELECT c.id AS chunk_id,
+                   c.page_start,
+                   c.page_end,
+                   c.content,
+                   bm25(lecture_chunks_fts) AS bm25_score
+            FROM lecture_chunks_fts
+            JOIN lecture_chunks c ON c.id = lecture_chunks_fts.chunk_id
+            WHERE lecture_chunks_fts MATCH :query
+              AND c.lecture_id = :lecture_id
+            ORDER BY bm25_score
+            LIMIT :top_n
+            """
+        )
     rows = (
         db.session.execute(
             sql,

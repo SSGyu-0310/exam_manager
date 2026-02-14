@@ -22,6 +22,7 @@ type BlockFormProps = {
 export function BlockForm({ initial }: BlockFormProps) {
   const router = useRouter();
   const [name, setName] = useState(initial?.name ?? "");
+  const [subject, setSubject] = useState(initial?.subject ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [order, setOrder] = useState(initial?.order ?? 0);
   const [saving, setSaving] = useState(false);
@@ -34,6 +35,7 @@ export function BlockForm({ initial }: BlockFormProps) {
     setSuccess(null);
     const payload: ManageBlockInput = {
       name: name.trim(),
+      subject: subject.trim() || null,
       description: description?.trim() || null,
       order: Number.isFinite(order) ? Number(order) : 0,
     };
@@ -80,6 +82,16 @@ export function BlockForm({ initial }: BlockFormProps) {
               Name
             </label>
             <Input value={name} onChange={(event) => setName(event.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              Subject
+            </label>
+            <Input
+              value={subject}
+              onChange={(event) => setSubject(event.target.value)}
+              placeholder="e.g. Physiology"
+            />
           </div>
           <div className="space-y-2">
             <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">

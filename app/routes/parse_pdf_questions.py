@@ -14,6 +14,7 @@ from app.services.pdf_parser import (
     detect_answer_color,
     color_distance,
     extract_events,
+    merge_orphan_labels,
     match_option_line,
     normalize_embedded_option,
 )
@@ -52,13 +53,16 @@ def parse_events(
 ) -> pd.DataFrame:
     from app.services.pdf_parser import (
         ANSWER_LABEL_RE,
+        EXAMINER_RE,
         INDENT_TOL,
         Q_HEADER,
+        fix_split_options,
     )
 
     questions = []
     cur = None
     cur_opt = None
+    pending_examiner = None
 
     for ev in events:
         if ev["type"] == "text":
@@ -66,6 +70,12 @@ def parse_events(
                 ev["text"], cur, max_option_number
             )
             for txt in normalized_lines:
+                m_examiner = EXAMINER_RE.match(txt)
+                if m_examiner:
+                    examiner_name = (m_examiner.group(1) or "").strip()
+                    pending_examiner = examiner_name or None
+                    continue
+
                 m_q = Q_HEADER.match(txt)
                 if m_q:
                     if cur:
@@ -108,12 +118,14 @@ def parse_events(
                     cur = {
                         "ID": m_q.group(1),
                         "Question": m_q.group(2).strip(),
+                        "Examiner": pending_examiner,
                         "image_path": None,
                         "options_map": {},
                         "answer_lines": [],
                         "question_x0": ev["x0"],
                         "option_x0": None,
                     }
+                    pending_examiner = None
                     cur_opt = None
                     continue
 
@@ -193,6 +205,8 @@ def parse_events(
     if cur:
         questions.append(cur)
 
+    fix_split_options(questions)
+
     rows = []
     for q in questions:
         options = [q["options_map"][n] for n in sorted(q["options_map"])]
@@ -205,6 +219,7 @@ def parse_events(
         row = {
             "ID": q.get("ID"),
             "Question": question_text.strip(),
+            "Examiner": q.get("Examiner") or "",
             "AnswerOption": ",".join(str(n) for n in answer_options),
         }
 
@@ -251,6 +266,7 @@ def pdf_to_csv(pdf_path: str, output_csv: str | None = None, max_option_number=1
     with pdfplumber.open(str(pdf_path)) as pdf:
         answer_color = detect_answer_color(pdf)
         events = extract_events(pdf, answer_color)
+        events = merge_orphan_labels(events)
         media_prefix = f"media/{pdf_path.stem}/"
         df = parse_events(
             events,

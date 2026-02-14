@@ -1,7 +1,18 @@
 """연습 모드 Blueprint - 강의별 기출문제 풀이"""
 import json
+import os
 
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash
+from flask import (
+    Blueprint,
+    render_template,
+    request,
+    jsonify,
+    redirect,
+    url_for,
+    flash,
+    current_app,
+    abort,
+)
 from urllib.parse import urlencode
 from app import db
 from app.models import Block, Lecture, Choice, PracticeSession, PracticeAnswer, Question
@@ -20,6 +31,14 @@ from app.services.practice_filters import (
     build_exam_options,
 )
 from app.services.db_guard import guard_write_request
+from app.services.user_scope import (
+    attach_current_user,
+    current_user,
+    get_scoped_by_id,
+    scope_model,
+    scope_query,
+)
+from app.services.block_sort import block_ordering
 
 practice_bp = Blueprint('practice', __name__)
 
@@ -30,6 +49,11 @@ def guard_read_only():
     if blocked is not None:
         return blocked
     return None
+
+
+@practice_bp.before_request
+def attach_user():
+    return attach_current_user(require=True)
 
 
 def _load_question_order(session):
@@ -69,17 +93,51 @@ def _build_filter_query(exam_ids, filter_active):
     return f"?{urlencode(params, doseq=True)}"
 
 
+def _build_upload_url(image_path):
+    if not image_path:
+        return None
+    if isinstance(image_path, str):
+        normalized = image_path.strip()
+        if not normalized:
+            return None
+        if normalized.startswith(("http://", "https://")):
+            return normalized
+        normalized = normalized.lstrip("/")
+        if normalized.startswith("static/"):
+            normalized = normalized[len("static/") :]
+            return url_for("static", filename=normalized)
+        upload_folder = current_app.config.get("UPLOAD_FOLDER") or os.path.join(
+            current_app.static_folder, "uploads"
+        )
+        relative_folder = os.path.relpath(
+            os.fspath(upload_folder), os.fspath(current_app.static_folder)
+        )
+        relative_folder = relative_folder.replace("\\", "/").strip("/")
+        if relative_folder == ".":
+            relative_folder = ""
+        if relative_folder and normalized.startswith(f"{relative_folder}/"):
+            return url_for("static", filename=normalized)
+        if relative_folder:
+            return url_for("static", filename=f"{relative_folder}/{normalized}")
+        return url_for("static", filename=normalized)
+    return None
+
+
 @practice_bp.route('/')
 def list_lectures():
     """연습할 강의 목록 표시"""
-    blocks = Block.query.order_by(Block.order).all()
+    user = current_user()
+    blocks = scope_model(Block, user, include_public=True).order_by(*block_ordering()).all()
     return render_template('practice/list.html', blocks=blocks)
 
 
 @practice_bp.route('/sessions')
 def session_list():
     """Practice sessions list."""
-    sessions = PracticeSession.query.order_by(PracticeSession.created_at.desc()).all()
+    user = current_user()
+    sessions = scope_query(PracticeSession.query, PracticeSession, user).order_by(
+        PracticeSession.created_at.desc()
+    ).all()
     session_rows = []
     for session in sessions:
         answers = session.answers
@@ -89,7 +147,11 @@ def session_list():
         if question_order:
             total_questions = len(question_order)
         elif session.lecture:
-            total_questions = session.lecture.question_count
+            total_questions = (
+                scope_query(Question.query, Question, user)
+                .filter(Question.lecture_id == session.lecture_id)
+                .count()
+            )
         else:
             total_questions = answered_count
         session_rows.append({
@@ -109,21 +171,34 @@ def session_list():
 @practice_bp.route('/sessions/<int:session_id>')
 def session_detail(session_id):
     """Practice session detail."""
-    session = PracticeSession.query.get_or_404(session_id)
+    user = current_user()
+    session = get_scoped_by_id(PracticeSession, session_id, user)
+    if not session:
+        abort(404)
     question_order = _load_question_order(session)
     answers = session.answers.all()
     answer_map = {answer.question_id: answer for answer in answers}
 
     ordered_questions = []
     if question_order:
-        questions = Question.query.filter(Question.id.in_(question_order)).all()
+        questions = (
+            scope_query(Question.query, Question, user)
+            .filter(Question.id.in_(question_order))
+            .all()
+        )
         question_map = {question.id: question for question in questions}
         ordered_questions = [
             question_map[qid] for qid in question_order if qid in question_map
         ]
 
     if not ordered_questions and session.lecture_id:
-        ordered_questions = get_lecture_questions_ordered(session.lecture_id) or []
+        question_user_id = None if getattr(user, "is_admin", False) else user.id
+        ordered_questions = (
+            get_lecture_questions_ordered(
+                session.lecture_id, user_id=question_user_id
+            )
+            or []
+        )
 
     if not ordered_questions:
         ordered_questions = [answer.question for answer in answers if answer.question]
@@ -156,9 +231,15 @@ def session_detail(session_id):
 @practice_bp.route('/lecture/<int:lecture_id>')
 def dashboard(lecture_id):
     """강의별 문제 대시보드 (바둑판 형태) - 유형별 분리"""
-    lecture = Lecture.query.get_or_404(lecture_id)
+    user = current_user()
+    lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
+    if not lecture:
+        abort(404)
     exam_ids, filter_active = parse_exam_filter_args(request.args)
-    all_questions = get_lecture_questions_ordered(lecture_id) or []
+    question_user_id = None if getattr(user, "is_admin", False) else user.id
+    all_questions = (
+        get_lecture_questions_ordered(lecture_id, user_id=question_user_id) or []
+    )
     questions = apply_exam_filter(all_questions, exam_ids, filter_active)
     
     groups = build_question_groups(questions)
@@ -190,9 +271,15 @@ def dashboard(lecture_id):
 @practice_bp.route('/lecture/<int:lecture_id>/q/<int:question_id>')
 def question_by_id(lecture_id, question_id):
     """개별 문제 풀이 페이지 (question_id 기반)"""
-    lecture = Lecture.query.get_or_404(lecture_id)
+    user = current_user()
+    lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
+    if not lecture:
+        abort(404)
     exam_ids, filter_active = parse_exam_filter_args(request.args)
-    all_questions = get_lecture_questions_ordered(lecture_id) or []
+    question_user_id = None if getattr(user, "is_admin", False) else user.id
+    all_questions = (
+        get_lecture_questions_ordered(lecture_id, user_id=question_user_id) or []
+    )
     questions = apply_exam_filter(all_questions, exam_ids, filter_active)
     filter_query = _build_filter_query(exam_ids, filter_active)
     index = next((i for i, q in enumerate(questions) if q.id == question_id), None)
@@ -282,9 +369,15 @@ def question_by_id(lecture_id, question_id):
 @practice_bp.route('/lecture/<int:lecture_id>/question/<int:seq>')
 def question(lecture_id, seq):
     """레거시 seq 라우트 -> question_id 라우트로 리다이렉트"""
-    Lecture.query.get_or_404(lecture_id)
+    user = current_user()
+    lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
+    if not lecture:
+        abort(404)
     exam_ids, filter_active = parse_exam_filter_args(request.args)
-    all_questions = get_lecture_questions_ordered(lecture_id) or []
+    question_user_id = None if getattr(user, "is_admin", False) else user.id
+    all_questions = (
+        get_lecture_questions_ordered(lecture_id, user_id=question_user_id) or []
+    )
     questions = apply_exam_filter(all_questions, exam_ids, filter_active)
     filter_query = _build_filter_query(exam_ids, filter_active)
     index = seq - 1
@@ -300,9 +393,15 @@ def question(lecture_id, seq):
 @practice_bp.route('/lecture/<int:lecture_id>/submit', methods=['POST'])
 def submit(lecture_id):
     """답안 제출 및 채점 - 유형별 분리 채점"""
-    lecture = Lecture.query.get_or_404(lecture_id)
+    user = current_user()
+    lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
+    if not lecture:
+        abort(404)
     exam_ids, filter_active = parse_exam_filter_args(request.args)
-    all_questions = get_lecture_questions_ordered(lecture_id) or []
+    question_user_id = None if getattr(user, "is_admin", False) else user.id
+    all_questions = (
+        get_lecture_questions_ordered(lecture_id, user_id=question_user_id) or []
+    )
     questions = apply_exam_filter(all_questions, exam_ids, filter_active)
     
     data = request.get_json()
@@ -316,14 +415,16 @@ def submit(lecture_id):
         question_meta,
     )
     if error_code:
-        return jsonify({'success': False, 'error': '?°ì´?°ê? ?†ìŠµ?ˆë‹¤.'}), 400
+        return jsonify({'success': False, 'error': '답안 형식이 올바르지 않습니다.'}), 400
 
     _summary, items, counts = evaluate_practice_answers(questions, answers_v1 or {})
     results = build_legacy_results(questions, items, include_content=True)
 
     if answers_v1 and not error_code:
         try:
-            grade_practice_submission(lecture_id, answers_v1, questions=questions)
+            grade_practice_submission(
+                lecture_id, answers_v1, questions=questions, user_id=user.id
+            )
         except Exception:
             db.session.rollback()
 
@@ -348,9 +449,15 @@ def submit(lecture_id):
 @practice_bp.route('/lecture/<int:lecture_id>/result')
 def result(lecture_id):
     """결과 페이지 (GET 방식으로 표시, 실제 데이터는 JS에서 처리)"""
-    lecture = Lecture.query.get_or_404(lecture_id)
+    user = current_user()
+    lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
+    if not lecture:
+        abort(404)
     exam_ids, filter_active = parse_exam_filter_args(request.args)
-    all_questions = get_lecture_questions_ordered(lecture_id) or []
+    question_user_id = None if getattr(user, "is_admin", False) else user.id
+    all_questions = (
+        get_lecture_questions_ordered(lecture_id, user_id=question_user_id) or []
+    )
     questions = apply_exam_filter(all_questions, exam_ids, filter_active)
     filter_query = _build_filter_query(exam_ids, filter_active)
     
@@ -362,7 +469,15 @@ def result(lecture_id):
             'seq': idx + 1,
             'id': q.id,
             'content': q.content,
-            'choices': [{'choice_number': c.choice_number, 'content': c.content} for c in choices],
+            'question_image_url': _build_upload_url(q.image_path),
+            'choices': [
+                {
+                    'choice_number': c.choice_number,
+                    'content': c.content,
+                    'image_url': _build_upload_url(c.image_path),
+                }
+                for c in choices
+            ],
             'correct_answer': q.correct_choice_numbers if not q.is_short_answer else q.correct_answer_text,
             'explanation': q.explanation,
             'exam_name': q.exam.title if q.exam else '',

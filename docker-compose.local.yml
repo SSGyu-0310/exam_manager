@@ -1,0 +1,26 @@
+name: exam_manager_local
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-exam}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-exam_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-exam_manager_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data_local:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-exam} -d ${POSTGRES_DB:-exam_manager_dev}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pg_data_local:

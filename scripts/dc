@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+ENV_FILE="${ENV_FILE:-.env.docker}"
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "[dc] env file not found: $ENV_FILE" >&2
+  echo "[dc] create it first: cp .env.docker.example .env.docker" >&2
+  exit 1
+fi
+
+resolve_docker_bin() {
+  if [[ -n "${DOCKER_BIN:-}" ]]; then
+    echo "$DOCKER_BIN"
+    return 0
+  fi
+
+  local windows_docker_exe="/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe"
+  local windows_docker_wrapper="/mnt/c/Program Files/Docker/Docker/resources/bin/docker"
+  if grep -qi microsoft /proc/version 2>/dev/null && [[ -x "$windows_docker_exe" ]]; then
+    echo "$windows_docker_exe"
+    return 0
+  fi
+
+  if command -v docker >/dev/null 2>&1; then
+    local docker_cmd
+    docker_cmd="$(command -v docker)"
+    if [[ "$docker_cmd" == "$windows_docker_wrapper" && -x "$windows_docker_exe" ]]; then
+      echo "$windows_docker_exe"
+      return 0
+    fi
+    echo "$docker_cmd"
+    return 0
+  fi
+  if [[ -x "$windows_docker_exe" ]]; then
+    echo "$windows_docker_exe"
+    return 0
+  fi
+  if [[ -x "$windows_docker_wrapper" ]]; then
+    echo "$windows_docker_wrapper"
+    return 0
+  fi
+  return 1
+}
+
+DOCKER_CMD="$(resolve_docker_bin || true)"
+if [[ -z "$DOCKER_CMD" ]]; then
+  echo "[dc] docker CLI not found." >&2
+  echo "[dc] install Docker Desktop or set DOCKER_BIN to docker executable path." >&2
+  exit 1
+fi
+
+exec "$DOCKER_CMD" compose --env-file "$ENV_FILE" "$@"

@@ -22,6 +22,7 @@ from app.services import context_expander
 from app.services.ai_classifier import (
     LectureRetriever,
     GeminiClassifier,
+    resolve_exam_subject_lecture_ids,
 )
 from app.models import Question
 from app.services.folder_scope import resolve_lecture_ids
@@ -137,6 +138,8 @@ def _retrieve_stage(context: ClassificationContext) -> RetrievalResult:
             context.folder_id,
             context.include_descendants,
         )
+    if context.lecture_ids is None:
+        context.lecture_ids = resolve_exam_subject_lecture_ids(context.question)
 
     candidates = retriever.find_candidates(
         context.question_text,
@@ -171,6 +174,7 @@ def _expand_stage(
     artifacts = retrieval_features.build_retrieval_artifacts(
         context.question_text,
         context.question.id,
+        lecture_ids=context.lecture_ids,
     )
     features = artifacts.features
 

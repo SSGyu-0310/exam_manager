@@ -1,53 +1,68 @@
-# 환경변수 가이드
+# Environment Variables
 
-이 프로젝트는 Flask용 `.env`와 Next.js용 `next_app/.env.local`을 분리해서 사용합니다.
+This project supports two runtime profiles.
 
-## 구분 기준
-- 필수: 프로덕션/보안상 반드시 설정해야 함 (로컬 개발은 기본값으로 동작 가능)
-- 조건부: 해당 기능을 사용할 때만 필요
-- 선택: 기본값이 있으나 필요 시 덮어쓰기 가능
+## 1) Local development (host-run backend/frontend)
+- Backend: `.env`
+- Frontend: `next_app/.env.local`
 
-## Flask (.env)
-| 키 | 구분 | 설명 | 기본값/비고 |
-| --- | --- | --- | --- |
-| SECRET_KEY | 필수(프로덕션) | Flask 세션/보안 키 | 미설정 시 `dev-secret-key-change-in-production` |
-| GEMINI_API_KEY | 조건부 | Gemini API 키 (AI 분류/텍스트 교정 사용 시) | 없음 |
-| GEMINI_MODEL_NAME | 선택 | Gemini 모델명 | `gemini-2.0-flash-lite` |
-| AUTO_CREATE_DB | 선택 | 앱 시작 시 `db.create_all()` 자동 실행 | DevelopmentConfig 기본 True |
-| LOCAL_ADMIN_ONLY | 선택 | `/manage` 및 관련 API 로컬호스트 제한 | 값은 `1/true/yes/on` |
-| LOCAL_ADMIN_DB | 선택 | local admin DB 경로 | 미설정 시 `data/admin_local.db` |
-| PDF_PARSER_MODE | 선택 | PDF 파서 선택 (`legacy`/`experimental`) | 기본 `legacy` |
-| FLASK_CONFIG | 선택 | 설정 프로파일 선택 | `default`, `development`, `production`, `local_admin` |
-
-## Next.js (`next_app/.env.local`)
-| 키 | 구분 | 설명 | 기본값/비고 |
-| --- | --- | --- | --- |
-| FLASK_BASE_URL | 필수 | Next.js 서버가 접근할 Flask base URL | 예: `http://127.0.0.1:5000` |
-| NEXT_PUBLIC_SITE_URL | 선택 | SSR에서 사용할 Next.js base URL | 미설정 시 `http://localhost:3000` |
-| NEXT_PUBLIC_APP_URL | 선택 | `NEXT_PUBLIC_SITE_URL` 대체값 | 미설정 시 `http://localhost:3000` |
-
-## 최소 예시
-### `.env`
-```dotenv
-SECRET_KEY=dev-secret-key-change-in-production
-GEMINI_API_KEY=your_api_key_here
-# GEMINI_MODEL_NAME=gemini-2.0-flash-lite
-# AUTO_CREATE_DB=1
-# LOCAL_ADMIN_ONLY=1
-# LOCAL_ADMIN_DB=./data/admin_local.db
-# PDF_PARSER_MODE=legacy
-# FLASK_CONFIG=development
+Create from templates:
+```bash
+cp .env.example .env
+cp .env.docker.example .env.docker
+cp next_app/.env.local.example next_app/.env.local
 ```
 
-### `next_app/.env.local`
+Recommended local keys in `.env`:
 ```dotenv
-FLASK_BASE_URL=http://127.0.0.1:5000
-# NEXT_PUBLIC_SITE_URL=http://localhost:3000
-# NEXT_PUBLIC_APP_URL=http://localhost:3000
+FLASK_CONFIG=development
+FLASK_DEBUG=1
+# Optional override. If unset, dev scripts derive URL from .env.docker POSTGRES_*.
+DATABASE_URL=postgresql+psycopg://exam:<POSTGRES_PASSWORD>@127.0.0.1:5432/exam_manager
+SEARCH_BACKEND=postgres
+CORS_ALLOWED_ORIGINS=http://localhost:4000
 ```
 
-## 참고
-- `.env`는 `run.py`, `run_local_admin.py`에서 `python-dotenv`로 로드됩니다.
-- AI 기능을 사용하지 않는다면 `GEMINI_API_KEY`는 생략해도 됩니다.
-- `LOCAL_ADMIN_ONLY=1`이면 `/manage` 및 관련 API를 localhost에서만 접근할 수 있습니다.
-- 환경변수 변경 후에는 Flask/Next.js 서버를 재시작해야 합니다.
+## 2) Docker compose (full stack)
+Main file:
+- `.env.docker`: used by `docker compose --env-file .env.docker`
+
+Create from template:
+```bash
+cp .env.docker.example .env.docker
+```
+
+Required for full stack:
+| Key | Purpose |
+| --- | --- |
+| `SECRET_KEY` | Flask session secret |
+| `JWT_SECRET_KEY` | JWT signing secret |
+| `POSTGRES_PASSWORD` | Postgres password |
+
+## Common optional keys
+| Key | Purpose | Default |
+| --- | --- | --- |
+| `POSTGRES_USER` | Postgres user | `exam` |
+| `POSTGRES_DB` | Postgres database | `exam_manager` |
+| `CORS_ALLOWED_ORIGINS` | Allowed browser origins | `http://localhost:4000` |
+| `JWT_COOKIE_SECURE` | Force secure JWT cookie (`1` for HTTPS only) | `0` |
+| `JWT_ACCESS_TOKEN_EXPIRES_MINUTES` | Access token lifetime (minutes) | `720` |
+| `JWT_REFRESH_WINDOW_MINUTES` | Sliding refresh window (minutes) | `30` |
+| `NEXT_PUBLIC_SITE_URL` | Next base URL | `http://localhost:4000` |
+| `NEXT_PUBLIC_APP_URL` | Next base URL fallback | `http://localhost:4000` |
+| `GEMINI_API_KEY` | Enable AI features | unset |
+| `KEEP_PDF_AFTER_INDEX` | Keep uploaded lecture PDFs after indexing (`1` keeps, `0` deletes) | `0` |
+| `RETRIEVAL_MODE` | Retrieval mode (`bm25`) | `bm25` |
+| `SEARCH_BACKEND` | Search backend (`auto`, `postgres`) | `postgres` (docker env) |
+| `SEARCH_PG_QUERY_MODE` | Postgres tsquery mode (`websearch`, `plainto`, `to_tsquery`) | `websearch` |
+| `SEARCH_PG_TRGM_ENABLED` | Enable pg_trgm fallback (`0/1`) | `0` |
+| `CLASSIFIER_REQUIRE_VERBATIM_QUOTE` | Keep evidence only when quote is verbatim | `1` |
+| `CLASSIFIER_REQUIRE_PAGE_SPAN` | Keep evidence only when page span exists | `1` |
+| `CLASSIFIER_DEBUG_LOG` | 분류 단계 상세 로그(`CLASSIFIER_*`) 출력 (`0/1`) | `0` |
+
+## Notes
+- Restart backend/frontend after `.env` changes.
+- Restart containers after `.env.docker` changes.
+- `scripts/dev-db` reads `.env.docker` by default (same DB volume as docker full stack) and exposes `127.0.0.1:5432` for host backend.
+- Use `DEV_DB_COMPOSE_FILE=docker-compose.local.yml` when you want an isolated local DB volume.
+- Do not commit `.env` or `.env.docker`.

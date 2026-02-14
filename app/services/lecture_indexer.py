@@ -13,6 +13,7 @@ from flask import current_app
 
 from app import db
 from app.models import LectureMaterial, LectureChunk
+from app.services.db_utils import is_postgres
 
 FTS_TABLE = "lecture_chunks_fts"
 
@@ -22,7 +23,7 @@ def extract_pdf_pages(pdf_path: os.PathLike) -> List[Tuple[int, str]]:
     with pdfplumber.open(str(pdf_path)) as pdf:
         for page_num, page in enumerate(pdf.pages, start=1):
             text_content = page.extract_text() or ""
-            text_content = text_content.replace("\u00A0", " ")
+            text_content = text_content.replace("\u00A0", " ").replace("\x00", "")
             text_content = re.sub(r"[ \t]+", " ", text_content)
             text_content = re.sub(r"\n{3,}", "\n\n", text_content)
             text_content = text_content.strip()
@@ -105,7 +106,7 @@ def _resolve_material_path(file_path: str) -> Path:
 
 
 def _delete_fts_rows(chunk_ids: List[int]) -> None:
-    if not chunk_ids:
+    if not chunk_ids or is_postgres():
         return
     placeholders = ", ".join([f":id_{idx}" for idx in range(len(chunk_ids))])
     params = {f"id_{idx}": cid for idx, cid in enumerate(chunk_ids)}
@@ -116,7 +117,7 @@ def _delete_fts_rows(chunk_ids: List[int]) -> None:
 
 
 def _insert_fts_rows(chunks: List[LectureChunk]) -> None:
-    if not chunks:
+    if not chunks or is_postgres():
         return
     payload = [
         {

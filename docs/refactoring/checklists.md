@@ -3,7 +3,7 @@
 리팩토링을 안전하게 진행하기 위한 점검 항목입니다. 작업 전/중/후로 나누어 체크하세요.
 
 ## 1) 작업 전 체크리스트
-- [ ] `data/exam.db` 백업 완료 (필요 시 `data/admin_local.db`도 백업)
+- [ ] `python scripts/backup_postgres.py --db "$DATABASE_URL"` 백업 완료
 - [ ] `.env`와 `next_app/.env.local` 값 기록
 - [ ] 현재 동작 기준선 확인 (PDF 업로드, 분류, AI, 연습)
 - [ ] 이번 리팩토링 대상 파일/모듈 범위 확정
@@ -22,16 +22,16 @@
 - [ ] 변경 범위가 커지면 작업을 분할
 
 ## 3) 작업 후 체크리스트 (필수)
-- [ ] PDF 업로드 → 문제 생성 정상 (Next `/manage/upload-pdf`)
+- [ ] PDF 업로드 → 문제 생성 정상 (Next `/manage/exams` 업로드 카드)
 - [ ] 문제 분류(수동/일괄) 정상 (Next `/exam/unclassified`)
 - [ ] AI 분류 시작/상태/적용 정상
 - [ ] 문제 편집에서 마크다운 이미지 정리 정상 (Legacy `/manage/question/<id>/edit`, API `PUT /api/manage/questions/<id>`)
-- [ ] 강의 노트 업로드/인덱싱 정상 (Legacy `/manage/lecture/<id>`)
+- [ ] 강의 노트 업로드/인덱싱 정상 (Next `/manage/lectures/<id>`, Legacy `/manage/lecture/<id>`)
 - [ ] Practice 필터 정상 (Legacy `/practice/lecture/<id>`, API `/api/practice/lecture/<id>`)
 - [ ] Practice 흐름 정상 (Legacy `/practice/*`, Next `/lectures`)
 - [ ] `PDF_PARSER_MODE=experimental`/`legacy` 동일 PDF 결과 비교(샘플 1건)
+- [ ] PDF 파싱 10샘플 체크표 검증 PASS (`docs/refactoring/pdf_parser_validation_template.csv`)
 - [ ] Next.js `/manage`, `/lectures` 렌더링 정상
-- [ ] Local admin 실행 가능 (`run_local_admin.py`)
 - [ ] 문서/README 반영 완료
 
 ## 4) 위험 신호

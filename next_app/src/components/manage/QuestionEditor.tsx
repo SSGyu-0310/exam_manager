@@ -8,11 +8,19 @@ import type {
   ManageQuestionDetail,
 } from "@/lib/api/manage";
 import { updateQuestion } from "@/lib/api/manage";
+import { apiFetch } from "@/lib/http";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { resolveImageUrl } from "@/lib/image";
+import {
+  getApiEnvelopeData,
+  getApiEnvelopeMessage,
+  isApiEnvelopeOk,
+  type ApiEnvelope,
+} from "@/lib/api/contract";
 
 type QuestionEditorProps = {
   question: ManageQuestionDetail;
@@ -20,6 +28,7 @@ type QuestionEditorProps = {
 };
 
 type ChoiceState = ManageChoice & { tempId: string };
+type ImageUploadPayload = { url?: string; filename?: string };
 
 const buildChoices = (choices: ManageChoice[], fallbackCount = 5) => {
   if (choices.length) {
@@ -52,7 +61,7 @@ export function QuestionEditor({ question, lectures }: QuestionEditorProps) {
     buildChoices(question.choices)
   );
   const [imageUrl, setImageUrl] = useState<string | null>(
-    question.imagePath ? `/static/uploads/${question.imagePath}` : null
+    resolveImageUrl(question.imagePath)
   );
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [removeImage, setRemoveImage] = useState(false);
@@ -61,14 +70,19 @@ export function QuestionEditor({ question, lectures }: QuestionEditorProps) {
   const [success, setSuccess] = useState<string | null>(null);
 
   const groupedLectures = useMemo(() => {
-    const groups = new Map<string, ManageLecture[]>();
+    const groups = new Map<string, { subject: string; block: string; lectures: ManageLecture[] }>();
     lectures.forEach((lecture) => {
-      const key = lecture.blockName ?? "Other";
-      const list = groups.get(key) ?? [];
-      list.push(lecture);
-      groups.set(key, list);
+      const subject = lecture.blockSubject ?? "Unassigned";
+      const block = lecture.blockName ?? "Other";
+      const key = `${subject}|||${block}`;
+      const entry = groups.get(key) ?? { subject, block, lectures: [] };
+      entry.lectures.push(lecture);
+      groups.set(key, entry);
     });
-    return Array.from(groups.entries());
+    return Array.from(groups.values()).sort((a, b) => {
+      if (a.subject === b.subject) return a.block.localeCompare(b.block);
+      return a.subject.localeCompare(b.subject);
+    });
   }, [lectures]);
 
   const handleChoiceChange = (index: number, value: string) => {
@@ -113,18 +127,22 @@ export function QuestionEditor({ question, lectures }: QuestionEditorProps) {
   const handleImageUpload = async (file: File) => {
     const formData = new FormData();
     formData.append("image", file, file.name || "image.png");
-    const response = await fetch("/api/proxy/manage/upload-image", {
+    const payload = await apiFetch<ApiEnvelope<ImageUploadPayload>>(
+      "/manage/upload-image",
+      {
       method: "POST",
       body: formData,
-    });
-    if (!response.ok) {
+      credentials: "include",
+      }
+    );
+    if (!isApiEnvelopeOk(payload)) {
+      throw new Error(getApiEnvelopeMessage(payload, "Image upload failed."));
+    }
+    const data = getApiEnvelopeData(payload);
+    if (!data?.url) {
       throw new Error("Image upload failed.");
     }
-    const data = (await response.json()) as { success?: boolean; url?: string; filename?: string; error?: string };
-    if (!data.success) {
-      throw new Error(data.error || "Image upload failed.");
-    }
-    setImageUrl(data.url ?? null);
+    setImageUrl(resolveImageUrl(data.url));
     setUploadedImage(data.filename ?? null);
     setRemoveImage(false);
   };
@@ -199,9 +217,9 @@ export function QuestionEditor({ question, lectures }: QuestionEditorProps) {
             }
           >
             <option value="">Unclassified</option>
-            {groupedLectures.map(([blockName, blockLectures]) => (
-              <optgroup key={blockName} label={blockName}>
-                {blockLectures.map((lecture) => (
+            {groupedLectures.map((group) => (
+              <optgroup key={`${group.subject}-${group.block}`} label={`${group.subject} · ${group.block}`}>
+                {group.lectures.map((lecture) => (
                   <option key={lecture.id} value={lecture.id}>
                     {lecture.title}
                   </option>

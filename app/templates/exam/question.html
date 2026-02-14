@@ -20,7 +20,8 @@
         }
 
         .container {
-            max-width: 800px;
+            max-width: 1200px;
+            width: 100%;
             margin: 0 auto;
             padding: 2rem;
         }
@@ -46,6 +47,71 @@
             color: #667eea;
             text-decoration: none;
             margin-left: 1rem;
+        }
+
+        .content-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+            gap: 1.5rem;
+            align-items: start;
+        }
+
+        .main-column {
+            min-width: 0;
+        }
+
+        .side-column {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .panel {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 1rem;
+        }
+
+        .panel-title {
+            font-size: 1.05rem;
+            color: #fff;
+        }
+
+        .panel-subtitle {
+            font-size: 0.8rem;
+            color: #aaa;
+        }
+
+        .crop-image {
+            width: 100%;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        }
+
+        .image-meta {
+            margin-top: 0.8rem;
+            font-size: 0.85rem;
+            color: #aab;
+            line-height: 1.5;
+        }
+
+        .empty-state {
+            padding: 1.5rem;
+            border-radius: 12px;
+            border: 1px dashed rgba(255, 255, 255, 0.2);
+            background: rgba(0, 0, 0, 0.2);
+            color: #aaa;
+            text-align: center;
+            line-height: 1.6;
         }
 
         .question-card {
@@ -108,6 +174,16 @@
             max-width: 100%;
             border-radius: 10px;
             margin-bottom: 1.5rem;
+        }
+
+        .image-block {
+            margin-bottom: 1.5rem;
+        }
+
+        .image-label {
+            font-size: 0.85rem;
+            color: #aab;
+            margin-bottom: 0.6rem;
         }
 
         .choices-list {
@@ -259,6 +335,44 @@
             margin-top: 2rem;
         }
 
+        .btn-disabled {
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+        .shortcut-list {
+            list-style: none;
+            display: grid;
+            gap: 0.6rem;
+        }
+
+        .shortcut-item {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+            color: #ccc;
+        }
+
+        .shortcut-key {
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        @media (max-width: 1024px) {
+            .container {
+                padding: 1.5rem;
+            }
+
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .nav-buttons {
+                flex-direction: column;
+                gap: 0.8rem;
+            }
+        }
+
         .flash-messages {
             margin-bottom: 1rem;
         }
@@ -304,7 +418,9 @@
         {% endif %}
         {% endwith %}
 
-        <div class="question-card">
+        <div class="content-grid">
+            <div class="main-column">
+                <div class="question-card">
             <div class="question-header">
                 <span class="question-number">Q{{ question.question_number }}</span>
                 <div style="display: flex; gap: 0.8rem; align-items: center;">
@@ -320,8 +436,11 @@
             </div>
 
             {% if question.image_path %}
-            <img src="{{ url_for('static', filename='uploads/' + question.image_path) }}" class="question-image"
-                alt="문제 이미지">
+            <div class="image-block">
+                <div class="image-label">파싱된 문제 이미지</div>
+                <img src="{{ url_for('static', filename='uploads/' + question.image_path) }}"
+                    class="question-image" alt="문제 이미지">
+            </div>
             {% endif %}
 
             <div class="question-content">{{- (question.content or '(이미지로 출제된 문제입니다)') | md_image -}}</div>
@@ -366,7 +485,7 @@
                 <select name="lecture_id">
                     <option value="">강의 선택...</option>
                     {% for block in blocks %}
-                    <optgroup label="{{ block.name }}">
+                    <optgroup label="{{ (block.subject or '과목 미지정') }} > {{ block.name }}">
                         {% for lecture in block.lectures %}
                         <option value="{{ lecture.id }}" {{ 'selected' if question.lecture_id==lecture.id else '' }}>
                             {{ lecture.order }}강. {{ lecture.title }}
@@ -389,17 +508,69 @@
 
         <!-- 이전/다음 버튼 -->
         <div class="nav-buttons">
-            {% if question.question_number > 1 %}
-            <a href="{{ url_for('exam.view_question', exam_id=exam.id, question_number=question.question_number - 1) }}"
-                class="btn btn-secondary">← 이전 문제</a>
+            {% if prev_url %}
+            <a href="{{ prev_url }}" class="btn btn-secondary">← 이전 문제</a>
             {% else %}
-            <span></span>
+            <span class="btn btn-secondary btn-disabled">← 이전 문제</span>
             {% endif %}
 
-            <a href="{{ url_for('exam.view_question', exam_id=exam.id, question_number=question.question_number + 1) }}"
-                class="btn btn-secondary">다음 문제 →</a>
+            {% if next_url %}
+            <a href="{{ next_url }}" class="btn btn-secondary">다음 문제 →</a>
+            {% else %}
+            <span class="btn btn-secondary btn-disabled">다음 문제 →</span>
+            {% endif %}
         </div>
-    </div>
+            </div>
+            <aside class="side-column">
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">크롭 원본 이미지</div>
+                        <div class="panel-subtitle">PDF crop</div>
+                    </div>
+                    {% if original_image_url %}
+                    <img src="{{ original_image_url }}" class="crop-image" alt="크롭 원본 이미지">
+                    <div class="image-meta">파싱된 내용과 비교해서 레이아웃/선지 밀림을 확인하세요.</div>
+                    {% else %}
+                    <div class="empty-state">
+                        크롭된 원본 이미지가 없습니다.<br>
+                        PDF 업로드 시 crop 단계가 실패했을 수 있습니다.
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">단축키</div>
+                        <div class="panel-subtitle">Navigation</div>
+                    </div>
+                    <ul class="shortcut-list">
+                        <li class="shortcut-item"><span class="shortcut-key">←</span><span>이전 문제</span></li>
+                        <li class="shortcut-item"><span class="shortcut-key">→</span><span>다음 문제</span></li>
+                    </ul>
+                </div>
+            </aside>
+        </div>
+    <script>
+        const prevUrl = {{ prev_url | tojson }};
+        const nextUrl = {{ next_url | tojson }};
+
+        document.addEventListener('keydown', (event) => {
+            if (event.defaultPrevented) return;
+            if (event.altKey || event.ctrlKey || event.metaKey) return;
+
+            const active = document.activeElement;
+            if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) {
+                return;
+            }
+
+            if (event.key === 'ArrowLeft' && prevUrl) {
+                window.location.href = prevUrl;
+            }
+            if (event.key === 'ArrowRight' && nextUrl) {
+                window.location.href = nextUrl;
+            }
+        });
+    </script>
+    <script src="{{ url_for('static', filename='js/duck_quack.js') }}"></script>
 </body>
 
 </html>

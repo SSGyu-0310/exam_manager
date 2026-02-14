@@ -1,10 +1,29 @@
 """시험 관련 Blueprint - 기출 시험 및 문제 조회"""
 import time
 import logging
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
+import os
+from flask import (
+    Blueprint,
+    render_template,
+    request,
+    redirect,
+    url_for,
+    flash,
+    jsonify,
+    current_app,
+    abort,
+)
 from app import db
 from app.models import PreviousExam, Question, Block, Lecture
 from app.services.db_guard import guard_write_request
+from app.services.user_scope import (
+    attach_current_user,
+    current_user,
+    get_scoped_by_id,
+    scope_model,
+    scope_query,
+)
+from app.services.block_sort import block_ordering
 
 logger = logging.getLogger(__name__)
 
@@ -19,18 +38,42 @@ def guard_read_only():
     return None
 
 
+@exam_bp.before_request
+def attach_user():
+    return attach_current_user(require=True)
+
+
+def _require_user_json():
+    error = attach_current_user(require=True)
+    if error is not None:
+        return None, error
+    user = current_user()
+    if user is None:
+        return None, (jsonify({"success": False, "error": "Authentication required."}), 401)
+    return user, None
+
+
 @exam_bp.route('/')
 def list_exams():
     """기출 시험 목록 조회"""
-    exams = PreviousExam.query.order_by(PreviousExam.exam_date.desc()).all()
+    user = current_user()
+    exams = scope_model(PreviousExam, user).order_by(PreviousExam.exam_date.desc()).all()
     return render_template('exam/list.html', exams=exams)
 
 
 @exam_bp.route('/<int:exam_id>')
 def view_exam(exam_id):
     """기출 시험 상세 조회"""
-    exam = PreviousExam.query.get_or_404(exam_id)
-    questions = exam.questions.order_by(Question.question_number).all()
+    user = current_user()
+    exam = get_scoped_by_id(PreviousExam, exam_id, user)
+    if not exam:
+        abort(404)
+    questions = (
+        scope_query(Question.query, Question, user)
+        .filter(Question.exam_id == exam.id)
+        .order_by(Question.question_number)
+        .all()
+    )
     
     # 분류 현황 계산
     classified_count = exam.classified_count
@@ -46,24 +89,84 @@ def view_exam(exam_id):
 @exam_bp.route('/<int:exam_id>/question/<int:question_number>')
 def view_question(exam_id, question_number):
     """문제 상세 조회"""
-    exam = PreviousExam.query.get_or_404(exam_id)
-    question = Question.query.filter_by(
-        exam_id=exam_id, 
-        question_number=question_number
-    ).first_or_404()
-    
+    user = current_user()
+    exam = get_scoped_by_id(PreviousExam, exam_id, user)
+    if not exam:
+        abort(404)
+    question = (
+        scope_query(Question.query, Question, user)
+        .filter(
+            Question.exam_id == exam_id,
+            Question.question_number == question_number,
+        )
+        .first()
+    )
+    if not question:
+        abort(404)
+
+    prev_question = (
+        scope_query(Question.query, Question, user)
+        .filter(
+            Question.exam_id == exam_id,
+            Question.question_number < question_number,
+        )
+        .order_by(Question.question_number.desc())
+        .first()
+    )
+    next_question = (
+        scope_query(Question.query, Question, user)
+        .filter(
+            Question.exam_id == exam_id,
+            Question.question_number > question_number,
+        )
+        .order_by(Question.question_number.asc())
+        .first()
+    )
+    prev_url = (
+        url_for("exam.view_question", exam_id=exam_id, question_number=prev_question.question_number)
+        if prev_question
+        else None
+    )
+    next_url = (
+        url_for("exam.view_question", exam_id=exam_id, question_number=next_question.question_number)
+        if next_question
+        else None
+    )
+
+    original_image_url = None
+    upload_folder = current_app.config.get("UPLOAD_FOLDER") or os.path.join(
+        current_app.static_folder, "uploads"
+    )
+    from app.services.pdf_cropper import find_question_crop_image, to_static_relative
+
+    crop_path = find_question_crop_image(
+        exam.id, question.question_number, upload_folder=upload_folder
+    )
+    if crop_path:
+        relative_path = to_static_relative(
+            crop_path, static_root=current_app.static_folder
+        )
+        if relative_path:
+            original_image_url = url_for("static", filename=relative_path)
+
     # 분류 가능한 강의 목록
-    blocks = Block.query.order_by(Block.order).all()
-    
-    return render_template('exam/question.html', 
-                         exam=exam, 
-                         question=question,
-                         blocks=blocks)
+    blocks = scope_model(Block, user, include_public=True).order_by(*block_ordering()).all()
+
+    return render_template(
+        'exam/question.html',
+        exam=exam,
+        question=question,
+        blocks=blocks,
+        original_image_url=original_image_url,
+        prev_url=prev_url,
+        next_url=next_url,
+    )
 
 
 @exam_bp.route('/unclassified')
 def unclassified_questions():
     """분류 대기소 페이지 - 미분류/분류된 문제 모두 표시 (paginated)"""
+    user = current_user()
     t_start = time.perf_counter()
     
     # Pagination parameters
@@ -73,7 +176,7 @@ def unclassified_questions():
     
     # 문제 조회 (기본적으로 미분류 우선) - 페이지네이션
     t_db_start = time.perf_counter()
-    pagination = Question.query.order_by(
+    pagination = scope_query(Question.query, Question, user).order_by(
         Question.is_classified,  # False(미분류)가 먼저
         Question.exam_id,
         Question.question_number
@@ -82,13 +185,13 @@ def unclassified_questions():
     t_db = time.perf_counter() - t_db_start
     
     # 블록 목록 (강의 포함)
-    blocks = Block.query.order_by(Block.order).all()
+    blocks = scope_model(Block, user, include_public=True).order_by(*block_ordering()).all()
     
     # 시험 목록 (필터용)
-    exams = PreviousExam.query.order_by(PreviousExam.created_at.desc()).all()
+    exams = scope_model(PreviousExam, user).order_by(PreviousExam.created_at.desc()).all()
     
     # 미분류 문제 수
-    unclassified_count = Question.query.filter_by(is_classified=False).count()
+    unclassified_count = scope_query(Question.query, Question, user).filter_by(is_classified=False).count()
     
     t_render_start = time.perf_counter()
     result = render_template('exam/unclassified.html', 
@@ -111,14 +214,20 @@ def unclassified_questions():
 @exam_bp.route('/question/<int:question_id>/classify', methods=['POST'])
 def classify_question(question_id):
     """문제를 강의에 분류 (AJAX 지원)"""
-    question = Question.query.get_or_404(question_id)
+    user, auth_error = _require_user_json()
+    if auth_error is not None:
+        return auth_error
+
+    question = get_scoped_by_id(Question, question_id, user)
+    if not question:
+        return jsonify({'success': False, 'error': '문제를 찾을 수 없습니다.'}), 404
     lecture_id = request.form.get('lecture_id', type=int)
     
     # AJAX 요청 확인
     is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     
     if lecture_id:
-        lecture = Lecture.query.get(lecture_id)
+        lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
         if lecture:
             question.classify(lecture_id)
             db.session.commit()
@@ -148,7 +257,13 @@ def classify_question(question_id):
 @exam_bp.route('/question/<int:question_id>/unclassify', methods=['POST'])
 def unclassify_question(question_id):
     """문제 분류 해제"""
-    question = Question.query.get_or_404(question_id)
+    user, auth_error = _require_user_json()
+    if auth_error is not None:
+        return auth_error
+
+    question = get_scoped_by_id(Question, question_id, user)
+    if not question:
+        return jsonify({'success': False, 'error': '문제를 찾을 수 없습니다.'}), 404
     question.unclassify()
     db.session.commit()
     
@@ -165,6 +280,10 @@ def unclassify_question(question_id):
 @exam_bp.route('/questions/bulk-classify', methods=['POST'])
 def bulk_classify():
     """여러 문제를 한 번에 분류"""
+    user, auth_error = _require_user_json()
+    if auth_error is not None:
+        return auth_error
+
     data = request.get_json()
     
     if not data:
@@ -179,17 +298,19 @@ def bulk_classify():
     if not lecture_id:
         return jsonify({'success': False, 'error': '강의를 선택해주세요.'}), 400
     
-    lecture = Lecture.query.get(lecture_id)
+    lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
     if not lecture:
         return jsonify({'success': False, 'error': '강의를 찾을 수 없습니다.'}), 404
     
     # 선택된 문제들 일괄 분류
-    updated_count = 0
-    for qid in question_ids:
-        question = Question.query.get(qid)
-        if question:
-            question.classify(lecture_id)
-            updated_count += 1
+    updated_count = (
+        scope_query(Question.query, Question, user)
+        .filter(Question.id.in_(question_ids))
+        .update(
+            {"lecture_id": lecture.id, "is_classified": True, "classification_status": "manual"},
+            synchronize_session=False,
+        )
+    )
     
     db.session.commit()
     

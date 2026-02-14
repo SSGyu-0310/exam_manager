@@ -30,11 +30,28 @@ from app.services.query_transformer import get_query_payload
 def _normalize_db_uri(db_value: str | None) -> str | None:
     if not db_value:
         return None
-    if "://" in db_value:
-        return db_value
-    path = Path(db_value).resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return f"sqlite:///{path.as_posix()}"
+    db_uri = db_value.strip()
+    if db_uri.startswith("postgres://"):
+        db_uri = db_uri.replace("postgres://", "postgresql+psycopg://", 1)
+    elif db_uri.startswith("postgresql://"):
+        db_uri = db_uri.replace("postgresql://", "postgresql+psycopg://", 1)
+    if not db_uri.startswith("postgresql+psycopg://"):
+        raise RuntimeError(
+            "--db must be a PostgreSQL URI (postgresql+psycopg://...)."
+        )
+    return db_uri
+
+
+def _resolve_db_uri(db_arg: str | None) -> str:
+    if db_arg:
+        db_uri = _normalize_db_uri(db_arg)
+    else:
+        from config import get_config
+
+        db_uri = _normalize_db_uri(str(get_config().runtime.db_uri))
+    if not db_uri:
+        raise RuntimeError("DATABASE_URL is required for this script.")
+    return db_uri
 
 
 def _build_question_text(question: Question) -> str:
@@ -122,7 +139,7 @@ def main() -> None:
         from _safety import SafetyLevel, require_confirmation, print_script_header
 
     parser = argparse.ArgumentParser(description="Build HyDE-lite queries.")
-    parser.add_argument("--db", default="data/dev.db", help="SQLite db path.")
+    parser.add_argument("--db", default=None, help="PostgreSQL URI override.")
     parser.add_argument(
         "--provider",
         default="gemini",
@@ -145,7 +162,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    print_script_header("build_queries.py", _normalize_db_uri(args.db))
+    db_uri = _resolve_db_uri(args.db)
+    print_script_header("build_queries.py", db_uri)
 
     if not require_confirmation(
         SafetyLevel.DESTRUCTIVE,
@@ -158,10 +176,6 @@ def main() -> None:
 
     if args.provider != "gemini":
         raise ValueError("Only gemini provider is supported.")
-
-    db_uri = _normalize_db_uri(args.db)
-    if not db_uri:
-        raise ValueError("DB path is required.")
 
     app = create_app("default", db_uri_override=db_uri, skip_migration_check=True)
 

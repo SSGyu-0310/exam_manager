@@ -12,6 +12,7 @@ const badgeVariants = cva(
         success: "bg-success/15 text-success",
         danger: "bg-danger/15 text-danger",
         ai: "bg-ai/15 text-ai",
+        outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
       },
     },
     defaultVariants: {
@@ -22,7 +23,7 @@ const badgeVariants = cva(
 
 export interface BadgeProps
   extends React.HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof badgeVariants> {}
+  VariantProps<typeof badgeVariants> { }
 
 const Badge = React.forwardRef<HTMLDivElement, BadgeProps>(
   ({ className, variant, ...props }, ref) => (

@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+if command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python)"
+else
+  echo "[dev-init-db] python interpreter not found." >&2
+  exit 1
+fi
+
+load_env_file() {
+  local file="$1"
+  if [[ -f "$file" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$file"
+    set +a
+  fi
+}
+
+# Load docker defaults first, then local overrides.
+load_env_file ".env.docker"
+load_env_file ".env"
+
+export FLASK_CONFIG="${FLASK_CONFIG:-development}"
+db_user="${POSTGRES_USER:-exam}"
+db_password="${POSTGRES_PASSWORD:-exam_dev_password}"
+db_name="${POSTGRES_DB:-exam_manager}"
+export DATABASE_URL="${DATABASE_URL:-postgresql+psycopg://${db_user}:${db_password}@127.0.0.1:5432/${db_name}}"
+
+echo "[dev-init-db] starting db container"
+"$ROOT_DIR/scripts/dev-db" up -d db
+
+echo "[dev-init-db] waiting for db to become ready"
+for _ in $(seq 1 30); do
+  if "$ROOT_DIR/scripts/dev-db" exec -T db sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1'; then
+    break
+  fi
+  sleep 1
+done
+
+if ! "$ROOT_DIR/scripts/dev-db" exec -T db sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1'; then
+  echo "[dev-init-db] db is not ready after waiting." >&2
+  exit 1
+fi
+
+echo "[dev-init-db] ensuring pg_stat_statements extension"
+"$ROOT_DIR/scripts/dev-db" exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"'
+
+echo "[dev-init-db] initializing schema"
+"$PYTHON_BIN" scripts/init_db.py --config "$FLASK_CONFIG" --db "$DATABASE_URL"
+
+echo "[dev-init-db] applying postgres migrations"
+"$PYTHON_BIN" scripts/run_postgres_migrations.py --db "$DATABASE_URL"
+
+echo "[dev-init-db] syncing fts metadata"
+"$PYTHON_BIN" scripts/init_fts.py --db "$DATABASE_URL" --sync
+
+echo "[dev-init-db] done"

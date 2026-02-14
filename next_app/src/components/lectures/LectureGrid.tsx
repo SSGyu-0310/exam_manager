@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from "react";
+import { useLanguage } from "@/context/LanguageContext";
 
 import type { Block, LectureSort, NormalizedLecture } from "@/components/lectures/types";
 import { normalizeLecture } from "@/components/lectures/types";
@@ -28,6 +29,7 @@ export function LectureGrid({
   sort,
   onSortChange,
 }: LectureGridProps) {
+  const { t } = useLanguage();
   const normalizedBlocks = useMemo<NormalizedBlock[]>(
     () =>
       (blocks ?? []).map((block) => ({
@@ -145,14 +147,14 @@ export function LectureGrid({
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.25em] text-muted-foreground">
-                        Block
+                        {t("learn.block")}
                       </p>
                       <h2 className="text-xl font-semibold text-foreground">
-                        {blockTitle ?? "Untitled Block"}
+                        {blockTitle ?? t("learn.untitledBlock")}
                       </h2>
                     </div>
                     <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
-                      {block.lectures.length} lectures
+                      {block.lectures.length} {t("learn.lecturesCount")}
                     </span>
                   </div>
                 )}

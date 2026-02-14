@@ -127,6 +127,11 @@
                         placeholder="예: 심혈관학, 호흡기학" required>
                 </div>
                 <div class="form-group">
+                    <label for="subject">과목</label>
+                    <input type="text" id="subject" name="subject" value="{{ block.subject if block else '' }}"
+                        placeholder="예: 생리학">
+                </div>
+                <div class="form-group">
                     <label for="order">표시 순서</label>
                     <input type="number" id="order" name="order" value="{{ block.order if block else 0 }}" min="0">
                 </div>
@@ -144,6 +149,7 @@
             </form>
         </div>
     </div>
+    <script src="{{ url_for('static', filename='js/duck_quack.js') }}"></script>
 </body>
 
 </html>

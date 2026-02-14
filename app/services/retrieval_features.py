@@ -58,6 +58,7 @@ def build_retrieval_artifacts(
     question_text: str,
     question_id: Optional[int],
     *,
+    lecture_ids: Optional[List[int]] = None,
     top_n: int = 80,
     top_k: int = 5,
 ) -> RetrievalArtifacts:
@@ -65,25 +66,17 @@ def build_retrieval_artifacts(
         question_text,
         top_n=top_n,
         question_id=question_id,
+        lecture_ids=lecture_ids,
     )
-    embed_chunks = retrieval.search_chunks_embedding(
-        question_text,
-        top_n=top_n,
-        candidate_chunks=bm25_chunks,
-        question_id=question_id,
-    )
-    hybrid_chunks = retrieval.search_chunks_hybrid_rrf(
-        question_text,
-        top_n=top_n,
-        question_id=question_id,
-    )
+
+    # Backward-compatible shape: embedding/hybrid lists are no longer produced.
+    embed_chunks: List[Dict] = []
+    hybrid_chunks: List[Dict] = list(bm25_chunks)
 
     bm25_topk = _ranked_list(bm25_chunks, "bm25_score", top_k)
-    embed_topk = _ranked_list(embed_chunks, "embedding_score", top_k)
-    hybrid_topk = _ranked_list(hybrid_chunks, "rrf_score", top_k)
+    hybrid_topk = _ranked_list(hybrid_chunks, "bm25_score", top_k)
 
     bm25_top1_chunk, bm25_top1_lecture = _top1_pair(bm25_chunks)
-    embed_top1_chunk, embed_top1_lecture = _top1_pair(embed_chunks)
     hybrid_top1_chunk, hybrid_top1_lecture = _top1_pair(hybrid_chunks)
 
     bm25_rank_map = {
@@ -91,38 +84,28 @@ def build_retrieval_artifacts(
         for idx, chunk in enumerate(bm25_chunks)
         if chunk.get("chunk_id") is not None
     }
-    embed_rank_map = {
-        chunk.get("chunk_id"): idx + 1
-        for idx, chunk in enumerate(embed_chunks)
-        if chunk.get("chunk_id") is not None
-    }
 
     bm25_margin = _margin(bm25_chunks, "bm25_score")
-    embed_margin = _margin(embed_chunks, "embedding_score")
 
     features = {
         "bm25_top1_chunk_id": bm25_top1_chunk,
         "bm25_top1_lecture_id": bm25_top1_lecture,
-        "embed_top1_chunk_id": embed_top1_chunk,
-        "embed_top1_lecture_id": embed_top1_lecture,
+        "embed_top1_chunk_id": None,
+        "embed_top1_lecture_id": None,
         "hybrid_top1_chunk_id": hybrid_top1_chunk,
         "hybrid_top1_lecture_id": hybrid_top1_lecture,
         "bm25_margin": bm25_margin,
-        "embed_margin": embed_margin,
+        "embed_margin": None,
         "bm25_hybrid_agree": bool(
             bm25_top1_chunk and bm25_top1_chunk == hybrid_top1_chunk
         ),
-        "embed_hybrid_agree": bool(
-            embed_top1_chunk and embed_top1_chunk == hybrid_top1_chunk
-        ),
-        "bm25_embed_agree": bool(
-            bm25_top1_chunk and bm25_top1_chunk == embed_top1_chunk
-        ),
+        "embed_hybrid_agree": False,
+        "bm25_embed_agree": False,
         "hybrid_top1_bm25_rank": bm25_rank_map.get(hybrid_top1_chunk),
-        "hybrid_top1_embed_rank": embed_rank_map.get(hybrid_top1_chunk),
+        "hybrid_top1_embed_rank": None,
         "hybrid_top1_chunk_len": _chunk_length(hybrid_top1_chunk),
         "bm25_topk": bm25_topk,
-        "embed_topk": embed_topk,
+        "embed_topk": [],
         "hybrid_topk": hybrid_topk,
     }
 
@@ -139,17 +122,14 @@ def auto_confirm_v2(
 ) -> bool:
     if not features:
         return False
-    bm25_top1 = features.get("bm25_top1_chunk_id")
-    hybrid_top1 = features.get("hybrid_top1_chunk_id")
-    if not bm25_top1 or not hybrid_top1:
+    top1 = features.get("bm25_top1_chunk_id")
+    if not top1:
         return False
-    if bm25_top1 != hybrid_top1:
+    bm25_margin = features.get("bm25_margin")
+    if bm25_margin is None or float(bm25_margin) < delta:
         return False
-    embed_margin = features.get("embed_margin")
-    if embed_margin is None or float(embed_margin) < delta:
-        return False
-    hybrid_bm25_rank = features.get("hybrid_top1_bm25_rank")
-    if hybrid_bm25_rank is None or int(hybrid_bm25_rank) > max_bm25_rank:
+    bm25_rank = features.get("hybrid_top1_bm25_rank")
+    if bm25_rank is None or int(bm25_rank) > max_bm25_rank:
         return False
     return True
 
@@ -163,12 +143,8 @@ def is_uncertain(
 ) -> bool:
     if not auto_confirm:
         return True
-    embed_margin = features.get("embed_margin")
-    if embed_margin is None or float(embed_margin) < delta_uncertain:
-        return True
-    bm25_top1 = features.get("bm25_top1_chunk_id")
-    hybrid_top1 = features.get("hybrid_top1_chunk_id")
-    if bm25_top1 and hybrid_top1 and bm25_top1 != hybrid_top1:
+    bm25_margin = features.get("bm25_margin")
+    if bm25_margin is None or float(bm25_margin) < delta_uncertain:
         return True
     chunk_len = features.get("hybrid_top1_chunk_len")
     if chunk_len is None or int(chunk_len) < min_chunk_len:

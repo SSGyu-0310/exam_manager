@@ -118,6 +118,32 @@
             color: #2ecc71;
         }
 
+        .term-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .term-btn {
+            padding: 0.6rem 1rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(0, 0, 0, 0.3);
+            color: #ccc;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+
+        .term-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            border-color: transparent;
+        }
+
+        .hidden {
+            display: none;
+        }
+
         .btn {
             display: inline-block;
             padding: 1rem 2rem;
@@ -221,15 +247,36 @@
                 </div>
                 <div class="form-group">
                     <label for="subject">과목</label>
-                    <input type="text" id="subject" name="subject" placeholder="예: 생리학, 해부학">
+                    <select id="subjectSelect">
+                        <option value="">과목 선택</option>
+                        {% for subject in subjects or [] %}
+                        <option value="{{ subject }}">{{ subject }}</option>
+                        {% endfor %}
+                        <option value="__custom">직접 입력</option>
+                    </select>
+                    <input type="text" id="subjectCustom" class="hidden" placeholder="과목 직접 입력">
+                    <input type="hidden" id="subjectValue" name="subject" value="">
                 </div>
                 <div class="form-group">
                     <label for="year">연도</label>
-                    <input type="number" id="year" name="year" placeholder="예: 2021" min="2000" max="2099">
+                    <select id="year" name="year">
+                        <option value="">연도 선택</option>
+                        {% for y in year_options or [] %}
+                        <option value="{{ y }}">{{ y }}</option>
+                        {% endfor %}
+                    </select>
                 </div>
                 <div class="form-group">
                     <label for="term">차수</label>
-                    <input type="text" id="term" name="term" placeholder="예: 1차, 기말">
+                    <div class="term-buttons">
+                        <button type="button" class="term-btn" data-term="1차">1차</button>
+                        <button type="button" class="term-btn" data-term="2차">2차</button>
+                        <button type="button" class="term-btn" data-term="3차">3차</button>
+                        <button type="button" class="term-btn" data-term="4차">4차</button>
+                        <button type="button" class="term-btn" data-term="__custom">기타</button>
+                    </div>
+                    <input type="text" id="termCustom" class="hidden" placeholder="차수 직접 입력">
+                    <input type="hidden" id="termValue" name="term" value="">
                 </div>
                 <div class="form-group">
                     <label>PDF 파일 *</label>
@@ -248,6 +295,12 @@
     <script>
         const fileInput = document.getElementById('pdfFile');
         const fileName = document.getElementById('fileName');
+        const subjectSelect = document.getElementById('subjectSelect');
+        const subjectCustom = document.getElementById('subjectCustom');
+        const subjectValue = document.getElementById('subjectValue');
+        const termButtons = document.querySelectorAll('.term-btn');
+        const termCustom = document.getElementById('termCustom');
+        const termValue = document.getElementById('termValue');
 
         fileInput.addEventListener('change', function () {
             if (this.files.length > 0) {
@@ -255,7 +308,49 @@
                 fileName.style.display = 'block';
             }
         });
+
+        function syncSubjectValue() {
+            if (!subjectSelect) return;
+            if (subjectSelect.value === '__custom') {
+                subjectCustom.classList.remove('hidden');
+                subjectValue.value = subjectCustom.value.trim();
+            } else {
+                subjectCustom.classList.add('hidden');
+                subjectValue.value = subjectSelect.value;
+            }
+        }
+
+        if (subjectSelect) {
+            subjectSelect.addEventListener('change', syncSubjectValue);
+        }
+        if (subjectCustom) {
+            subjectCustom.addEventListener('input', syncSubjectValue);
+        }
+
+        termButtons.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                termButtons.forEach((b) => b.classList.remove('active'));
+                btn.classList.add('active');
+                const value = btn.dataset.term || '';
+                if (value === '__custom') {
+                    termCustom.classList.remove('hidden');
+                    termValue.value = termCustom.value.trim();
+                } else {
+                    termCustom.classList.add('hidden');
+                    termValue.value = value;
+                }
+            });
+        });
+
+        if (termCustom) {
+            termCustom.addEventListener('input', () => {
+                termValue.value = termCustom.value.trim();
+            });
+        }
+
+        syncSubjectValue();
     </script>
+    <script src="{{ url_for('static', filename='js/duck_quack.js') }}"></script>
 </body>
 
 </html>

@@ -48,7 +48,7 @@ export function LectureForm({ blockId, initial }: LectureFormProps) {
         await createLecture(blockId, payload);
         setSuccess("Lecture created.");
       }
-      router.push(`/manage/blocks/${blockId}/lectures`);
+      router.push("/manage");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to save lecture.");
@@ -65,7 +65,7 @@ export function LectureForm({ blockId, initial }: LectureFormProps) {
     setError(null);
     try {
       await deleteLecture(initial.id);
-      router.push(`/manage/blocks/${blockId}/lectures`);
+      router.push("/manage");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to delete lecture.");

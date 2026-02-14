@@ -11,8 +11,12 @@ This Next.js app provides the primary management and practice UI. It communicate
 
 ```dotenv
 FLASK_BASE_URL=http://127.0.0.1:5000
-# NEXT_PUBLIC_SITE_URL=http://localhost:3000
-# NEXT_PUBLIC_APP_URL=http://localhost:3000
+# NEXT_PUBLIC_SITE_URL=http://localhost:4000
+# NEXT_PUBLIC_APP_URL=http://localhost:4000
+```
+or
+```bash
+cp next_app/.env.local.example next_app/.env.local
 ```
 
 2) Install dependencies and run the dev server:
@@ -22,9 +26,14 @@ npm install
 npm run dev
 ```
 
+From project root, you can also run:
+```bash
+./scripts/dev-frontend
+```
+
 3) Open:
 
-http://localhost:3000/lectures
+http://localhost:4000/lectures
 
 ## Notes
 - `FLASK_BASE_URL` is required for the proxy to reach Flask.

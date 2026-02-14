@@ -17,19 +17,29 @@ import pdfplumber
 CID_RE = re.compile(r"\(cid:\d+\)")
 Q_HEADER = re.compile(r"^\s*(\d{1,3})\.(?!\d)\s*(.*)$")
 OPT_RE = re.compile(r"^([1-9]|1[0-6])([)\.])\s*(.*)$")
-EMBEDDED_OPT_RE = re.compile(r"^(?P<prefix>.*)\s+(?P<num>[1-9]|1[0-6])[)\.](?P<suffix>\s+.*)?$")
+EMBEDDED_OPT_RE = re.compile(r"^(?P<prefix>.*)\s+(?P<num>[1-9]|1[0-6])\s*[)\.](?P<suffix>\s+.*)?$")
 ANSWER_LABEL_RE = re.compile(r"^(?:\uC815\uB2F5|\uB2F5|answer)\s*[:\uFF1A]\s*(.*)$", re.IGNORECASE)
+EXAMINER_RE = re.compile(r"^\s*출제자\s*[:\uFF1A]\s*(.+?)\s*$")
 
 INDENT_TOL = 6.0
 WORD_X_TOL = 0.5
+
+# Post-clean rules to avoid label token splits like "1 )" or "A )"
+LABEL_SPACE_FIX_NUM = re.compile(r"(\d)\s+([)\.])")
+LABEL_SPACE_FIX_ALPHA = re.compile(r"([A-Za-z])\s+([)\.])")
 
 
 def clean_text(s: str) -> str:
     s = s.replace("\u00A0", " ")
     s = CID_RE.sub(" ", s)
+    s = s.replace("\x00", "")
     s = re.sub(r"[\x00-\x1F\x7F]", " ", s)
     s = re.sub(r"[ \t]+", " ", s)
-    return s.strip()
+    s = s.strip()
+    # Fix accidental splits for labels
+    s = LABEL_SPACE_FIX_NUM.sub(r"\1\2", s)
+    s = LABEL_SPACE_FIX_ALPHA.sub(r"\1\2", s)
+    return s
 
 
 def detect_answer_color(pdf: pdfplumber.PDF, max_pages=None):
@@ -60,6 +70,163 @@ def color_distance(c1, c2) -> float:
     return float(sum((a - b) ** 2 for a, b in zip(c1, c2)) ** 0.5)
 
 
+def get_vertical_overlap(w1, w2):
+    """Calculate vertical overlap ratio between two objects (word vs word/row-proxy)."""
+    top1, bottom1 = w1["top"], w1["bottom"]
+    top2, bottom2 = w2["top"], w2["bottom"]
+
+    overlap_top = max(top1, top2)
+    overlap_bottom = min(bottom1, bottom2)
+
+    if overlap_top >= overlap_bottom:
+        return 0.0
+
+    overlap_h = overlap_bottom - overlap_top
+    h1 = bottom1 - top1
+    h2 = bottom2 - top2
+
+    min_h = min(h1, h2)
+    if min_h <= 0:
+        return 0.0
+
+    return overlap_h / min_h
+
+
+def cluster_words_into_rows(words, overlap_threshold=0.4):
+    """Cluster words into rows based on vertical overlap (greedy)."""
+    if not words:
+        return []
+
+    sorted_words = sorted(words, key=lambda w: w["top"])
+    rows = []
+    row_bounds = []
+
+    for word in sorted_words:
+        best_idx = None
+        best_overlap = -1.0
+
+        for idx in range(len(rows) - 1, -1, -1):
+            proxy = row_bounds[idx]
+            overlap = get_vertical_overlap(word, proxy)
+            if overlap > overlap_threshold and overlap > best_overlap:
+                best_overlap = overlap
+                best_idx = idx
+
+        if best_idx is not None:
+            rows[best_idx].append(word)
+            rb = row_bounds[best_idx]
+            rb["top"] = min(rb["top"], word["top"])
+            rb["bottom"] = max(rb["bottom"], word["bottom"])
+        else:
+            rows.append([word])
+            row_bounds.append({"top": word["top"], "bottom": word["bottom"]})
+
+    return rows
+
+
+def _join_words_with_gap(ws, gap_threshold=1.5):
+    """Join words in x-order; only insert a space when there's a visible gap."""
+    if not ws:
+        return ""
+    ws = sorted(ws, key=lambda w: w["x0"])
+    parts = [ws[0]["text"]]
+    prev_x1 = ws[0].get("x1", ws[0]["x0"])
+    for w in ws[1:]:
+        x0 = w.get("x0", 0.0)
+        if x0 - prev_x1 > gap_threshold:
+            parts.append(" ")
+        parts.append(w["text"])
+        prev_x1 = w.get("x1", x0)
+    return "".join(parts)
+
+
+def merge_orphan_labels(events):
+    """Merge label-only rows (e.g. '2)') with adjacent text rows."""
+    text_events = [e for e in events if e["type"] == "text"]
+    other_events = [e for e in events if e["type"] != "text"]
+
+    orphan_pattern = re.compile(r"^\s*\d+\s*[)\.]\s*$")
+
+    for ev in text_events:
+        ev["_merged"] = False
+
+    for i, ev in enumerate(text_events):
+        if ev["_merged"]:
+            continue
+
+        text = (ev.get("text") or "").strip()
+        if not orphan_pattern.match(text):
+            continue
+
+        label = LABEL_SPACE_FIX_NUM.sub(r"\1\2", text)
+        label = LABEL_SPACE_FIX_ALPHA.sub(r"\1\2", label)
+
+        candidates = []
+        for offset in (-2, -1, 1, 2):
+            idx = i + offset
+            if not (0 <= idx < len(text_events)):
+                continue
+            target = text_events[idx]
+            if target["_merged"]:
+                continue
+            if target["page"] != ev["page"]:
+                continue
+
+            ttext = (target.get("text") or "").strip()
+            if not ttext:
+                continue
+            if not (target["x0"] > ev["x0"] + 2.0):
+                continue
+
+            score = abs(offset)
+            if re.match(r"^[A-Za-z\uAC00-\uD7A3]", ttext):
+                score -= 0.2
+            if len(ttext) <= 12:
+                score += 0.5
+
+            candidates.append((score, idx))
+
+        if not candidates:
+            continue
+
+        candidates.sort(key=lambda x: (x[0], x[1]))
+        _, j = candidates[0]
+        target = text_events[j]
+
+        if j > 0:
+            prev = text_events[j - 1]
+            if (
+                prev["page"] == ev["page"]
+                and not prev.get("_merged", False)
+                and prev["x0"] > ev["x0"] + 2.0
+            ):
+                prev_text = (prev.get("text") or "").strip()
+                tgt_text = (target.get("text") or "").strip()
+                if prev_text and tgt_text and len(tgt_text) <= 12:
+                    if re.match(r"^[A-Za-z\uAC00-\uD7A3]", prev_text):
+                        target = prev
+
+        new_text = f"{label} {target['text']}".strip()
+        ev["text"] = new_text
+        ev["top"] = min(ev["top"], target["top"])
+        ev["bottom"] = max(ev["bottom"], target["bottom"])
+        ev["x0"] = min(ev["x0"], target["x0"])
+        ev["x1"] = max(ev["x1"], target["x1"])
+        ev["has_key"] = ev.get("has_key", False) or target.get("has_key", False)
+
+        target["_merged"] = True
+
+    final_text_events = []
+    for ev in text_events:
+        if not ev["_merged"]:
+            ev.pop("_merged", None)
+            final_text_events.append(ev)
+
+    all_events = final_text_events + other_events
+    all_events.sort(key=lambda d: (d["page"], d["top"], d["x0"], 0 if d["type"] == "text" else 1))
+    return all_events
+
+
 def extract_events(pdf, answer_color, y_tol=3, min_image_area=2000):
     events = []
 
@@ -77,25 +244,12 @@ def extract_events(pdf, answer_color, y_tol=3, min_image_area=2000):
             else:
                 w["color"] = None
 
-        words_sorted = sorted(words, key=lambda w: (w["top"], w["x0"]))
+        rows = cluster_words_into_rows(words, overlap_threshold=0.4)
+        rows.sort(key=lambda r: min(w["top"] for w in r))
 
-        clusters = []
-        cur = []
-        cur_top = None
-        for w in words_sorted:
-            if cur_top is None or abs(w["top"] - cur_top) <= y_tol:
-                cur.append(w)
-                cur_top = w["top"] if cur_top is None else (cur_top + w["top"]) / 2
-            else:
-                clusters.append(cur)
-                cur = [w]
-                cur_top = w["top"]
-        if cur:
-            clusters.append(cur)
-
-        for ws in clusters:
+        for ws in rows:
             ws = sorted(ws, key=lambda w: w["x0"])
-            text = clean_text(" ".join(w["text"] for w in ws))
+            text = clean_text(_join_words_with_gap(ws))
             if not text:
                 continue
 
@@ -207,6 +361,40 @@ def save_image_crop(page, bbox, upload_dir: Path, exam_prefix: str, resolution=2
     return fname
 
 
+def fix_split_options(questions):
+    """Reassign trailing fragment from previous option to current option.
+
+    Handles late label layouts where the beginning of (n+1) option text was
+    attached to n option during sequential accumulation.
+    """
+    split_re = re.compile(r"(.*(?:이다|것이다|된다|한다|없다|있다|였으며|으며))\s+(.+)$")
+
+    for q in questions:
+        options_map = q.get("options_map") or {}
+        if not options_map:
+            continue
+
+        sorted_nums = sorted(options_map)
+        for i in range(1, len(sorted_nums)):
+            prev_num = sorted_nums[i - 1]
+            curr_num = sorted_nums[i]
+            prev_opt = options_map[prev_num]
+            curr_opt = options_map[curr_num]
+
+            prev_content = (prev_opt.get("content") or "").strip()
+            curr_content = (curr_opt.get("content") or "").strip()
+            if not prev_content or not curr_content:
+                continue
+
+            match = split_re.search(prev_content)
+            if not match:
+                continue
+
+            prev_opt["content"] = match.group(1).strip()
+            moved = match.group(2).strip()
+            curr_opt["content"] = f"{moved} {curr_content}".strip()
+
+
 def parse_pdf_to_questions(pdf_path, upload_dir: Path, exam_prefix: str, max_option_number=16):
     pdf_path = Path(pdf_path)
     upload_dir = Path(upload_dir)
@@ -217,14 +405,22 @@ def parse_pdf_to_questions(pdf_path, upload_dir: Path, exam_prefix: str, max_opt
     with pdfplumber.open(str(pdf_path)) as pdf:
         answer_color = detect_answer_color(pdf)
         events = extract_events(pdf, answer_color)
+        events = merge_orphan_labels(events)
 
         cur = None
         cur_opt = None
+        pending_examiner = None
 
         for ev in events:
             if ev["type"] == "text":
                 normalized_lines = normalize_embedded_option(ev["text"], cur, max_option_number)
                 for txt in normalized_lines:
+                    m_examiner = EXAMINER_RE.match(txt)
+                    if m_examiner:
+                        examiner_name = (m_examiner.group(1) or "").strip()
+                        pending_examiner = examiner_name or None
+                        continue
+
                     m_q = Q_HEADER.match(txt)
                     if m_q:
                         if cur:
@@ -258,11 +454,13 @@ def parse_pdf_to_questions(pdf_path, upload_dir: Path, exam_prefix: str, max_opt
                             "question_number": int(m_q.group(1)),
                             "content": m_q.group(2).strip(),
                             "image_path": None,
+                            "examiner": pending_examiner,
                             "options_map": {},
                             "answer_lines": [],
                             "question_x0": ev["x0"],
                             "option_x0": None,
                         }
+                        pending_examiner = None
                         cur_opt = None
                         continue
 
@@ -325,6 +523,8 @@ def parse_pdf_to_questions(pdf_path, upload_dir: Path, exam_prefix: str, max_opt
 
         if cur:
             questions.append(cur)
+
+    fix_split_options(questions)
 
     for q in questions:
         options = [q["options_map"][n] for n in sorted(q["options_map"])]

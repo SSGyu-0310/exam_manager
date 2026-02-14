@@ -2,7 +2,7 @@
 Evaluate retrieval/classification against evaluation_labels.
 
 Usage:
-  python scripts/evaluate_evalset.py --db data/dev.db
+  python scripts/evaluate_evalset.py --db "postgresql+psycopg://user:pass@host:5432/dbname"
 """
 from __future__ import annotations
 
@@ -28,6 +28,33 @@ from app import db
 from app.models import EvaluationLabel, Question
 from app.services import retrieval, retrieval_features
 from app.services.classifier_cache import ClassifierResultCache, build_config_hash
+
+
+def _normalize_db_uri(db_value: str | None) -> str | None:
+    if not db_value:
+        return None
+    db_uri = db_value.strip()
+    if db_uri.startswith("postgres://"):
+        db_uri = db_uri.replace("postgres://", "postgresql+psycopg://", 1)
+    elif db_uri.startswith("postgresql://"):
+        db_uri = db_uri.replace("postgresql://", "postgresql+psycopg://", 1)
+    if not db_uri.startswith("postgresql+psycopg://"):
+        raise RuntimeError(
+            "--db must be a PostgreSQL URI (postgresql+psycopg://...)."
+        )
+    return db_uri
+
+
+def _resolve_db_uri(db_arg: str | None) -> str:
+    if db_arg:
+        db_uri = _normalize_db_uri(db_arg)
+    else:
+        from config import get_config
+
+        db_uri = _normalize_db_uri(str(get_config().runtime.db_uri))
+    if not db_uri:
+        raise RuntimeError("DATABASE_URL is required for this script.")
+    return db_uri
 
 
 def _parse_list(value: str, cast=float):
@@ -133,8 +160,6 @@ def _classifier_config_hash(app, retrieval_mode: str, max_k: int, evidence_per_l
         "auto_confirm_v2_max_bm25_rank": int(app.config.get("AUTO_CONFIRM_V2_MAX_BM25_RANK", 5)),
         "auto_confirm_v2_delta_uncertain": float(app.config.get("AUTO_CONFIRM_V2_DELTA_UNCERTAIN", 0.03)),
         "auto_confirm_v2_min_chunk_len": int(app.config.get("AUTO_CONFIRM_V2_MIN_CHUNK_LEN", 200)),
-        "embedding_model": app.config.get("EMBEDDING_MODEL_NAME"),
-        "embedding_top_n": int(app.config.get("EMBEDDING_TOP_N", 300)),
         "rrf_k": int(app.config.get("RRF_K", 60)),
         "hyde_enabled": bool(app.config.get("HYDE_ENABLED", False)),
         "hyde_strategy": app.config.get("HYDE_STRATEGY", "blend"),
@@ -168,14 +193,15 @@ def _classify_worker(app, question_id: int, candidates: list[dict], expand_conte
         return question_id, result
 
 
-def evaluate(db_path: Path, args) -> dict:
-    db_uri = f"sqlite:///{db_path.resolve().as_posix()}"
+def evaluate(db_uri: str, args) -> dict:
     app = create_app("default", db_uri_override=db_uri, skip_migration_check=True)
 
     with app.app_context():
         current_threshold = float(app.config.get("AI_CONFIDENCE_THRESHOLD", 0.7))
         current_margin = float(app.config.get("AI_AUTO_APPLY_MARGIN", 0.2))
-        retrieval_mode = args.retrieval_mode or app.config.get("RETRIEVAL_MODE", "bm25")
+        retrieval_mode = (args.retrieval_mode or app.config.get("RETRIEVAL_MODE", "bm25")).strip().lower()
+        if retrieval_mode != "bm25":
+            retrieval_mode = "bm25"
         labels_query = EvaluationLabel.query.join(Question).order_by(EvaluationLabel.id.asc())
         if args.question_ids_file:
             ids = _load_question_ids(args.question_ids_file)
@@ -238,20 +264,12 @@ def evaluate(db_path: Path, args) -> dict:
                 top_k=max_k,
             )
 
-            if retrieval_mode == "hybrid_rrf":
-                chunks = artifacts.hybrid_chunks
-                candidates = retrieval.aggregate_candidates_rrf(
-                    chunks,
-                    top_k_lectures=max_k,
-                    evidence_per_lecture=evidence_per_lecture,
-                )
-            else:
-                chunks = artifacts.bm25_chunks
-                candidates = retrieval.aggregate_candidates(
-                    chunks,
-                    top_k_lectures=max_k,
-                    evidence_per_lecture=evidence_per_lecture,
-                )
+            chunks = artifacts.bm25_chunks
+            candidates = retrieval.aggregate_candidates(
+                chunks,
+                top_k_lectures=max_k,
+                evidence_per_lecture=evidence_per_lecture,
+            )
 
             candidate_ids = [c.get("id") for c in candidates]
             rank = None
@@ -490,7 +508,7 @@ def evaluate(db_path: Path, args) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate eval labels.")
-    parser.add_argument("--db", default="data/dev.db", help="SQLite db path.")
+    parser.add_argument("--db", default=None, help="PostgreSQL URI override.")
     parser.add_argument(
         "--pred-field",
         default="ai_final_lecture_id",
@@ -500,7 +518,7 @@ def main() -> None:
     parser.add_argument(
         "--retrieval-mode",
         default=None,
-        help="bm25 or hybrid_rrf (default: use config).",
+        help="bm25 only (default: use config).",
     )
     parser.add_argument("--include-ambiguous", action="store_true", help="Include ambiguous labels.")
     parser.add_argument("--max-failures", type=int, default=15, help="Max failures per report.")
@@ -533,11 +551,8 @@ def main() -> None:
     args.thresholds = _parse_list(args.thresholds, float)
     args.margins = _parse_list(args.margins, float)
 
-    db_path = Path(args.db)
-    if not db_path.exists():
-        raise FileNotFoundError(f"DB not found: {db_path}")
-
-    result = evaluate(db_path, args)
+    db_uri = _resolve_db_uri(args.db)
+    result = evaluate(db_uri, args)
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     report_dir = ROOT_DIR / "reports" / f"eval_{timestamp}"
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -554,7 +569,7 @@ def main() -> None:
     )
     summary = {
         "generated_at": timestamp,
-        "db": db_path.as_posix(),
+        "db": db_uri,
         "pred_field": args.pred_field,
         "retrieval_mode": result["retrieval_mode"],
         "total": result["total"],

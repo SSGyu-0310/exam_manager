@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Exam Manager Prototype</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=Space+Grotesk:wght@500;700&display=swap');
+
+        :root {
+            --bg-deep: #0f172a;
+            --bg-mid: #0b3b2e;
+            --bg-accent: #0ea5a4;
+            --card: rgba(15, 23, 42, 0.72);
+            --card-strong: rgba(15, 23, 42, 0.9);
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+            --accent: #38bdf8;
+            --accent-2: #f59e0b;
+            --ok: #22c55e;
+            --warn: #f97316;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            min-height: 100vh;
+            font-family: "IBM Plex Sans", "Noto Sans KR", sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(1200px 600px at 10% 10%, rgba(14, 165, 164, 0.3), transparent 60%),
+                radial-gradient(900px 500px at 80% 20%, rgba(245, 158, 11, 0.25), transparent 60%),
+                linear-gradient(160deg, var(--bg-deep), var(--bg-mid));
+            display: flex;
+            align-items: stretch;
+            justify-content: center;
+            padding: 48px 20px 64px;
+        }
+
+        .shell {
+            width: min(1100px, 100%);
+            display: grid;
+            gap: 28px;
+            animation: fadeIn 0.8s ease both;
+        }
+
+        header {
+            display: grid;
+            gap: 12px;
+        }
+
+        .eyebrow {
+            font-size: 0.85rem;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: var(--accent);
+        }
+
+        h1 {
+            font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+            font-size: clamp(2rem, 3.2vw, 3.4rem);
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .subtitle {
+            color: var(--muted);
+            font-size: 1.05rem;
+            max-width: 640px;
+            line-height: 1.6;
+        }
+
+        .chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .chip {
+            padding: 8px 14px;
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            font-size: 0.85rem;
+            background: rgba(15, 23, 42, 0.4);
+        }
+
+        .grid {
+            display: grid;
+            gap: 18px;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        }
+
+        .card {
+            padding: 18px 20px;
+            border-radius: 16px;
+            background: var(--card);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            box-shadow: 0 18px 40px rgba(2, 6, 23, 0.35);
+            animation: rise 0.6s ease both;
+        }
+
+        .card strong {
+            font-size: 1.8rem;
+            font-weight: 700;
+            font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+        }
+
+        .card span {
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 600;
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--ok);
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.8);
+        }
+
+        .dot.warn {
+            background: var(--warn);
+            box-shadow: 0 0 10px rgba(249, 115, 22, 0.8);
+        }
+
+        .panel {
+            background: var(--card-strong);
+            border-radius: 20px;
+            padding: 22px;
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            display: grid;
+            gap: 16px;
+        }
+
+        .panel h3 {
+            font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+            font-weight: 600;
+            font-size: 1.2rem;
+        }
+
+        .list {
+            display: grid;
+            gap: 8px;
+        }
+
+        .list-item {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 12px;
+            border-radius: 12px;
+            background: rgba(15, 23, 42, 0.5);
+        }
+
+        .list-item span {
+            color: var(--muted);
+            font-size: 0.85rem;
+        }
+
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .action {
+            padding: 10px 16px;
+            border-radius: 12px;
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            color: var(--text);
+            text-decoration: none;
+            font-weight: 600;
+            background: rgba(56, 189, 248, 0.15);
+            transition: transform 0.2s ease, background 0.2s ease;
+        }
+
+        .action:hover {
+            transform: translateY(-2px);
+            background: rgba(56, 189, 248, 0.25);
+        }
+
+        .muted {
+            color: var(--muted);
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        .code {
+            font-family: "IBM Plex Mono", "Courier New", monospace;
+            font-size: 0.88rem;
+            color: var(--accent-2);
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes rise {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @media (max-width: 720px) {
+            body {
+                padding: 32px 16px 40px;
+            }
+
+            .actions {
+                flex-direction: column;
+            }
+
+            .list-item {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="shell">
+        <header>
+            <div class="eyebrow">Prototype Mode</div>
+            <h1>Exam Manager — 실행 중심 프로토타입</h1>
+            <p class="subtitle">세부 기능 대신 실행 상태를 기준으로 최소 UI를 구성했습니다. Flask 단일 서버로 실행되고, DB 연결 및 기본 데이터 요약을 확인할 수 있습니다.</p>
+            <div class="chip-row">
+                <div class="chip">APP_MODE: {{ app_mode }}</div>
+                <div class="chip">/health 지원</div>
+                <div class="chip">단일 서버</div>
+            </div>
+        </header>
+
+        <section class="grid">
+            <div class="card" style="animation-delay: 0.05s;">
+                <div class="status">
+                    <div class="dot {% if not db_ok %}warn{% endif %}"></div>
+                    <div>{{ 'DB 연결 정상' if db_ok else 'DB 연결 실패' }}</div>
+                </div>
+                <span>{{ db_error if db_error else 'PostgreSQL 연결이 정상입니다.' }}</span>
+            </div>
+            <div class="card" style="animation-delay: 0.1s;">
+                <strong>{{ counts.blocks if counts.blocks is not none else '—' }}</strong>
+                <span>Blocks</span>
+            </div>
+            <div class="card" style="animation-delay: 0.15s;">
+                <strong>{{ counts.lectures if counts.lectures is not none else '—' }}</strong>
+                <span>Lectures</span>
+            </div>
+            <div class="card" style="animation-delay: 0.2s;">
+                <strong>{{ counts.exams if counts.exams is not none else '—' }}</strong>
+                <span>Exams</span>
+            </div>
+            <div class="card" style="animation-delay: 0.25s;">
+                <strong>{{ counts.questions if counts.questions is not none else '—' }}</strong>
+                <span>Questions</span>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h3>최근 데이터</h3>
+            <div class="grid">
+                <div class="list">
+                    <div class="muted">최근 강의</div>
+                    {% if recent_lectures %}
+                        {% for lecture in recent_lectures %}
+                        <div class="list-item">
+                            <div>{{ lecture.title }}</div>
+                            <span>#{{ lecture.id }}</span>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="list-item"><span>데이터 없음</span></div>
+                    {% endif %}
+                </div>
+                <div class="list">
+                    <div class="muted">최근 시험</div>
+                    {% if recent_exams %}
+                        {% for exam in recent_exams %}
+                        <div class="list-item">
+                            <div>{{ exam.title }}</div>
+                            <span>#{{ exam.id }}</span>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="list-item"><span>데이터 없음</span></div>
+                    {% endif %}
+                </div>
+                <div class="list">
+                    <div class="muted">최근 문제</div>
+                    {% if recent_questions %}
+                        {% for question in recent_questions %}
+                        <div class="list-item">
+                            <div>문항 {{ question.question_number }}</div>
+                            <span>#{{ question.id }}</span>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="list-item"><span>데이터 없음</span></div>
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h3>빠른 체크</h3>
+            <div class="actions">
+                <a class="action" href="{{ url_for('main.health') }}">/health 보기</a>
+                <a class="action" href="/prototype">프로토타입 홈</a>
+            </div>
+            <p class="muted">전체 기능 모드는 환경변수로 전환합니다. <span class="code">./scripts/dc up -d</span></p>
+        </section>
+    </main>
+</body>
+</html>

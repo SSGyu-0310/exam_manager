@@ -1,4 +1,5 @@
 import { Search } from "lucide-react";
+import { useLanguage } from "@/context/LanguageContext";
 
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -21,17 +22,18 @@ export function LectureHeader({
   totalCount,
   filteredCount,
 }: LectureHeaderProps) {
+  const { t } = useLanguage();
   return (
     <div className="mb-8 space-y-6">
       <div className="space-y-4">
         <p className="text-xs font-semibold uppercase tracking-[0.4em] text-muted-foreground">
-          Study Library
+          {t("learn.studyLibrary")}
         </p>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-2">
-            <h1 className="text-3xl font-semibold text-foreground">Lectures</h1>
+            <h1 className="text-3xl font-semibold text-foreground">{t("learn.lectures")}</h1>
             <p className="text-sm text-muted-foreground">
-              {filteredCount} of {totalCount} lectures ready to study.
+              {t("learn.readyToStudy").replace('{filtered}', String(filteredCount)).replace('{total}', String(totalCount))}
             </p>
           </div>
           <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
@@ -40,7 +42,7 @@ export function LectureHeader({
               <Input
                 value={query}
                 onChange={(event) => onQueryChange(event.target.value)}
-                placeholder="Search lectures"
+                placeholder={t("learn.searchLectures")}
                 className="pl-10"
               />
             </div>
@@ -48,10 +50,10 @@ export function LectureHeader({
               <Select
                 value={sort}
                 onChange={(event) => onSortChange(event.target.value as LectureSort)}
-                aria-label="Sort lectures"
+                aria-label={t("learn.searchLectures")}
               >
-                <option value="title">Title (A-Z)</option>
-                <option value="questions">Most questions</option>
+                <option value="title">{t("learn.sortByTitle")}</option>
+                <option value="questions">{t("learn.sortByQuestions")}</option>
               </Select>
             </div>
           </div>

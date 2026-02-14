@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Experimental PDF parser entrypoint.
-Currently delegates to the legacy parser to keep behavior identical.
+Currently delegates to legacy parser.
 """
 
 from app.services.pdf_parser import parse_pdf_to_questions

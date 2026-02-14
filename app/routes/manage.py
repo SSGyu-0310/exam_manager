@@ -9,7 +9,7 @@ from flask import (
     flash,
     current_app,
     abort,
-    jsonify,
+    session,
 )
 from werkzeug.utils import secure_filename
 from datetime import datetime
@@ -18,6 +18,7 @@ import shutil
 from app import db
 from app.models import (
     Block,
+    Subject,
     Lecture,
     PreviousExam,
     Question,
@@ -29,9 +30,23 @@ from app.services.exam_cleanup import delete_exam_with_assets
 from app.services.markdown_images import strip_markdown_images
 from app.services.db_backup import maybe_backup_before_write
 from app.services.db_guard import guard_write_request
+from app.services.db_utils import is_postgres
+from app.services.pdf_import_service import save_parsed_questions
 from app.services.manage_service import get_dashboard_stats
+from app.services.api_response import (
+    success_response as _success_response,
+    error_response as _error_response,
+)
+from app.services.user_scope import (
+    attach_current_user,
+    current_user,
+    get_scoped_by_id,
+    scope_model,
+    scope_query,
+)
+from app.services.block_sort import block_ordering, block_lecture_ordering
 from pathlib import Path
-from sqlalchemy import text
+from sqlalchemy import text, or_
 
 manage_bp = Blueprint("manage", __name__)
 
@@ -47,6 +62,11 @@ def restrict_to_local_admin():
 
 
 @manage_bp.before_request
+def attach_user():
+    return attach_current_user(require=True)
+
+
+@manage_bp.before_request
 def backup_before_write():
     blocked = guard_write_request()
     if blocked is not None:
@@ -55,6 +75,91 @@ def backup_before_write():
         return None
     maybe_backup_before_write(request.endpoint)
     return None
+
+
+def _require_user_json():
+    error = attach_current_user(require=True)
+    if error is not None:
+        return None, error
+    user = current_user()
+    if user is None:
+        return None, _json_error(
+            "Authentication required.",
+            code="UNAUTHORIZED",
+            status=401,
+        )
+    return user, None
+
+
+def _json_success(data=None, status=200, code=None, message=None, legacy=None):
+    merged_legacy = {"success": True}
+    if legacy:
+        merged_legacy.update(legacy)
+    return _success_response(
+        data=data,
+        status=status,
+        code=code,
+        message=message,
+        legacy=merged_legacy,
+    )
+
+
+def _json_error(message, code="BAD_REQUEST", status=400, data=None, legacy=None):
+    merged_legacy = {"success": False, "error": message}
+    if legacy:
+        merged_legacy.update(legacy)
+    return _error_response(
+        message=message,
+        code=code,
+        status=status,
+        data=data,
+        legacy=merged_legacy,
+    )
+
+
+def _resolve_subject_from_form(subject_value, user, is_public=False):
+    name = (subject_value or "").strip()
+    if not name:
+        return None
+    if is_public:
+        subject = Subject.query.filter(
+            Subject.user_id.is_(None), Subject.name == name
+        ).first()
+    else:
+        subject = Subject.query.filter(
+            Subject.user_id == user.id, Subject.name == name
+        ).first()
+    if not subject:
+        subject = Subject(
+            name=name,
+            user_id=None if is_public else user.id,
+        )
+    db.session.add(subject)
+    db.session.flush()
+    return subject
+
+
+def _get_or_create_unassigned_block(user, is_public):
+    fallback_name = "미지정"
+    query = Block.query.filter(Block.name == fallback_name, Block.subject.is_(None))
+    if is_public:
+        query = query.filter(Block.user_id.is_(None))
+    else:
+        query = query.filter(Block.user_id == user.id)
+    block = query.first()
+    if block:
+        return block
+    block = Block(
+        name=fallback_name,
+        subject=None,
+        subject_id=None,
+        description=None,
+        order=0,
+        user_id=None if is_public else user.id,
+    )
+    db.session.add(block)
+    db.session.flush()
+    return block
 
 
 def allowed_file(filename, allowed_extensions):
@@ -69,15 +174,33 @@ def _resolve_upload_folder() -> Path:
     return Path(upload_folder)
 
 
+def _should_keep_pdf_after_index() -> bool:
+    return bool(current_app.config.get("KEEP_PDF_AFTER_INDEX", False))
+
+
+def _remove_material_file(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        current_app.logger.warning("Lecture note file delete failed: %s", path)
+
+
+def _ensure_editable(resource, user):
+    if resource and resource.user_id is None and not getattr(user, "is_admin", False):
+        abort(403)
+    return None
+
+
 # ===== 대시보드 =====
 
 
 @manage_bp.route("/")
 def dashboard():
     """관리 대시보드"""
+    user = current_user()
     return render_template(
         "manage/dashboard.html",
-        **get_dashboard_stats(),
+        **get_dashboard_stats(user),
     )
 
 
@@ -87,19 +210,35 @@ def dashboard():
 @manage_bp.route("/blocks")
 def list_blocks():
     """블록 목록"""
-    blocks = Block.query.order_by(Block.order).all()
+    user = current_user()
+    blocks = scope_model(Block, user, include_public=True).order_by(*block_ordering()).all()
     return render_template("manage/blocks.html", blocks=blocks)
 
 
 @manage_bp.route("/block/new", methods=["GET", "POST"])
 def create_block():
     """새 블록 생성"""
+    user = current_user()
     if request.method == "POST":
+        is_public = (
+            request.form.get("is_public") == "1"
+            or request.form.get("isPublic") == "1"
+        )
+        if is_public and not getattr(user, "is_admin", False):
+            abort(403)
         block = Block(
             name=request.form.get("name"),
             description=request.form.get("description"),
             order=int(request.form.get("order", 0)),
+            user_id=None if is_public else user.id,
         )
+        subject = _resolve_subject_from_form(request.form.get("subject"), user, is_public)
+        if subject:
+            block.subject_id = subject.id
+            block.subject = subject.name
+        else:
+            block.subject_id = None
+            block.subject = None
         db.session.add(block)
         db.session.commit()
         flash("블록이 생성되었습니다.", "success")
@@ -110,9 +249,21 @@ def create_block():
 @manage_bp.route("/block/<int:block_id>/edit", methods=["GET", "POST"])
 def edit_block(block_id):
     """블록 수정"""
-    block = Block.query.get_or_404(block_id)
+    user = current_user()
+    block = get_scoped_by_id(Block, block_id, user, include_public=True)
+    if not block:
+        abort(404)
+    _ensure_editable(block, user)
     if request.method == "POST":
         block.name = request.form.get("name")
+        subject_value = request.form.get("subject")
+        subject = _resolve_subject_from_form(subject_value, user, block.user_id is None)
+        if subject:
+            block.subject_id = subject.id
+            block.subject = subject.name
+        else:
+            block.subject_id = None
+            block.subject = None
         block.description = request.form.get("description")
         block.order = int(request.form.get("order", 0))
         db.session.commit()
@@ -124,7 +275,15 @@ def edit_block(block_id):
 @manage_bp.route("/block/<int:block_id>/delete", methods=["POST"])
 def delete_block(block_id):
     """블록 삭제"""
-    block = Block.query.get_or_404(block_id)
+    user = current_user()
+    block = get_scoped_by_id(Block, block_id, user, include_public=True)
+    if not block:
+        abort(404)
+    _ensure_editable(block, user)
+    fallback_block = _get_or_create_unassigned_block(user, block.user_id is None)
+    Lecture.query.filter_by(block_id=block.id).update(
+        {"block_id": fallback_block.id, "folder_id": None}
+    )
     db.session.delete(block)
     db.session.commit()
     flash("블록이 삭제되었습니다.", "success")
@@ -137,21 +296,34 @@ def delete_block(block_id):
 @manage_bp.route("/block/<int:block_id>/lectures")
 def list_lectures(block_id):
     """블록 내 강의 목록"""
-    block = Block.query.get_or_404(block_id)
-    lectures = block.lectures.order_by(Lecture.order).all()
+    user = current_user()
+    block = get_scoped_by_id(Block, block_id, user, include_public=True)
+    if not block:
+        abort(404)
+    lectures = (
+        scope_query(Lecture.query, Lecture, user, include_public=True)
+        .filter(Lecture.block_id == block.id)
+        .order_by(Lecture.order)
+        .all()
+    )
     return render_template("manage/lectures.html", block=block, lectures=lectures)
 
 
 @manage_bp.route("/block/<int:block_id>/lecture/new", methods=["GET", "POST"])
 def create_lecture(block_id):
     """새 강의 생성"""
-    block = Block.query.get_or_404(block_id)
+    user = current_user()
+    block = get_scoped_by_id(Block, block_id, user, include_public=True)
+    if not block:
+        abort(404)
+    _ensure_editable(block, user)
     if request.method == "POST":
         lecture = Lecture(
             block_id=block_id,
             title=request.form.get("title"),
             professor=request.form.get("professor"),
             order=int(request.form.get("order", 1)),
+            user_id=block.user_id,
         )
         db.session.add(lecture)
         db.session.commit()
@@ -160,8 +332,9 @@ def create_lecture(block_id):
 
     # 다음 순서 번호 계산 (현재 최대값 + 1)
     max_order = (
-        db.session.query(db.func.max(Lecture.order))
-        .filter_by(block_id=block_id)
+        scope_query(Lecture.query, Lecture, user, include_public=True)
+        .filter(Lecture.block_id == block_id)
+        .with_entities(db.func.max(Lecture.order))
         .scalar()
     )
     next_order = (max_order or 0) + 1
@@ -174,7 +347,11 @@ def create_lecture(block_id):
 @manage_bp.route("/lecture/<int:lecture_id>/edit", methods=["GET", "POST"])
 def edit_lecture(lecture_id):
     """강의 수정"""
-    lecture = Lecture.query.get_or_404(lecture_id)
+    user = current_user()
+    lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
+    if not lecture:
+        abort(404)
+    _ensure_editable(lecture, user)
     if request.method == "POST":
         lecture.title = request.form.get("title")
         lecture.professor = request.form.get("professor")
@@ -190,19 +367,25 @@ def edit_lecture(lecture_id):
 @manage_bp.route("/lecture/<int:lecture_id>/upload-note", methods=["POST"])
 def upload_lecture_note(lecture_id):
     """강의 노트 PDF 업로드 및 인덱싱"""
-    lecture = Lecture.query.get_or_404(lecture_id)
+    user = current_user()
+    lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
+    if not lecture:
+        abort(404)
+    _ensure_editable(lecture, user)
 
     if "pdf_file" not in request.files:
-        return jsonify({"success": False, "error": "PDF 파일이 필요합니다."}), 400
+        return _json_error("PDF 파일이 필요합니다.", code="PDF_REQUIRED", status=400)
 
     file = request.files["pdf_file"]
     if file.filename == "":
-        return jsonify({"success": False, "error": "파일명이 없습니다."}), 400
+        return _json_error("파일명이 없습니다.", code="FILE_NAME_REQUIRED", status=400)
 
     if not file.filename.lower().endswith(".pdf"):
-        return jsonify(
-            {"success": False, "error": "PDF 파일만 업로드 가능합니다."}
-        ), 400
+        return _json_error(
+            "PDF 파일만 업로드 가능합니다.",
+            code="INVALID_FILE_TYPE",
+            status=400,
+        )
 
     try:
         upload_folder = _resolve_upload_folder()
@@ -231,24 +414,41 @@ def upload_lecture_note(lecture_id):
         from app.services.lecture_indexer import index_material
 
         index_result = index_material(material)
+        if not _should_keep_pdf_after_index():
+            _remove_material_file(stored_path)
 
-        return jsonify(
-            {
-                "success": True,
+        material_payload = {
+            "materialId": material.id,
+            "chunks": index_result.get("chunks", 0),
+            "pages": index_result.get("pages", 0),
+        }
+        return _json_success(
+            data=material_payload,
+            code="LECTURE_NOTE_UPLOADED",
+            message="Lecture note uploaded.",
+            legacy={
                 "material_id": material.id,
-                "chunks": index_result.get("chunks", 0),
-                "pages": index_result.get("pages", 0),
-            }
+                "chunks": material_payload["chunks"],
+                "pages": material_payload["pages"],
+            },
         )
     except Exception as e:
         current_app.logger.exception("Lecture note indexing failed")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return _json_error(
+            str(e),
+            code="LECTURE_NOTE_INDEX_FAILED",
+            status=500,
+        )
 
 
 @manage_bp.route("/lecture/<int:lecture_id>/note-status")
 def lecture_note_status(lecture_id):
     """강의 노트 업로드 상태 조회"""
-    lecture = Lecture.query.get_or_404(lecture_id)
+    user = current_user()
+    lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
+    if not lecture:
+        abort(404)
+    _ensure_editable(lecture, user)
     materials = (
         LectureMaterial.query.filter_by(lecture_id=lecture.id)
         .order_by(LectureMaterial.uploaded_at.desc())
@@ -273,7 +473,12 @@ def lecture_note_status(lecture_id):
             }
         )
 
-    return jsonify({"success": True, "materials": payload})
+    return _json_success(
+        data={"materials": payload},
+        code="LECTURE_NOTE_STATUS_OK",
+        message="Lecture note status fetched.",
+        legacy={"materials": payload},
+    )
 
 
 @manage_bp.route(
@@ -281,7 +486,11 @@ def lecture_note_status(lecture_id):
 )
 def delete_lecture_note(lecture_id, material_id):
     """Delete an uploaded lecture note and related chunks/FTS rows."""
-    lecture = Lecture.query.get_or_404(lecture_id)
+    user = current_user()
+    lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
+    if not lecture:
+        abort(404)
+    _ensure_editable(lecture, user)
     material = LectureMaterial.query.filter_by(
         id=material_id, lecture_id=lecture.id
     ).first_or_404()
@@ -291,7 +500,7 @@ def delete_lecture_note(lecture_id, material_id):
             row.id
             for row in LectureChunk.query.filter_by(material_id=material.id).all()
         ]
-        if chunk_ids:
+        if chunk_ids and not is_postgres():
             placeholders = ", ".join([f":id_{idx}" for idx in range(len(chunk_ids))])
             params = {f"id_{idx}": cid for idx, cid in enumerate(chunk_ids)}
             try:
@@ -316,29 +525,42 @@ def delete_lecture_note(lecture_id, material_id):
 
         db.session.delete(material)
         db.session.commit()
-        return jsonify({"success": True})
+        return _json_success(
+            data={"id": material_id},
+            code="LECTURE_NOTE_DELETED",
+            message="Lecture note deleted.",
+        )
     except Exception as e:
         db.session.rollback()
         current_app.logger.exception("Failed to delete lecture note %s", material.id)
-        return jsonify({"success": False, "error": str(e)}), 500
+        return _json_error(
+            str(e),
+            code="LECTURE_NOTE_DELETE_FAILED",
+            status=500,
+        )
 
 
 @manage_bp.route("/lecture/<int:lecture_id>")
 def view_lecture(lecture_id):
     """강의 상세보기 - 분류된 문제 목록"""
-    lecture = Lecture.query.get_or_404(lecture_id)
+    user = current_user()
+    lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
+    if not lecture:
+        abort(404)
 
     # 해당 강의에 분류된 문제들 가져오기
     from app.models import Question
 
     questions = (
-        Question.query.filter_by(lecture_id=lecture_id)
+        scope_query(Question.query, Question, user).filter(
+            Question.lecture_id == lecture_id
+        )
         .order_by(Question.question_number)
         .all()
     )
 
     # 모든 블록과 강의 정보 가져오기 (이동 모달용)
-    all_blocks = Block.query.order_by(Block.order).all()
+    all_blocks = scope_model(Block, user, include_public=True).order_by(*block_ordering()).all()
 
     return render_template(
         "manage/lecture_detail.html",
@@ -352,7 +574,11 @@ def view_lecture(lecture_id):
 @manage_bp.route("/lecture/<int:lecture_id>/delete", methods=["POST"])
 def delete_lecture(lecture_id):
     """강의 삭제"""
-    lecture = Lecture.query.get_or_404(lecture_id)
+    user = current_user()
+    lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
+    if not lecture:
+        abort(404)
+    _ensure_editable(lecture, user)
     block_id = lecture.block_id
     db.session.delete(lecture)
     db.session.commit()
@@ -366,37 +592,19 @@ def delete_lecture(lecture_id):
 @manage_bp.route("/exams")
 def list_exams():
     """기출 시험 관리 목록"""
-    exams = PreviousExam.query.order_by(PreviousExam.exam_date.desc()).all()
+    user = current_user()
+    exams = scope_model(PreviousExam, user).order_by(PreviousExam.exam_date.desc()).all()
     return render_template("manage/exams.html", exams=exams)
-
-
-@manage_bp.route("/exam/new", methods=["GET", "POST"])
-def create_exam():
-    """새 기출 시험 생성"""
-    if request.method == "POST":
-        exam = PreviousExam(
-            title=request.form.get("title"),
-            subject=request.form.get("subject"),
-            year=int(request.form.get("year")) if request.form.get("year") else None,
-            term=request.form.get("term"),
-            exam_date=datetime.strptime(
-                request.form.get("exam_date"), "%Y-%m-%d"
-            ).date()
-            if request.form.get("exam_date")
-            else None,
-            description=request.form.get("description"),
-        )
-        db.session.add(exam)
-        db.session.commit()
-        flash("기출 시험이 생성되었습니다.", "success")
-        return redirect(url_for("manage.list_exams"))
-    return render_template("manage/exam_form.html", exam=None)
 
 
 @manage_bp.route("/exam/<int:exam_id>/edit", methods=["GET", "POST"])
 def edit_exam(exam_id):
     """기출 시험 수정"""
-    exam = PreviousExam.query.get_or_404(exam_id)
+    user = current_user()
+    exam = get_scoped_by_id(PreviousExam, exam_id, user)
+    if not exam:
+        abort(404)
+    _ensure_editable(exam, user)
     if request.method == "POST":
         exam.title = request.form.get("title")
         exam.subject = request.form.get("subject")
@@ -417,7 +625,11 @@ def edit_exam(exam_id):
 @manage_bp.route("/exam/<int:exam_id>/delete", methods=["POST"])
 def delete_exam(exam_id):
     """기출 시험 삭제"""
-    exam = PreviousExam.query.get_or_404(exam_id)
+    user = current_user()
+    exam = get_scoped_by_id(PreviousExam, exam_id, user)
+    if not exam:
+        abort(404)
+    _ensure_editable(exam, user)
     delete_exam_with_assets(exam)
     flash("기출 시험이 삭제되었습니다.", "success")
     return redirect(url_for("manage.list_exams"))
@@ -429,42 +641,67 @@ def delete_exam(exam_id):
 @manage_bp.route("/eval")
 def eval_labeler():
     """Evaluation labeling UI (BM25 top-5 candidates)."""
+    from app.models import EvaluationLabel
+    from app.services import retrieval
+
+    user = current_user()
     question_id = request.args.get("question_id", type=int)
     exam_id_filter = request.args.get("exam_id", type=int)
 
     question = None
     if question_id:
-        question = Question.query.get(question_id)
+        question = get_scoped_by_id(Question, question_id, user)
     if not question:
-        query = Question.query.outerjoin(
-            EvaluationLabel, EvaluationLabel.question_id == Question.id
-        ).filter(EvaluationLabel.id.is_(None))
+        query = (
+            scope_query(Question.query, Question, user)
+            .outerjoin(EvaluationLabel, EvaluationLabel.question_id == Question.id)
+            .filter(EvaluationLabel.id.is_(None))
+        )
         if exam_id_filter:
             query = query.filter(Question.exam_id == exam_id_filter)
         question = query.order_by(Question.exam_id, Question.question_number).first()
 
     label = None
     candidates = []
-    retrieval_mode = current_app.config.get("RETRIEVAL_MODE", "bm25")
+    retrieval_mode = (current_app.config.get("RETRIEVAL_MODE", "bm25") or "bm25").strip().lower()
+    if retrieval_mode != "bm25":
+        retrieval_mode = "bm25"
 
     if question:
         label = EvaluationLabel.query.filter_by(question_id=question.id).first()
-        if retrieval_mode == "bm25":
-            question_text = _build_question_text(question)
-            chunks = retrieval.search_chunks_bm25(
-                question_text,
-                top_n=80,
-                question_id=question.id,
-            )
-            candidates = retrieval.aggregate_candidates(
-                chunks,
-                top_k_lectures=5,
-                evidence_per_lecture=2,
-            )
+        question_text = _build_question_text(question)
+        chunks = retrieval.search_chunks_bm25(
+            question_text,
+            top_n=80,
+            question_id=question.id,
+        )
+        from config import get_config as _get_config
+        _cfg = _get_config().experiment
+        candidates = retrieval.aggregate_candidates(
+            chunks,
+            top_k_lectures=5,
+            evidence_per_lecture=2,
+            agg_mode=_cfg.lecture_agg_mode,
+            topm=_cfg.lecture_topm,
+            chunk_cap=_cfg.lecture_chunk_cap,
+        )
 
-    exams = PreviousExam.query.order_by(PreviousExam.created_at.desc()).all()
-    total_questions = Question.query.count()
-    labeled_count = EvaluationLabel.query.count()
+    exams = scope_model(PreviousExam, user).order_by(
+        PreviousExam.created_at.desc()
+    ).all()
+    total_questions = scope_query(Question.query, Question, user).count()
+    labeled_count = (
+        EvaluationLabel.query.join(
+            Question, EvaluationLabel.question_id == Question.id
+        )
+        .filter(
+            Question.id.in_(
+                scope_query(Question.query, Question, user)
+                .with_entities(Question.id)
+            )
+        )
+        .count()
+    )
 
     return render_template(
         "manage/eval_label.html",
@@ -482,12 +719,17 @@ def eval_labeler():
 @manage_bp.route("/eval/label", methods=["POST"])
 def save_eval_label():
     """Save evaluation label and move to next."""
+    from app.models import EvaluationLabel
+
+    user = current_user()
     question_id = request.form.get("question_id", type=int)
     if not question_id:
         flash("question_id가 필요합니다.", "error")
         return redirect(url_for("manage.eval_labeler"))
 
-    question = Question.query.get_or_404(question_id)
+    question = get_scoped_by_id(Question, question_id, user)
+    if not question:
+        abort(404)
     raw_lecture_id = (request.form.get("gold_lecture_id") or "").strip().lower()
     if raw_lecture_id in {"", "none", "unknown"}:
         gold_lecture_id = None
@@ -543,22 +785,30 @@ def eval_previous():
 @manage_bp.route("/eval/lecture-search")
 def search_lectures():
     """Search lectures for manual labeling."""
+    user = current_user()
     query = (request.args.get("q") or "").strip()
     if not query:
-        return jsonify({"items": []})
+        return _json_success(
+            data={"items": []},
+            code="LECTURE_SEARCH_EMPTY",
+            message="No query provided.",
+            legacy={"items": []},
+        )
 
     q = f"%{query}%"
     lecture_query = (
-        Lecture.query.join(Block)
+        scope_query(Lecture.query, Lecture, user, include_public=True)
+        .join(Block)
         .filter(or_(Lecture.title.ilike(q), Block.name.ilike(q)))
-        .order_by(Block.order, Lecture.order)
+        .order_by(*block_lecture_ordering())
     )
     try:
         lecture_id = int(query)
         lecture_query = lecture_query.union(
-            Lecture.query.join(Block)
+            scope_query(Lecture.query, Lecture, user, include_public=True)
+            .join(Block)
             .filter(Lecture.id == lecture_id)
-            .order_by(Block.order, Lecture.order)
+            .order_by(*block_lecture_ordering())
         )
     except ValueError:
         pass
@@ -573,7 +823,12 @@ def search_lectures():
         }
         for lecture in lectures
     ]
-    return jsonify({"items": items})
+    return _json_success(
+        data={"items": items},
+        code="LECTURE_SEARCH_OK",
+        message="Lecture search completed.",
+        legacy={"items": items},
+    )
 
 
 # ===== 문제 관리 =====
@@ -582,7 +837,11 @@ def search_lectures():
 @manage_bp.route("/exam/<int:exam_id>/question/new", methods=["GET", "POST"])
 def create_question(exam_id):
     """새 문제 생성"""
-    exam = PreviousExam.query.get_or_404(exam_id)
+    user = current_user()
+    exam = get_scoped_by_id(PreviousExam, exam_id, user)
+    if not exam:
+        abort(404)
+    _ensure_editable(exam, user)
     if request.method == "POST":
         # 이미지 업로드 처리
         image_path = None
@@ -604,6 +863,7 @@ def create_question(exam_id):
 
         question = Question(
             exam_id=exam_id,
+            user_id=exam.user_id,
             question_number=int(request.form.get("question_number", 1)),
             content=request.form.get("content"),
             image_path=image_path,
@@ -626,6 +886,7 @@ def create_question(exam_id):
 @manage_bp.route("/upload-pdf", methods=["GET", "POST"])
 def upload_pdf():
     """PDF 파일 업로드 및 파싱"""
+    user = current_user()
     if request.method == "POST":
         # 필수 필드 확인
         if "pdf_file" not in request.files:
@@ -646,6 +907,12 @@ def upload_pdf():
             flash("시험 이름을 입력해주세요.", "error")
             return redirect(request.url)
 
+        subject_value = (request.form.get("subject") or "").strip()
+        if subject_value:
+            _resolve_subject_from_form(subject_value, user, is_public=False)
+
+        tmp_path = None
+        crop_dir = None
         try:
             parser_mode = current_app.config.get("PDF_PARSER_MODE", "legacy")
             if parser_mode == "experimental":
@@ -654,10 +921,10 @@ def upload_pdf():
                 from app.services.pdf_parser import parse_pdf_to_questions
 
             # PDF 파일 임시 저장
-            tmp_path = None
-            crop_dir = None
             crop_question_count = 0
             crop_image_count = 0
+            crop_question_images = {}
+            crop_is_reliable = False
             import tempfile
 
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -681,12 +948,13 @@ def upload_pdf():
             # 시험 레코드 생성
             exam = PreviousExam(
                 title=title,
-                subject=request.form.get("subject"),
+                subject=subject_value or None,
                 year=int(request.form.get("year"))
                 if request.form.get("year")
                 else None,
                 term=request.form.get("term"),
                 source_file=secure_filename(file.filename),
+                user_id=user.id,
             )
             db.session.add(exam)
             db.session.flush()
@@ -697,62 +965,31 @@ def upload_pdf():
             )
 
             crop_dir = get_exam_crop_dir(exam.id, upload_folder)
-            crop_result = crop_pdf_to_questions(
-                tmp_path, exam.id, upload_folder=upload_folder
-            )
-            crop_meta = crop_result.get("meta") or {}
-            crop_question_count = len(crop_meta.get("questions", []))
-            crop_image_count = len(crop_result.get("question_images", {}))
-
-            question_count = 0
-            choice_count = 0
-
-            for q_data in questions_data:
-                # 문제 유형 결정
-                answer_count = len(q_data.get("answer_options", []))
-                has_options = len(q_data.get("options", [])) > 0
-
-                if not has_options:
-                    q_type = Question.TYPE_SHORT_ANSWER
-                elif answer_count > 1:
-                    q_type = Question.TYPE_MULTIPLE_RESPONSE
-                else:
-                    q_type = Question.TYPE_MULTIPLE_CHOICE
-
-                # Question 생성
-                question = Question(
-                    exam_id=exam.id,
-                    question_number=q_data["question_number"],
-                    content=q_data.get("content", ""),
-                    image_path=q_data.get("image_path"),
-                    q_type=q_type,
-                    answer=",".join(map(str, q_data.get("answer_options", []))),
-                    correct_answer_text=q_data.get("answer_text")
-                    if q_type == Question.TYPE_SHORT_ANSWER
-                    else None,
-                    explanation=q_data.get("answer_text")
-                    if q_type != Question.TYPE_SHORT_ANSWER
-                    else None,
-                    is_classified=False,
-                    lecture_id=None,
+            try:
+                crop_result = crop_pdf_to_questions(
+                    tmp_path, exam.id, upload_folder=upload_folder
                 )
-                db.session.add(question)
-                db.session.flush()
+                crop_meta = crop_result.get("meta") or {}
+                crop_question_count = len(crop_meta.get("questions", []))
+                crop_image_count = len(crop_result.get("question_images", {}))
+                crop_question_images = crop_result.get("question_images", {}) or {}
+                duplicate_qnums = crop_meta.get("duplicate_qnums") or []
+                crop_is_reliable = (
+                    crop_question_count == len(questions_data)
+                    and crop_image_count == len(questions_data)
+                    and not duplicate_qnums
+                )
+            except RuntimeError as exc:
+                current_app.logger.warning("PDF crop skipped: %s", exc)
+                flash(f"PDF crop 건너뜀: {exc}", "warning")
 
-                # Choice 생성
-                for opt in q_data.get("options", []):
-                    if opt.get("content") or opt.get("image_path"):
-                        choice = Choice(
-                            question_id=question.id,
-                            choice_number=opt["number"],
-                            content=opt.get("content", ""),
-                            image_path=opt.get("image_path"),
-                            is_correct=opt.get("is_correct", False),
-                        )
-                        db.session.add(choice)
-                        choice_count += 1
-
-                question_count += 1
+            question_count, choice_count = save_parsed_questions(
+                exam_id=exam.id,
+                user_id=user.id,
+                questions_data=questions_data,
+                crop_question_images=crop_question_images,
+                crop_is_reliable=crop_is_reliable,
+            )
 
             db.session.commit()
             flash(
@@ -760,7 +997,11 @@ def upload_pdf():
                 "success",
             )
             if crop_image_count:
-                flash(f"Original images created: {crop_image_count}", "success")
+                status = "enabled" if crop_is_reliable else "fallback-to-parser"
+                flash(
+                    f"Original images created: {crop_image_count} ({status})",
+                    "success" if crop_is_reliable else "warning",
+                )
             if crop_question_count and crop_question_count != question_count:
                 flash(
                     "Crop count differs from parsed question count. Verify the exam.",
@@ -768,6 +1009,12 @@ def upload_pdf():
                 )
             return redirect(url_for("manage.list_exams"))
 
+        except ValueError as e:
+            db.session.rollback()
+            if crop_dir:
+                shutil.rmtree(crop_dir, ignore_errors=True)
+            flash(str(e), "error")
+            return redirect(request.url)
         except ImportError as e:
             db.session.rollback()
             if crop_dir:
@@ -794,7 +1041,19 @@ def upload_pdf():
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
-    return render_template("manage/pdf_upload.html")
+    subjects = (
+        scope_model(Subject, user, include_public=True)
+        .order_by(Subject.order, Subject.name)
+        .all()
+    )
+    subject_values = [subject.name for subject in subjects if subject.name]
+    current_year = datetime.utcnow().year
+    year_options = list(range(current_year + 1, 1999, -1))
+    return render_template(
+        "manage/pdf_upload.html",
+        subjects=subject_values,
+        year_options=year_options,
+    )
 
 
 # ===== 문제 수정 =====
@@ -805,7 +1064,11 @@ def edit_question(question_id):
     """문제 수정"""
     from app.models import Question, Choice
 
-    question = Question.query.get_or_404(question_id)
+    user = current_user()
+    question = get_scoped_by_id(Question, question_id, user)
+    if not question:
+        abort(404)
+    _ensure_editable(question, user)
     exam = question.exam
     from_practice = request.args.get("from_practice", "0") == "1"
 
@@ -852,7 +1115,9 @@ def edit_question(question_id):
         if new_lecture_id:
             from app.models import Lecture
 
-            new_lecture = Lecture.query.get(int(new_lecture_id))
+            new_lecture = get_scoped_by_id(
+                Lecture, int(new_lecture_id), user, include_public=True
+            )
             if new_lecture:
                 question.lecture_id = new_lecture.id
 
@@ -942,7 +1207,7 @@ def edit_question(question_id):
             )
         )
 
-    blocks = Block.query.order_by(Block.order).all()
+    blocks = scope_model(Block, user, include_public=True).order_by(*block_ordering()).all()
     original_image_url = None
     upload_folder = current_app.config.get("UPLOAD_FOLDER") or os.path.join(
         current_app.static_folder, "uploads"
@@ -976,30 +1241,61 @@ def move_questions():
     """선택한 문제 이동"""
     from app.models import Question
 
-    data = request.json
+    user, auth_error = _require_user_json()
+    if auth_error is not None:
+        return auth_error
+
+    data = request.get_json(silent=True) or {}
     question_ids = data.get("question_ids", [])
     target_lecture_id = data.get("target_lecture_id")
 
     if not question_ids:
-        return {"success": False, "error": "선택된 문제가 없습니다."}, 400
+        return _json_error(
+            "선택된 문제가 없습니다.",
+            code="QUESTION_IDS_REQUIRED",
+            status=400,
+        )
 
     if not target_lecture_id:
-        return {"success": False, "error": "이동할 강의가 지정되지 않았습니다."}, 400
+        return _json_error(
+            "이동할 강의가 지정되지 않았습니다.",
+            code="TARGET_LECTURE_REQUIRED",
+            status=400,
+        )
+
+    lecture = get_scoped_by_id(
+        Lecture, int(target_lecture_id), user, include_public=True
+    )
+    if not lecture:
+        return _json_error(
+            "강의를 찾을 수 없습니다.",
+            code="LECTURE_NOT_FOUND",
+            status=404,
+        )
 
     try:
-        Question.query.filter(Question.id.in_(question_ids)).update(
-            {
-                "lecture_id": target_lecture_id,
-                "is_classified": True,
-                "classification_status": "manual",
-            },
-            synchronize_session=False,
+        updated_count = (
+            scope_query(Question.query, Question, user)
+            .filter(Question.id.in_(question_ids))
+            .update(
+                {
+                    "lecture_id": lecture.id,
+                    "is_classified": True,
+                    "classification_status": "manual",
+                },
+                synchronize_session=False,
+            )
         )
         db.session.commit()
-        return {"success": True, "moved_count": len(question_ids)}
+        return _json_success(
+            data={"movedCount": updated_count},
+            code="QUESTIONS_MOVED",
+            message="Questions moved.",
+            legacy={"moved_count": updated_count},
+        )
     except Exception as e:
         db.session.rollback()
-        return {"success": False, "error": str(e)}, 500
+        return _json_error(str(e), code="QUESTION_MOVE_FAILED", status=500)
 
 
 @manage_bp.route("/questions/reset", methods=["POST"])
@@ -1007,26 +1303,43 @@ def reset_questions():
     """선택한 문제 분류 초기화 (미분류로)"""
     from app.models import Question
 
-    data = request.json
+    user, auth_error = _require_user_json()
+    if auth_error is not None:
+        return auth_error
+
+    data = request.get_json(silent=True) or {}
     question_ids = data.get("question_ids", [])
 
     if not question_ids:
-        return {"success": False, "error": "선택된 문제가 없습니다."}, 400
+        return _json_error(
+            "선택된 문제가 없습니다.",
+            code="QUESTION_IDS_REQUIRED",
+            status=400,
+        )
 
     try:
-        Question.query.filter(Question.id.in_(question_ids)).update(
-            {
-                "lecture_id": None,
-                "is_classified": False,
-                "classification_status": "manual",
-            },
-            synchronize_session=False,
+        updated_count = (
+            scope_query(Question.query, Question, user)
+            .filter(Question.id.in_(question_ids))
+            .update(
+                {
+                    "lecture_id": None,
+                    "is_classified": False,
+                    "classification_status": "manual",
+                },
+                synchronize_session=False,
+            )
         )
         db.session.commit()
-        return {"success": True, "reset_count": len(question_ids)}
+        return _json_success(
+            data={"resetCount": updated_count},
+            code="QUESTIONS_RESET",
+            message="Questions reset.",
+            legacy={"reset_count": updated_count},
+        )
     except Exception as e:
         db.session.rollback()
-        return {"success": False, "error": str(e)}, 500
+        return _json_error(str(e), code="QUESTION_RESET_FAILED", status=500)
 
 
 @manage_bp.route("/upload-image", methods=["POST"])
@@ -1034,17 +1347,25 @@ def upload_image():
     """클립보드 이미지 업로드"""
     import uuid
 
+    _user, auth_error = _require_user_json()
+    if auth_error is not None:
+        return auth_error
+
     if "image" not in request.files:
-        return {"success": False, "error": "이미지가 없습니다."}, 400
+        return _json_error("이미지가 없습니다.", code="IMAGE_REQUIRED", status=400)
 
     file = request.files["image"]
     if file.filename == "":
-        return {"success": False, "error": "파일명이 없습니다."}, 400
+        return _json_error("파일명이 없습니다.", code="FILE_NAME_REQUIRED", status=400)
 
     # 고유 파일명 생성
     ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "png"
     if ext not in ["png", "jpg", "jpeg", "gif", "webp"]:
-        return {"success": False, "error": "허용되지 않는 이미지 형식입니다."}, 400
+        return _json_error(
+            "허용되지 않는 이미지 형식입니다.",
+            code="INVALID_IMAGE_TYPE",
+            status=400,
+        )
 
     filename = f"{uuid.uuid4().hex}.{ext}"
 
@@ -1061,6 +1382,11 @@ def upload_image():
         relative_folder = os.path.relpath(upload_folder, current_app.static_folder)
         relative_folder = relative_folder.replace("\\", "/").strip("/")
         image_url = url_for("static", filename=f"{relative_folder}/{filename}")
-        return {"success": True, "url": image_url, "filename": filename}
+        return _json_success(
+            data={"url": image_url, "filename": filename},
+            code="IMAGE_UPLOADED",
+            message="Image uploaded.",
+            legacy={"url": image_url, "filename": filename},
+        )
     except Exception as e:
-        return {"success": False, "error": str(e)}, 500
+        return _json_error(str(e), code="IMAGE_UPLOAD_FAILED", status=500)
