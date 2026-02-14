@@ -1,129 +1,149 @@
 # Exam Manager
 
-Exam PDF parsing, classification, practice, and review web app.
+Exam Manager는 시험지 PDF를 업로드해 문제를 생성하고, 강의 체계에 분류하고,
+연습/복습까지 이어지는 학습 워크플로를 제공하는 웹 애플리케이션입니다.
 
-## Recommended Run Modes
-- Local development (fast iteration): Docker DB + local backend/frontend
-- Docker full stack (deployment-like verification)
+- Backend: Flask + SQLAlchemy
+- Frontend: Next.js (App Router)
+- Database: PostgreSQL (runtime은 Postgres-only)
 
-## Quick Start (Local Development)
-1. Create env files
+## 현재 구현된 기능
+
+### 콘텐츠 관리
+- 과목(Subject) / 블록(Block) / 강의(Lecture) 관리
+- 시험지(Exam) 관리 및 PDF 업로드 기반 문제 생성
+- 문제/선지 수정, 이미지 업로드, 강의노트 PDF 인덱싱
+
+### 분류
+- 미분류 큐 조회/검색/필터
+- 수동 분류, 일괄 분류/이동/초기화
+- AI 분류 배치 작업(시작/상태/결과/적용/진단)
+
+### 학습/복습
+- 강의 기반 연습(객관식/복수정답/주관식)
+- 시험 기반 연습 결과 조회
+- 세션 히스토리, 약점 분석, 복습 노트/이력 대시보드
+
+### 인증/공개 템플릿
+- 회원가입/로그인/로그아웃/JWT 쿠키 인증
+- 공개 커리큘럼 템플릿 조회/복제
+
+### 현재 제한사항
+- Next 기준 세션 생성 API는 일부 경로에서 fallback(sessionStorage) 동작을 사용합니다.
+- `/learn/recommended` 등 일부 화면은 안내용(준비 중)입니다.
+- Legacy Flask 템플릿 화면과 Next 화면이 병행 운영 중입니다.
+
+## 빠른 시작 (로컬 개발)
+
+1) 환경 파일 생성
+
 ```bash
 cp .env.example .env
 cp .env.docker.example .env.docker
 cp next_app/.env.local.example next_app/.env.local
 ```
 
-2. Configure local DB connection in `.env` (if needed)
+2) 의존성 설치
+
 ```bash
-# optional override (when unset, scripts/dev-backend derives from .env.docker POSTGRES_* keys)
-DATABASE_URL=postgresql+psycopg://exam:<POSTGRES_PASSWORD>@127.0.0.1:5432/exam_manager
+python -m pip install -r requirements.txt
+cd next_app && npm install
 ```
 
-3. Start DB container + initialize schema/FTS
+3) DB 컨테이너 기동 + 스키마/FTS 초기화
+
 ```bash
 ./scripts/dev-db up -d db
 ./scripts/dev-init-db
 ```
 
-4. Run backend/frontend in separate terminals
+4) 백엔드/프론트엔드 실행 (각각 별도 터미널)
+
 ```bash
 ./scripts/dev-backend
 ./scripts/dev-frontend
 ```
 
-5. Open
+5) 접속
+
 - Web: `http://localhost:4000`
 - API health: `http://localhost:5000/health`
 
-## Local Dev Commands
-```bash
-./scripts/dev-db ps
-./scripts/dev-db logs -f db
-./scripts/dev-db down
-./scripts/dev-db down -v
+6) 최초 계정 생성
 
-# isolated dev DB (separate volume) when needed
-DEV_DB_COMPOSE_FILE=docker-compose.local.yml ./scripts/dev-db up -d db
-```
+- `http://localhost:4000/register` 에서 계정을 만든 뒤 로그인합니다.
 
-## Docker Full Stack (Production-like)
-1. Create env file
+## Docker 전체 스택 실행
+
+1) `.env.docker` 준비
+
 ```bash
 cp .env.docker.example .env.docker
 ```
 
-2. Set required secrets in `.env.docker`
+2) 필수 값 설정
+
 - `SECRET_KEY`
 - `JWT_SECRET_KEY`
 - `POSTGRES_PASSWORD`
 
-3. Start
+3) 컨테이너 실행
+
 ```bash
 ./scripts/dc up -d --build
 ```
 
-4. First-time initialization
+4) 초기화
+
 ```bash
 ./scripts/dc exec api sh -lc 'python scripts/init_db.py --config production --db "$DATABASE_URL"'
+./scripts/dc exec api sh -lc 'python scripts/run_postgres_migrations.py --db "$DATABASE_URL"'
 ./scripts/dc exec api sh -lc 'python scripts/init_fts.py --db "$DATABASE_URL" --sync'
 ./scripts/dc exec db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"'
 ```
 
-5. Common commands
+## 테스트
+
 ```bash
-./scripts/dc up -d
-./scripts/dc down
-./scripts/dc ps
-./scripts/dc logs -f api web
-```
-
-## After Deploying PDF Crop Fixes
-If you updated parser/crop logic, run these in Docker once:
-```bash
-# rebuild + restart api
-./scripts/dc up -d --build api
-
-# backfill existing question.image_path to exam_crops paths
-./scripts/dc exec api sh -lc 'python scripts/backfill_crop_image_paths.py --config production --apply'
-```
-
-## Local PDF Lab (Backend-only)
-빠른 파서 실험 루프:
-```bash
-python scripts/pdf_lab.py --pdf parse_lab/pdfs/sample.pdf --mode experimental --watch
-```
-
-산출물은 `parse_lab/output/lab_runs/` 아래에 run별로 저장됩니다.
-
-## Run Tests
-```bash
-# Postgres test run (recommended, auto-creates *_test DB if needed)
 ./scripts/dev-test-backend
+```
 
-# Optional: explicit URI
+필요 시 직접 실행:
+
+```bash
 TEST_DATABASE_URL=postgresql+psycopg://exam:<POSTGRES_PASSWORD>@127.0.0.1:5432/exam_manager_test \
 PYTHONPATH=. python -m pytest -q
 ```
 
-## Legacy: one-time Historical Import (Optional)
-Postgres is the only supported runtime DB.  
-If you still have old file-based data, run the one-time legacy import utility under `scripts/legacy/`, then resync FTS:
+## 자주 쓰는 명령
+
 ```bash
-./scripts/dc exec -T api sh -lc 'python scripts/init_fts.py --db "$DATABASE_URL" --sync'
+# DB 상태
+./scripts/dev-db ps
+./scripts/dev-db logs -f db
+
+# 종료/정리
+./scripts/dev-db down
+./scripts/dev-db down -v
+
+# 도커 스택 로그
+./scripts/dc logs -f api web
 ```
 
-## Project Layout
-- `app/`: Flask backend
-- `next_app/`: Next.js frontend
-- `docker/`: Dockerfiles
-- `scripts/`: operation and migration scripts
-- `docs/`: setup and architecture docs
-- `migrations/`: schema migration SQL
+## 문서
 
-## Docs
-- `docs/README.md`
-- `docs/setup/local-dev.md`
-- `docs/setup/docker.md`
-- `docs/setup/env.md`
-- `docs/architecture/overview.md`
+- 문서 인덱스: `docs/README.md`
+- 기능 기준 정리: `docs/features.md`
+- 아키텍처 개요: `docs/architecture/overview.md`
+- 라우트/기능 매핑: `docs/architecture/map.md`
+- API 가이드: `docs/api.md`
+- API(개발): `docs/api-dev.md`
+- API(운영): `docs/api-ops.md`
+
+## 디렉터리 구조
+
+- `app/`: Flask 백엔드
+- `next_app/`: Next.js 프론트엔드
+- `scripts/`: 운영/개발 스크립트
+- `migrations/`: SQL 마이그레이션
+- `docs/`: 프로젝트 문서
