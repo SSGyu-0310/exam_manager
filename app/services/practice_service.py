@@ -303,17 +303,21 @@ def build_legacy_results(questions, items, include_content=False):
 
 @transactional
 def grade_practice_submission(lecture_id, answers_v1, questions=None, user_id=None):
-    from app.services.transaction import transaction
-
     if questions is None:
         questions = get_lecture_questions_ordered(lecture_id, user_id=user_id) or []
+    question_order = [q.id for q in questions]
+    lecture_scope_ids = [lecture_id]
+
     # Each submit creates a new session; repeated submissions are kept for history.
     session = PracticeSession(
         lecture_id=lecture_id,
         user_id=user_id,
-        lecture_ids_json=json.dumps([lecture_id], ensure_ascii=True),
+        lecture_ids_json=json.dumps(lecture_scope_ids, ensure_ascii=True),
         mode="practice",
-        question_order=json.dumps([q.id for q in questions], ensure_ascii=True),
+        question_order=json.dumps(question_order, ensure_ascii=True),
+        current_question_index=0,
+        total_time_spent=0,
+        submission_count=1,
     )
     db.session.add(session)
     summary, items, _counts = evaluate_practice_answers(questions, answers_v1 or {})
@@ -340,16 +344,80 @@ def grade_practice_submission(lecture_id, answers_v1, questions=None, user_id=No
 
 @transactional
 def grade_exam_submission(exam_id, answers_v1, questions=None, user_id=None):
-    from app.services.transaction import transaction
-
     if questions is None:
         questions = get_exam_questions_ordered(exam_id, user_id=user_id) or []
+    question_order = [q.id for q in questions]
+    exam_scope_ids = [exam_id]
+
     session = PracticeSession(
         lecture_id=None,
         user_id=user_id,
-        lecture_ids_json=None,
+        lecture_ids_json=json.dumps(exam_scope_ids, ensure_ascii=True),
         mode="practice",
-        question_order=json.dumps([q.id for q in questions], ensure_ascii=True),
+        question_order=json.dumps(question_order, ensure_ascii=True),
+        current_question_index=0,
+        total_time_spent=0,
+        submission_count=1,
+    )
+    db.session.add(session)
+    summary, items, _counts = evaluate_practice_answers(questions, answers_v1 or {})
+
+    for item in items:
+        if not item.get("isAnswered"):
+            continue
+        answer_payload = json.dumps(
+            {"type": item.get("type"), "value": item.get("userAnswer")},
+            ensure_ascii=True,
+        )
+        answer = PracticeAnswer(
+            session=session,
+            question_id=item.get("questionId"),
+            answer_payload=answer_payload,
+            is_correct=item.get("isCorrect"),
+            answered_at=datetime.utcnow(),
+        )
+        db.session.add(answer)
+
+    session.finished_at = datetime.utcnow()
+    return summary, items
+
+
+@transactional
+def grade_exam_set_submission(
+    exam_ids,
+    answers_v1,
+    questions=None,
+    user_id=None,
+    mode="exam_practice",
+):
+    normalized_exam_ids = []
+    seen_exam_ids = set()
+    for exam_id in exam_ids or []:
+        try:
+            value = int(exam_id)
+        except (TypeError, ValueError):
+            continue
+        if value in seen_exam_ids:
+            continue
+        seen_exam_ids.add(value)
+        normalized_exam_ids.append(value)
+
+    if questions is None:
+        questions = get_exam_set_questions_ordered(
+            normalized_exam_ids,
+            user_id=user_id,
+        )
+    question_order = [q.id for q in questions]
+
+    session = PracticeSession(
+        lecture_id=None,
+        user_id=user_id,
+        lecture_ids_json=json.dumps(normalized_exam_ids, ensure_ascii=True),
+        mode=mode,
+        question_order=json.dumps(question_order, ensure_ascii=True),
+        current_question_index=0,
+        total_time_spent=0,
+        submission_count=1,
     )
     db.session.add(session)
     summary, items, _counts = evaluate_practice_answers(questions, answers_v1 or {})
@@ -389,6 +457,40 @@ def get_exam_questions_ordered(exam_id, user_id=None):
     if user_id is not None:
         query = query.filter_by(user_id=user_id)
     return query.order_by(Question.question_number).all()
+
+
+def get_exam_set_questions_ordered(exam_ids, user_id=None):
+    normalized_exam_ids = []
+    seen_exam_ids = set()
+    for exam_id in exam_ids or []:
+        try:
+            value = int(exam_id)
+        except (TypeError, ValueError):
+            continue
+        if value in seen_exam_ids:
+            continue
+        seen_exam_ids.add(value)
+        normalized_exam_ids.append(value)
+
+    if not normalized_exam_ids:
+        return []
+
+    query = Question.query.filter(Question.exam_id.in_(normalized_exam_ids))
+    if user_id is not None:
+        query = query.filter_by(user_id=user_id)
+
+    questions = query.order_by(
+        Question.exam_id, Question.question_number, Question.id
+    ).all()
+    exam_order = {exam_id: idx for idx, exam_id in enumerate(normalized_exam_ids)}
+    questions.sort(
+        key=lambda question: (
+            exam_order.get(question.exam_id, len(exam_order)),
+            question.question_number or 0,
+            question.id,
+        )
+    )
+    return questions
 
 
 def get_question_by_seq(lecture_id, seq):

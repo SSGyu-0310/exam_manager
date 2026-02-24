@@ -7,6 +7,7 @@ Uses pdfplumber to detect question blocks, options, and answer hints.
 
 import re
 import hashlib
+import logging
 from pathlib import Path
 from collections import Counter
 from io import BytesIO
@@ -27,6 +28,7 @@ WORD_X_TOL = 0.5
 # Post-clean rules to avoid label token splits like "1 )" or "A )"
 LABEL_SPACE_FIX_NUM = re.compile(r"(\d)\s+([)\.])")
 LABEL_SPACE_FIX_ALPHA = re.compile(r"([A-Za-z])\s+([)\.])")
+LOGGER = logging.getLogger(__name__)
 
 
 def clean_text(s: str) -> str:
@@ -345,8 +347,30 @@ def normalize_embedded_option(text, cur, max_option_number):
     return [rebuilt]
 
 
-def save_image_crop(page, bbox, upload_dir: Path, exam_prefix: str, resolution=200) -> str:
-    cropped = page.crop(bbox)
+def _normalize_bbox(page, bbox, min_span: float = 1.0):
+    page_width = float(getattr(page, "width", 0) or 0)
+    page_height = float(getattr(page, "height", 0) or 0)
+    if page_width <= 0 or page_height <= 0:
+        return None
+
+    x0, top, x1, bottom = (float(v) for v in bbox)
+    x0 = max(0.0, min(x0, page_width))
+    x1 = max(0.0, min(x1, page_width))
+    top = max(0.0, min(top, page_height))
+    bottom = max(0.0, min(bottom, page_height))
+
+    if (x1 - x0) < min_span or (bottom - top) < min_span:
+        return None
+
+    return (x0, top, x1, bottom)
+
+
+def save_image_crop(page, bbox, upload_dir: Path, exam_prefix: str, resolution=200) -> str | None:
+    normalized_bbox = _normalize_bbox(page, bbox)
+    if normalized_bbox is None:
+        return None
+
+    cropped = page.crop(normalized_bbox)
     page_image = cropped.to_image(resolution=resolution)
 
     buf = BytesIO()
@@ -508,7 +532,18 @@ def parse_pdf_to_questions(pdf_path, upload_dir: Path, exam_prefix: str, max_opt
 
                 page = ev["page_obj"]
                 bbox = (ev["x0"], ev["top"], ev["x1"], ev["bottom"])
-                fname = save_image_crop(page, bbox, upload_dir, exam_prefix)
+                try:
+                    fname = save_image_crop(page, bbox, upload_dir, exam_prefix)
+                except Exception as exc:
+                    LOGGER.warning(
+                        "Skipping image crop during PDF parse (page=%s, bbox=%s): %s",
+                        ev["page"],
+                        bbox,
+                        exc,
+                    )
+                    continue
+                if not fname:
+                    continue
 
                 if cur_opt is not None:
                     option = cur["options_map"].setdefault(

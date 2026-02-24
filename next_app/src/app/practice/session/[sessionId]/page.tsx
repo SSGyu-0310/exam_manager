@@ -1,18 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Flag, Timer } from "lucide-react";
+import { Check, CircleHelp, Flag, Loader2, Timer, XCircle } from "lucide-react";
 
+import { useLanguage } from "@/context/LanguageContext";
 import { apiFetch } from "@/lib/http";
+import { resolveImageUrl } from "@/lib/image";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { QuestionView } from "@/components/practice/QuestionView";
+import { ShortcutHelpDialog } from "@/components/practice/ShortcutHelpDialog";
 import { SubmitDialog } from "@/components/practice/SubmitDialog";
 import {
   AnswerPayload,
+  PracticeChoice,
   lectureQuestionsResponseSchema,
   PracticeQuestion,
   sessionDetailSchema,
@@ -21,6 +25,107 @@ import {
 
 const CONNECTION_ERROR_MESSAGE = "연결 실패(엔드포인트/응답 확인 필요)";
 const PAGE_SIZE = 200;
+const MARKDOWN_IMAGE_REGEX = /!\[[^\]]*]\(([^)]+)\)/g;
+
+type ParsedStemContent = {
+  text: string;
+  images: string[];
+};
+
+type CopyLabels = {
+  question: string;
+  noPrompt: string;
+  choices: string;
+};
+
+const parseStemContent = (value?: string | null): ParsedStemContent => {
+  if (!value) {
+    return { text: "", images: [] };
+  }
+  const images: string[] = [];
+  const cleaned = value.replace(MARKDOWN_IMAGE_REGEX, (_match, url) => {
+    if (typeof url === "string") {
+      const trimmed = url.trim();
+      if (trimmed) {
+        images.push(trimmed);
+      }
+    }
+    return "";
+  });
+  return {
+    text: cleaned.trim(),
+    images,
+  };
+};
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const readBlobAsDataUrl = (blob: Blob) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("Failed to read image"));
+    reader.readAsDataURL(blob);
+  });
+
+const collectQuestionImageUrls = (question: PracticeQuestion) => {
+  const urls = new Set<string>();
+
+  const directImage = resolveImageUrl(question.imageUrl ?? question.image);
+  if (directImage) {
+    urls.add(directImage);
+  }
+
+  const { images: stemImages } = parseStemContent(question.stem ?? "");
+  stemImages.forEach((raw) => {
+    const normalized = resolveImageUrl(raw);
+    if (normalized) {
+      urls.add(normalized);
+    }
+  });
+
+  (question.choices ?? []).forEach((choice) => {
+    const normalized = resolveImageUrl(choice.imageUrl ?? choice.image);
+    if (normalized) {
+      urls.add(normalized);
+    }
+  });
+
+  return Array.from(urls);
+};
+
+const buildCopyTextPayload = ({
+  question,
+  index,
+  labels,
+}: {
+  question: PracticeQuestion;
+  index: number;
+  labels: CopyLabels;
+}) => {
+  const { text: stemText } = parseStemContent(question.stem ?? "");
+  const lines = [
+    `${labels.question} ${index + 1}`,
+    stemText || labels.noPrompt,
+  ];
+
+  if (!question.isShortAnswer && (question.choices ?? []).length > 0) {
+    lines.push("", `${labels.choices}:`);
+    (question.choices ?? []).forEach((choice, choiceIndex) => {
+      const choiceId = getChoiceId(choice, choiceIndex);
+      lines.push(`${choiceId}. ${choice.content ?? ""}`);
+    });
+  }
+
+  return lines.join("\n").trim();
+};
+
 
 type SessionContext = {
   lectureId?: string;
@@ -53,7 +158,7 @@ const formatTime = (seconds: number) => {
   return `${mins}:${secs}`;
 };
 
-const getChoiceId = (choice: { number?: number }, index: number) =>
+const getChoiceId = (choice: { number?: number | null }, index: number) =>
   typeof choice.number === "number" ? choice.number : index + 1;
 
 const isAnswerComplete = (payload?: AnswerPayload) => {
@@ -67,6 +172,28 @@ const formatMode = (value?: string) => {
   if (!value) return "Practice";
   return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
 };
+
+const toOptionalString = (value: unknown): string | undefined => {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value);
+  }
+  return undefined;
+};
+
+const areNumberArraysEqual = (
+  left?: number[] | null,
+  right?: number[] | null
+) => {
+  if (left === right) return true;
+  if (!left || !right) return !left && !right;
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+};
+
+const isPersistedSessionId = (value: string) => /^\d+$/.test(value);
 
 const appendExamParams = (
   params: URLSearchParams,
@@ -89,9 +216,37 @@ const buildExamQuery = (examIds?: number[], filterActive?: boolean) => {
 };
 
 export default function PracticeSessionPage() {
+  const { t } = useLanguage();
   const router = useRouter();
   const params = useParams();
   const sessionId = params.sessionId as string;
+
+  const SOLVER_SHORTCUT_SECTIONS = [
+    {
+      title: t("practiceSession.shortcuts.navigation"),
+      items: [
+        { keys: "Arrow Left / Arrow Right", description: t("practiceSession.shortcuts.prevNext") },
+        { keys: "J / K", description: t("practiceSession.shortcuts.prevNext") },
+        { keys: "Ctrl+Shift+1-9", description: t("practiceSession.shortcuts.jumpQuestion") },
+      ],
+    },
+    {
+      title: t("practiceSession.shortcuts.answering"),
+      items: [
+        { keys: "1-5", description: t("practiceSession.shortcuts.selectChoice") },
+        { keys: "Ctrl+Alt+V", description: t("practiceSession.shortcuts.bookmarkWin") },
+        { keys: "Cmd+Shift+V", description: t("practiceSession.shortcuts.bookmarkMac") },
+        { keys: "Ctrl/Cmd+Shift+C", description: t("practiceSession.shortcuts.copyQuestion") },
+      ],
+    },
+    {
+      title: t("practiceSession.shortcuts.session"),
+      items: [
+        { keys: "Ctrl/Cmd+Enter", description: t("practiceSession.shortcuts.submit") },
+        { keys: "?", description: t("practiceSession.shortcuts.help") },
+      ],
+    },
+  ];
 
   const [sessionContext, setSessionContext] = useState<SessionContext>({});
   const [questions, setQuestions] = useState<PracticeQuestion[]>([]);
@@ -103,15 +258,34 @@ export default function PracticeSessionPage() {
   const [loadMoreLoading, setLoadMoreLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const [showSubmitDialog, setShowSubmitDialog] = useState(false);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [timerSeconds, setTimerSeconds] = useState(0);
+  const [isQuestionEditing, setIsQuestionEditing] = useState(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [resumeMessage, setResumeMessage] = useState<string | null>(null);
   const [pagination, setPagination] = useState({
     total: 0,
     offset: 0,
     limit: PAGE_SIZE,
     hasMore: false,
   });
+  const questionTopRef = useRef<HTMLDivElement | null>(null);
+  const previousQuestionIdRef = useRef<string | null>(null);
+  const copyTimeoutRef = useRef<number | null>(null);
+  const autoSaveTimerRef = useRef<number | null>(null);
+  const autoSavePendingRef = useRef(false);
+  const resumeTimerRef = useRef<number | null>(null);
+  const answersRef = useRef(answers);
+  answersRef.current = answers;
+  const currentIndexRef = useRef(currentIndex);
+  currentIndexRef.current = currentIndex;
+  const timerSecondsRef = useRef(timerSeconds);
+  timerSecondsRef.current = timerSeconds;
 
   const isTimed = sessionContext.mode === "timed";
 
@@ -127,6 +301,17 @@ export default function PracticeSessionPage() {
       return decodeURIComponent(sessionId.replace("exam-", ""));
     }
     return null;
+  }, [sessionId]);
+
+  const fallbackExamIds = useMemo(() => {
+    if (sessionId?.startsWith("examset-")) {
+      const raw = decodeURIComponent(sessionId.replace("examset-", ""));
+      return raw
+        .split(",")
+        .map((token) => Number(token.trim()))
+        .filter((value) => Number.isFinite(value) && value > 0);
+    }
+    return [] as number[];
   }, [sessionId]);
 
   useEffect(() => {
@@ -151,6 +336,133 @@ export default function PracticeSessionPage() {
     }, 1000);
     return () => clearInterval(timerId);
   }, [isTimed]);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        window.clearTimeout(copyTimeoutRef.current);
+      }
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current);
+      }
+      if (resumeTimerRef.current) {
+        window.clearTimeout(resumeTimerRef.current);
+      }
+    };
+  }, []);
+
+  // ---- Auto-save logic ----
+  const flushAutoSave = useCallback(async () => {
+    if (!isPersistedSessionId(sessionId)) return;
+    const currentAnswers = answersRef.current;
+    const idx = currentIndexRef.current;
+    const elapsed = timerSecondsRef.current;
+    try {
+      setAutoSaveStatus("saving");
+      await apiFetch<unknown>(
+        `/api/practice/sessions/${encodeURIComponent(sessionId)}/progress`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            currentQuestionIndex: idx,
+            answers: currentAnswers,
+            elapsedSeconds: elapsed,
+          }),
+        }
+      );
+      autoSavePendingRef.current = false;
+      setAutoSaveStatus("saved");
+    } catch {
+      setAutoSaveStatus("error");
+    }
+  }, [sessionId]);
+
+  // Debounced auto-save on answers or currentIndex change
+  useEffect(() => {
+    if (!isPersistedSessionId(sessionId)) return;
+    if (!sessionLoadedRef.current) return;
+    autoSavePendingRef.current = true;
+    if (autoSaveTimerRef.current) {
+      window.clearTimeout(autoSaveTimerRef.current);
+    }
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      void flushAutoSave();
+    }, 3000);
+    return () => {
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, [answers, currentIndex, sessionId, flushAutoSave]);
+
+  // Flush on page unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (!autoSavePendingRef.current) return;
+      if (!isPersistedSessionId(sessionId)) return;
+      const currentAnswers = answersRef.current;
+      const idx = currentIndexRef.current;
+      const elapsed = timerSecondsRef.current;
+      const body = JSON.stringify({
+        currentQuestionIndex: idx,
+        answers: currentAnswers,
+        elapsedSeconds: elapsed,
+      });
+      const url = `/api/proxy/api/practice/sessions/${encodeURIComponent(sessionId)}/progress`;
+      const csrfToken = document.cookie
+        .split("; ")
+        .find((row) => row.startsWith("csrf_access_token="))
+        ?.split("=")[1];
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (csrfToken) {
+        headers["X-CSRF-TOKEN"] = csrfToken;
+      }
+
+      if (typeof fetch === "function") {
+        void fetch(url, {
+          method: "PATCH",
+          body,
+          keepalive: true,
+          headers,
+          credentials: "include",
+        }).catch(() => {
+          if (typeof navigator.sendBeacon === "function") {
+            navigator.sendBeacon(
+              url,
+              new Blob([body], { type: "application/json" })
+            );
+          }
+        });
+        return;
+      }
+
+      if (typeof navigator.sendBeacon === "function") {
+        navigator.sendBeacon(
+          url,
+          new Blob([body], { type: "application/json" })
+        );
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [sessionId]);
+
+  // Clear resume message after delay
+  useEffect(() => {
+    if (!resumeMessage) return;
+    resumeTimerRef.current = window.setTimeout(() => {
+      setResumeMessage(null);
+    }, 5000);
+    return () => {
+      if (resumeTimerRef.current) {
+        window.clearTimeout(resumeTimerRef.current);
+      }
+    };
+  }, [resumeMessage]);
 
   const fetchLectureQuestions = useCallback(
     async (
@@ -208,26 +520,54 @@ export default function PracticeSessionPage() {
     []
   );
 
+  const fetchExamSetQuestions = useCallback(
+    async (examIds: number[], offset = 0) => {
+      const params = new URLSearchParams();
+      params.set("limit", String(PAGE_SIZE));
+      params.set("offset", String(offset));
+      examIds.forEach((id) => params.append("exam_ids", String(id)));
+      const response = await apiFetch<unknown>(
+        `/api/practice/exam-set/questions?${params.toString()}`,
+        { cache: "no-store" }
+      );
+      const parsed = lectureQuestionsResponseSchema.safeParse(response);
+      if (!parsed.success) {
+        throw new Error(CONNECTION_ERROR_MESSAGE);
+      }
+      const data = parsed.data;
+      return {
+        questions: data.questions ?? [],
+        total: data.total ?? 0,
+        offset: data.offset ?? offset,
+        limit: data.limit ?? PAGE_SIZE,
+      };
+    },
+    []
+  );
+
+  const sessionLoadedRef = useRef(false);
+
   useEffect(() => {
     let active = true;
 
     const loadSession = async () => {
+      if (sessionLoadedRef.current) return;
+
       setLoading(true);
       setError(null);
       setSubmitError(null);
 
       let lectureId = sessionContext.lectureId ?? fallbackLectureId ?? undefined;
       let examId = sessionContext.examId ?? fallbackExamId ?? undefined;
+      let examIds = sessionContext.examIds ?? fallbackExamIds;
       let order = sessionContext.questionOrder ?? [];
-      const examIds = sessionContext.examIds;
       const filterActive = sessionContext.filterActive;
 
       if (
         !lectureId &&
         !examId &&
         sessionId &&
-        !sessionId.startsWith("lecture-") &&
-        !sessionId.startsWith("exam-")
+        isPersistedSessionId(sessionId)
       ) {
         try {
           const response = await apiFetch<unknown>(
@@ -236,15 +576,76 @@ export default function PracticeSessionPage() {
           );
           const parsed = sessionDetailSchema.safeParse(response);
           if (parsed.success) {
-            lectureId =
-              parsed.data.lectureId !== undefined ? String(parsed.data.lectureId) : undefined;
+            // Redirect if session is already finished
+            if (parsed.data.finishedAt) {
+              router.replace(`/practice/session/${sessionId}/result`);
+              return;
+            }
+
+            lectureId = toOptionalString(parsed.data.lectureId);
             order = parsed.data.questionOrder ?? [];
-            setSessionContext((prev) => ({
-              ...prev,
-              lectureId,
-              lectureTitle: parsed.data.lectureTitle ?? prev.lectureTitle,
-              mode: parsed.data.mode ?? prev.mode,
-            }));
+            const newExamIds = parsed.data.examIds;
+
+            // Restore draft answers from server
+            const serverItems = parsed.data.items;
+            if (serverItems && serverItems.length > 0) {
+              const restoredAnswers: Record<string, AnswerPayload> = {};
+              for (const item of serverItems) {
+                if (!item.isAnswered || !item.answer) continue;
+                const answerData = item.answer;
+                if (
+                  answerData &&
+                  typeof answerData === "object" &&
+                  "type" in answerData &&
+                  "value" in answerData
+                ) {
+                  restoredAnswers[String(item.questionId)] =
+                    answerData as AnswerPayload;
+                }
+              }
+              if (Object.keys(restoredAnswers).length > 0) {
+                setAnswers(restoredAnswers);
+                setResumeMessage(t("practiceSession.resumeMessage"));
+              }
+            }
+
+            // Restore current question index
+            const savedIndex = parsed.data.currentQuestionIndex;
+            if (
+              typeof savedIndex === "number" &&
+              savedIndex > 0
+            ) {
+              setCurrentIndex(savedIndex);
+            }
+
+            setSessionContext((prev) => {
+              const nextLectureId = lectureId ?? prev.lectureId;
+              const nextExamIds = newExamIds ?? prev.examIds;
+              const nextExamTitle = parsed.data.examTitle ?? prev.examTitle;
+              const nextLectureTitle =
+                parsed.data.lectureTitle ?? prev.lectureTitle;
+              const nextMode = parsed.data.mode ?? prev.mode;
+
+              if (
+                prev.lectureId === nextLectureId &&
+                prev.examTitle === nextExamTitle &&
+                prev.lectureTitle === nextLectureTitle &&
+                prev.mode === nextMode &&
+                areNumberArraysEqual(prev.examIds, nextExamIds)
+              ) {
+                return prev;
+              }
+
+              return {
+                ...prev,
+                lectureId: nextLectureId,
+                examIds: nextExamIds,
+                examTitle: nextExamTitle,
+                lectureTitle: nextLectureTitle,
+                mode: nextMode,
+              };
+            });
+            examIds = newExamIds ?? examIds;
           }
         } catch {
           setSessionContext((prev) => ({
@@ -254,7 +655,7 @@ export default function PracticeSessionPage() {
         }
       }
 
-      if (!lectureId && !examId) {
+      if (!lectureId && !examId && (!examIds || examIds.length === 0)) {
         setError("Unable to resolve content for this session.");
         setLoading(false);
         return;
@@ -263,8 +664,11 @@ export default function PracticeSessionPage() {
       try {
         const page = lectureId
           ? await fetchLectureQuestions(lectureId, 0, examIds, filterActive)
-          : await fetchExamQuestions(examId!, 0);
+          : examId
+            ? await fetchExamQuestions(examId, 0)
+            : await fetchExamSetQuestions(examIds, 0);
         if (!active) return;
+        sessionLoadedRef.current = true;
         setQuestions(page.questions);
         setQuestionOrder(order);
         setPagination({
@@ -289,14 +693,18 @@ export default function PracticeSessionPage() {
   }, [
     fetchLectureQuestions,
     fetchExamQuestions,
+    fetchExamSetQuestions,
     fallbackLectureId,
     fallbackExamId,
+    fallbackExamIds,
     sessionContext.lectureId,
     sessionContext.examId,
     sessionId,
     sessionContext.questionOrder,
     sessionContext.examIds,
     sessionContext.filterActive,
+    router,
+    t,
   ]);
 
   const orderedQuestions = useMemo(() => {
@@ -312,12 +720,30 @@ export default function PracticeSessionPage() {
   }, [questions, questionOrder]);
 
   useEffect(() => {
+    if (orderedQuestions.length === 0) {
+      return;
+    }
     if (currentIndex >= orderedQuestions.length) {
       setCurrentIndex(0);
     }
   }, [currentIndex, orderedQuestions.length]);
 
   const currentQuestion = orderedQuestions[currentIndex];
+  const currentQuestionId = currentQuestion
+    ? String(currentQuestion.questionId)
+    : null;
+
+  useEffect(() => {
+    if (!currentQuestionId) return;
+    if (previousQuestionIdRef.current === null) {
+      previousQuestionIdRef.current = currentQuestionId;
+      return;
+    }
+    if (previousQuestionIdRef.current === currentQuestionId) return;
+    previousQuestionIdRef.current = currentQuestionId;
+    questionTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [currentQuestionId]);
+
   const answeredCount = useMemo(() => {
     return orderedQuestions.reduce((count, question) => {
       const answer = answers[String(question.questionId)];
@@ -392,15 +818,196 @@ export default function PracticeSessionPage() {
     setBookmarks((prev) => ({ ...prev, [questionId]: !prev[questionId] }));
   }, []);
 
+  const handleQuestionUpdated = useCallback(
+    (questionId: string, payload: { stem: string; choices: PracticeChoice[] }) => {
+      setQuestions((prev) =>
+        prev.map((item) =>
+          String(item.questionId) === questionId
+            ? {
+              ...item,
+              stem: payload.stem,
+              choices: payload.choices,
+            }
+            : item
+        )
+      );
+    },
+    []
+  );
+
+  const showCopyToast = useCallback((message: string) => {
+    setCopyMessage(message);
+    if (copyTimeoutRef.current) {
+      window.clearTimeout(copyTimeoutRef.current);
+    }
+    copyTimeoutRef.current = window.setTimeout(() => {
+      setCopyMessage(null);
+    }, 2000);
+  }, []);
+
+  const handleCopyCurrentQuestion = useCallback(async () => {
+    if (!currentQuestion) return;
+    if (typeof navigator === "undefined" || !navigator.clipboard) {
+      showCopyToast(t("practiceSession.copyFailed"));
+      return;
+    }
+
+    const imageUrls = collectQuestionImageUrls(currentQuestion);
+    const textPayload = buildCopyTextPayload({
+      question: currentQuestion,
+      index: currentIndex,
+      labels: {
+        question: t("practiceSession.question"),
+        noPrompt: t("practiceSession.noPrompt"),
+        choices: t("practiceSession.copyChoicesHeader"),
+      },
+    });
+
+    if (
+      typeof navigator.clipboard.write === "function" &&
+      typeof ClipboardItem !== "undefined"
+    ) {
+      try {
+        const imageAssets = (
+          await Promise.allSettled(
+            imageUrls.map(async (url) => {
+              const response = await fetch(url);
+              if (!response.ok) {
+                throw new Error("Failed to fetch image");
+              }
+              const blob = await response.blob();
+              return {
+                blob,
+                dataUrl: await readBlobAsDataUrl(blob),
+              };
+            })
+          )
+        )
+          .filter(
+            (
+              result
+            ): result is PromiseFulfilledResult<{ blob: Blob; dataUrl: string }> =>
+              result.status === "fulfilled"
+          )
+          .map((result) => result.value);
+
+        const { text: stemText } = parseStemContent(currentQuestion.stem ?? "");
+        const promptHtml = escapeHtml(
+          stemText || t("practiceSession.noPrompt")
+        ).replace(/\n/g, "<br>");
+        const choicesHtml = !currentQuestion.isShortAnswer
+          ? (currentQuestion.choices ?? [])
+            .map((choice, index) => {
+              const choiceId = getChoiceId(choice, index);
+              const choiceText = escapeHtml(choice.content ?? "").replace(
+                /\n/g,
+                "<br>"
+              );
+              return `<li><strong>${choiceId}.</strong> ${choiceText}</li>`;
+            })
+            .join("")
+          : "";
+        const imagesHtml = imageAssets
+          .map((asset, index) => {
+            const label = `${escapeHtml(t("practiceSession.copyImageLabel"))} ${index + 1
+              }`;
+            return `<figure style="margin: 0 0 10px;"><figcaption style="margin-bottom: 4px; font-size: 12px;">${label}</figcaption><img src="${asset.dataUrl}" alt="${label}" style="max-width: 100%; height: auto;" /></figure>`;
+          })
+          .join("");
+
+        const htmlPayload = [
+          `<section>`,
+          `<h3>${escapeHtml(t("practiceSession.question"))} ${currentIndex + 1}</h3>`,
+          `<p>${promptHtml}</p>`,
+          choicesHtml
+            ? `<h4>${escapeHtml(
+              t("practiceSession.copyChoicesHeader")
+            )}</h4><ol>${choicesHtml}</ol>`
+            : "",
+          imagesHtml
+            ? `<h4>${escapeHtml(t("practiceSession.copyImageHeader"))}</h4>${imagesHtml}`
+            : "",
+          `</section>`,
+        ].join("");
+
+        const clipboardData: Record<string, Blob> = {
+          "text/plain": new Blob([textPayload], { type: "text/plain" }),
+          "text/html": new Blob([htmlPayload], { type: "text/html" }),
+        };
+        const firstImageBlob = imageAssets.find((asset) =>
+          asset.blob.type.startsWith("image/")
+        )?.blob;
+        if (firstImageBlob?.type) {
+          clipboardData[firstImageBlob.type] = firstImageBlob;
+        }
+
+        await navigator.clipboard.write([new ClipboardItem(clipboardData)]);
+        showCopyToast(t("practiceSession.copySuccess"));
+        return;
+      } catch {
+        // Fallback to plain text copy
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(textPayload);
+      showCopyToast(t("practiceSession.copySuccess"));
+    } catch {
+      showCopyToast(t("practiceSession.copyFailed"));
+    }
+  }, [currentIndex, currentQuestion, showCopyToast, t]);
+
   const handleKeyboard = useCallback(
     (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target && ["INPUT", "TEXTAREA"].includes(target.tagName)) {
+      if (event.isComposing) {
+        return;
+      }
+      if (isQuestionEditing) {
+        return;
+      }
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) {
         return;
       }
       if (!currentQuestion) return;
 
-      const key = event.key.toLowerCase();
+      if (event.key === "?" || (event.key === "/" && event.shiftKey)) {
+        event.preventDefault();
+        setShowShortcutHelp(true);
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        event.preventDefault();
+        setShowSubmitDialog(true);
+        return;
+      }
+
+      const shortcutKey = event.key.toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && shortcutKey === "c") {
+        event.preventDefault();
+        void handleCopyCurrentQuestion();
+        return;
+      }
+      if (
+        ((event.ctrlKey && event.altKey) || (event.metaKey && event.shiftKey)) &&
+        shortcutKey === "v"
+      ) {
+        event.preventDefault();
+        toggleBookmark(String(currentQuestion.questionId));
+        return;
+      }
+
+      if (event.ctrlKey && event.shiftKey && shortcutKey >= "1" && shortcutKey <= "9") {
+        event.preventDefault();
+        const targetIndex = Number(shortcutKey) - 1;
+        if (targetIndex >= 0 && targetIndex < orderedQuestions.length) {
+          setCurrentIndex(targetIndex);
+        }
+        return;
+      }
+
+      const key = shortcutKey;
       if (key === "arrowright" || key === "j") {
         setCurrentIndex((prev) => Math.min(prev + 1, orderedQuestions.length - 1));
         return;
@@ -436,7 +1043,15 @@ export default function PracticeSessionPage() {
         }
       }
     },
-    [answers, currentQuestion, handleAnswerChange, orderedQuestions.length]
+    [
+      answers,
+      currentQuestion,
+      handleCopyCurrentQuestion,
+      handleAnswerChange,
+      isQuestionEditing,
+      orderedQuestions.length,
+      toggleBookmark,
+    ]
   );
 
   useEffect(() => {
@@ -447,7 +1062,8 @@ export default function PracticeSessionPage() {
   const handleSubmit = async () => {
     const lectureId = sessionContext.lectureId ?? fallbackLectureId;
     const examId = sessionContext.examId ?? fallbackExamId;
-    if (!lectureId && !examId) {
+    const examIds = sessionContext.examIds ?? fallbackExamIds;
+    if (!lectureId && !examId && examIds.length === 0) {
       setSubmitError("Unable to resolve content for submission.");
       return;
     }
@@ -486,9 +1102,19 @@ export default function PracticeSessionPage() {
         { method: "POST", headers, body }
       );
 
+    const submitViaExamSet = async () =>
+      apiFetch<unknown>(
+        `/api/practice/exam-set/submit`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ version: 1, answers: answersPayload, examIds }),
+        }
+      );
+
     let response: unknown = null;
     try {
-      if (!sessionId.startsWith("lecture-") && !sessionId.startsWith("exam-")) {
+      if (isPersistedSessionId(sessionId)) {
         response = await submitViaSession();
       }
     } catch {
@@ -497,7 +1123,11 @@ export default function PracticeSessionPage() {
 
     if (!response) {
       try {
-        response = examId ? await submitViaExam() : await submitViaLecture();
+        response = examId
+          ? await submitViaExam()
+          : examIds.length > 0
+            ? await submitViaExamSet()
+            : await submitViaLecture();
       } catch (err) {
         setSubmitError(err instanceof Error ? err.message : CONNECTION_ERROR_MESSAGE);
         setSubmitting(false);
@@ -508,9 +1138,8 @@ export default function PracticeSessionPage() {
     const parsed = submitResponseSchema.safeParse(response);
     const resultPayload: SubmitResult = parsed.success
       ? {
-        lectureId:
-          parsed.data.lectureId !== undefined ? String(parsed.data.lectureId) : (lectureId ?? undefined),
-        submittedAt: parsed.data.submittedAt,
+        lectureId: toOptionalString(parsed.data.lectureId) ?? (lectureId ?? undefined),
+        submittedAt: parsed.data.submittedAt ?? undefined,
         summary: parsed.data.summary,
         items: parsed.data.items ?? [],
       }
@@ -527,10 +1156,10 @@ export default function PracticeSessionPage() {
           ...resultPayload,
           lectureId,
           examId,
+          examIds,
           examTitle: sessionContext.examTitle,
           answers: answersPayload,
           mode: sessionContext.mode,
-          examIds: sessionContext.examIds,
           filterActive: sessionContext.filterActive,
         })
       );
@@ -543,7 +1172,8 @@ export default function PracticeSessionPage() {
     if (loadMoreLoading || !pagination.hasMore) return;
     const lectureId = sessionContext.lectureId ?? fallbackLectureId;
     const examId = sessionContext.examId ?? fallbackExamId;
-    if (!lectureId && !examId) return;
+    const examIds = sessionContext.examIds ?? fallbackExamIds;
+    if (!lectureId && !examId && examIds.length === 0) return;
     setLoadMoreLoading(true);
     try {
       const nextOffset = pagination.offset + pagination.limit;
@@ -554,7 +1184,9 @@ export default function PracticeSessionPage() {
           sessionContext.examIds,
           sessionContext.filterActive
         )
-        : await fetchExamQuestions(examId!, nextOffset);
+        : examId
+          ? await fetchExamQuestions(examId, nextOffset)
+          : await fetchExamSetQuestions(examIds, nextOffset);
       setQuestions((prev) => [...prev, ...page.questions]);
       setPagination({
         total: page.total,
@@ -602,8 +1234,8 @@ export default function PracticeSessionPage() {
 
   return (
     <div className="min-h-screen px-4 py-10">
-      <div className="mx-auto w-full max-w-5xl space-y-6">
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="mx-auto w-full max-w-[1400px] space-y-6">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-6">
             {sessionContext.warning && (
               <div className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
@@ -615,17 +1247,31 @@ export default function PracticeSessionPage() {
                 {submitError}
               </div>
             )}
-            <QuestionView
-              question={currentQuestion}
-              index={currentIndex}
-              total={orderedQuestions.length}
-              answer={answerForCurrent}
-              onAnswerChange={(payload) =>
-                handleAnswerChange(String(currentQuestion.questionId), payload)
-              }
-              bookmarked={Boolean(bookmarks[String(currentQuestion.questionId)])}
-              onToggleBookmark={() => toggleBookmark(String(currentQuestion.questionId))}
-            />
+            {resumeMessage && (
+              <div className="rounded-lg border border-primary/40 bg-primary/10 px-4 py-3 text-sm text-primary">
+                {resumeMessage}
+              </div>
+            )}
+            {copyMessage && (
+              <div className="rounded-lg border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
+                {copyMessage}
+              </div>
+            )}
+            <div ref={questionTopRef} className="scroll-mt-24">
+              <QuestionView
+                question={currentQuestion}
+                index={currentIndex}
+                total={orderedQuestions.length}
+                answer={answerForCurrent}
+                onAnswerChange={(payload) =>
+                  handleAnswerChange(String(currentQuestion.questionId), payload)
+                }
+                bookmarked={Boolean(bookmarks[String(currentQuestion.questionId)])}
+                onToggleBookmark={() => toggleBookmark(String(currentQuestion.questionId))}
+                onQuestionUpdated={handleQuestionUpdated}
+                onEditModeChange={setIsQuestionEditing}
+              />
+            </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <Button
@@ -633,13 +1279,13 @@ export default function PracticeSessionPage() {
                 onClick={() => setCurrentIndex((prev) => Math.max(prev - 1, 0))}
                 disabled={currentIndex === 0}
               >
-                Previous
+                {t("practiceSession.previous")}
               </Button>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Flag className="h-4 w-4" />
                 {bookmarks[String(currentQuestion.questionId)]
-                  ? "Bookmarked"
-                  : "Not bookmarked"}
+                  ? t("practiceSession.bookmarked")
+                  : t("practiceSession.bookmark")}
               </div>
               <Button
                 onClick={() =>
@@ -649,7 +1295,7 @@ export default function PracticeSessionPage() {
                 }
                 disabled={currentIndex >= orderedQuestions.length - 1}
               >
-                Next
+                {t("practiceSession.next")}
               </Button>
             </div>
 
@@ -674,24 +1320,41 @@ export default function PracticeSessionPage() {
           <aside className="space-y-4 lg:sticky lg:top-24">
             <Card className="border border-border/70 bg-card/85 shadow-soft">
               <CardContent className="space-y-4 p-5">
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                    Session
-                  </p>
-                  <p className="text-sm font-semibold text-foreground">
-                    {sessionContext.lectureTitle ??
-                      sessionContext.examTitle ??
-                      "Practice Session"}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <Badge variant="neutral">{formatMode(sessionContext.mode)}</Badge>
-                    <span>{totalLoaded} questions</span>
-                    {hasUnloaded && (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-foreground">
+                      {sessionContext.lectureTitle ??
+                        sessionContext.examTitle ??
+                        t("common.practice")}
+                    </p>
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      {autoSaveStatus === "saving" && (
+                        <>
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          <span>{t("practiceSession.autoSaving")}</span>
+                        </>
+                      )}
+                      {autoSaveStatus === "saved" && (
+                        <>
+                          <Check className="h-3 w-3 text-success" />
+                          <span className="text-success">{t("practiceSession.autoSaved")}</span>
+                        </>
+                      )}
+                      {autoSaveStatus === "error" && (
+                        <>
+                          <XCircle className="h-3 w-3 text-danger" />
+                          <span className="text-danger">{t("practiceSession.autoSaveFailed")}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {hasUnloaded && (
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <Badge variant="neutral">
                         Loaded {totalLoaded} / {totalQuestions}
                       </Badge>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
                 {isTimed && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -705,11 +1368,12 @@ export default function PracticeSessionPage() {
                   className="w-full"
                   onClick={() => setShowSubmitDialog(true)}
                 >
-                  Submit
+                  {t("practiceSession.submit")}
                 </Button>
+
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>Progress</span>
+                    <span>{t("practiceSession.progress")}</span>
                     <span>{completion}%</span>
                   </div>
                   <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
@@ -719,59 +1383,37 @@ export default function PracticeSessionPage() {
                     />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-xl border border-border/60 bg-muted/60 px-3 py-2">
-                    <p className="text-xs text-muted-foreground">Total</p>
-                    <p className="text-lg font-semibold text-foreground">
-                      {totalLoaded}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-border/60 bg-muted/60 px-3 py-2">
-                    <p className="text-xs text-muted-foreground">Answered</p>
-                    <p className="text-lg font-semibold text-foreground">
-                      {answeredCount}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-border/60 bg-muted/60 px-3 py-2">
-                    <p className="text-xs text-muted-foreground">Unanswered</p>
-                    <p className="text-lg font-semibold text-foreground">
-                      {unansweredCount}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-border/60 bg-muted/60 px-3 py-2">
-                    <p className="text-xs text-muted-foreground">Bookmarked</p>
-                    <p className="text-lg font-semibold text-foreground">
-                      {bookmarkedCount}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2 text-xs">
-                  <Badge variant="neutral">MCQ {Math.max(singleChoiceCount, 0)}</Badge>
-                  <Badge variant="neutral">Multi {Math.max(multipleResponseCount, 0)}</Badge>
-                  <Badge variant="neutral">Short {Math.max(shortAnswerCount, 0)}</Badge>
-                </div>
-                <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                  <div className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-muted-foreground/60" />
-                    Unanswered
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-success" />
-                    Answered
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-warning" />
-                    Bookmarked
-                  </div>
+
+                <div className="rounded-xl border border-border/60 bg-muted/40 px-3 py-3 text-xs text-muted-foreground">
+                  <p className="font-semibold text-foreground">{t("practiceSession.tip")}</p>
+                  <p>
+                    {t("practiceSession.tipDesc")}
+                  </p>
                 </div>
               </CardContent>
             </Card>
 
             <Card className="border border-border/70 bg-card/85 shadow-soft">
               <CardContent className="space-y-4 p-5">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                  Question Navigator
-                </p>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    {t("practiceSession.questionNavigator")}
+                  </p>
+                  <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+                      {t("practiceSession.unanswered")}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                      {t("practiceSession.answered")}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-warning" />
+                      {t("practiceSession.bookmark")}
+                    </div>
+                  </div>
+                </div>
                 <div className="grid grid-cols-6 gap-2">
                   {orderedQuestions.map((question, index) => {
                     const id = String(question.questionId);
@@ -815,6 +1457,13 @@ export default function PracticeSessionPage() {
           void handleSubmit();
         }}
         loading={submitting}
+      />
+      <ShortcutHelpDialog
+        open={showShortcutHelp}
+        title="Practice shortcuts"
+        description="Keyboard controls for faster solving and navigation."
+        sections={SOLVER_SHORTCUT_SECTIONS}
+        onClose={() => setShowShortcutHelp(false)}
       />
     </div>
   );

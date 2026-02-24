@@ -2,10 +2,10 @@ import { z } from "zod";
 
 export const choiceSchema = z
   .object({
-    number: z.number().optional(),
-    content: z.string().optional(),
-    image: z.string().optional(),
-    imageUrl: z.string().optional(),
+    number: z.number().nullable().optional(),
+    content: z.string().nullable().optional(),
+    image: z.string().nullable().optional(),
+    imageUrl: z.string().nullable().optional(),
   })
   .passthrough();
 
@@ -21,14 +21,15 @@ export const examOptionSchema = z
 export const questionSchema = z
   .object({
     questionId: z.union([z.number(), z.string()]),
-    stem: z.string().optional(),
+    stem: z.string().nullable().optional(),
     choices: z.array(choiceSchema).optional(),
     isShortAnswer: z.boolean().optional(),
     isMultipleResponse: z.boolean().optional(),
     examId: z.number().nullable().optional(),
     examTitle: z.string().nullable().optional(),
-    image: z.string().optional(),
-    imageUrl: z.string().optional(),
+    image: z.string().nullable().optional(),
+    imageUrl: z.string().nullable().optional(),
+    originalImageUrl: z.string().nullable().optional(),
   })
   .passthrough();
 
@@ -38,23 +39,24 @@ export type PracticeQuestion = z.infer<typeof questionSchema> & {
 
 export const lectureDetailSchema = z
   .object({
-    lectureId: z.union([z.number(), z.string()]).optional(),
-    title: z.string().optional(),
+    lectureId: z.union([z.number(), z.string()]).nullable().optional(),
+    title: z.string().nullable().optional(),
     questions: z.array(questionSchema).optional(),
     totalCount: z.number().optional(),
     objectiveCount: z.number().optional(),
     subjectiveCount: z.number().optional(),
     multipleResponseCount: z.number().optional(),
     examOptions: z.array(examOptionSchema).optional(),
-    selectedExamIds: z.array(z.number()).optional(),
-    filterActive: z.boolean().optional(),
+    selectedExamIds: z.array(z.number()).nullable().optional(),
+    filterActive: z.boolean().nullable().optional(),
   })
   .passthrough();
 
 export const lectureQuestionsResponseSchema = z
   .object({
-    lectureId: z.union([z.number(), z.string()]).optional(),
-    title: z.string().optional(),
+    lectureId: z.union([z.number(), z.string()]).nullable().optional(),
+    title: z.string().nullable().optional(),
+    examIds: z.array(z.number()).nullable().optional(),
     total: z.number().optional(),
     offset: z.number().optional(),
     limit: z.number().optional(),
@@ -64,8 +66,9 @@ export const lectureQuestionsResponseSchema = z
 
 export const lectureResultSchema = z
   .object({
-    lectureId: z.union([z.number(), z.string()]).optional(),
-    title: z.string().optional(),
+    lectureId: z.union([z.number(), z.string()]).nullable().optional(),
+    examIds: z.array(z.number()).nullable().optional(),
+    title: z.string().nullable().optional(),
     total: z.number().optional(),
     offset: z.number().optional(),
     limit: z.number().optional(),
@@ -84,28 +87,47 @@ export const lectureResultSchema = z
 export const sessionDetailSchema = z
   .object({
     sessionId: z.union([z.number(), z.string()]).optional(),
-    lectureId: z.union([z.number(), z.string()]).optional(),
-    lectureTitle: z.string().optional(),
-    mode: z.string().optional(),
-    questionOrder: z.array(z.number()).optional(),
+    lectureId: z.union([z.number(), z.string()]).nullable().optional(),
+    lectureTitle: z.string().nullable().optional(),
+    examIds: z.array(z.number()).nullable().optional(),
+    examTitle: z.string().nullable().optional(),
+    mode: z.string().nullable().optional(),
+    questionOrder: z.array(z.number()).nullable().optional(),
     totalQuestions: z.number().optional(),
+    currentQuestionIndex: z.number().nullable().optional(),
+    finishedAt: z.string().nullable().optional(),
+    items: z
+      .array(
+        z
+          .object({
+            questionId: z.number(),
+            answer: z.any().nullable().optional(),
+            isAnswered: z.boolean().optional(),
+          })
+          .passthrough()
+      )
+      .nullable()
+      .optional(),
   })
   .passthrough();
 
 export type AnswerPayload =
   | {
-      type: "mcq";
-      value: number[];
-    }
+    type: "mcq";
+    value: number[];
+  }
   | {
-      type: "short";
-      value: string;
-    };
+    type: "short";
+    value: string;
+  };
 
 export const submitResponseSchema = z
   .object({
-    lectureId: z.union([z.number(), z.string()]).optional(),
-    submittedAt: z.string().optional(),
+    sessionId: z.union([z.number(), z.string()]).optional(),
+    lectureId: z.union([z.number(), z.string()]).nullable().optional(),
+    examIds: z.array(z.number()).nullable().optional(),
+    examTitle: z.string().nullable().optional(),
+    submittedAt: z.string().nullable().optional(),
     summary: z
       .object({
         all: z

@@ -2,19 +2,28 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Check, Copy } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Copy, ImageIcon } from "lucide-react";
 
 import { apiFetch } from "@/lib/http";
 import { resolveImageUrl } from "@/lib/image";
+import { useLanguage } from "@/context/LanguageContext";
 import { ResultSummary } from "@/components/practice/ResultSummary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import {
   AnswerPayload,
   lectureResultSchema,
   PracticeQuestion,
 } from "@/components/practice/types";
+import {
+  getQuestionDetail,
+  updateQuestion,
+  type ManageChoice,
+  type ManageQuestionDetail,
+} from "@/lib/api/manage";
 
 const CONNECTION_ERROR_MESSAGE = "연결 실패(엔드포인트/응답 확인 필요)";
 
@@ -51,6 +60,12 @@ type ResultQuestion = PracticeQuestion & {
   explanation?: string | null;
   correctChoiceNumbers?: number[];
   correctAnswerText?: string | null;
+};
+
+type EditableChoice = {
+  number: number;
+  content: string;
+  isCorrect: boolean;
 };
 
 const normalizeResultItem = (raw: unknown): ResultItem | null => {
@@ -190,12 +205,35 @@ const appendExamParams = (
   }
 };
 
+const getManageChoiceNumber = (choice: ManageChoice, index: number) =>
+  typeof choice.number === "number"
+    ? choice.number
+    : typeof choice.choiceNumber === "number"
+      ? choice.choiceNumber
+      : index + 1;
+
+const sortManageChoices = (choices: ManageChoice[]) =>
+  [...choices].sort((left, right) => {
+    const leftNumber = getManageChoiceNumber(left, 0);
+    const rightNumber = getManageChoiceNumber(right, 0);
+    return leftNumber - rightNumber;
+  });
+
+const toEditableChoicesFromManage = (choices: ManageChoice[]): EditableChoice[] =>
+  sortManageChoices(choices).map((choice, index) => ({
+    number: getManageChoiceNumber(choice, index),
+    content: choice.content ?? "",
+    isCorrect: Boolean(choice.isCorrect),
+  }));
+
 export default function PracticeResultPage() {
+  const { t } = useLanguage();
   const router = useRouter();
   const params = useParams();
   const sessionId = params.sessionId as string;
 
   const [storedResult, setStoredResult] = useState<StoredResult | null>(null);
+  const [storageReady, setStorageReady] = useState(false);
   const [questions, setQuestions] = useState<ResultQuestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -205,8 +243,26 @@ export default function PracticeResultPage() {
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const copyTimeoutRef = useRef<number | null>(null);
 
+  // --- Edit state ---
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [loadingEditor, setLoadingEditor] = useState(false);
+  const [savingEditor, setSavingEditor] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSuccess, setEditSuccess] = useState<string | null>(null);
+  const [questionDetail, setQuestionDetail] = useState<ManageQuestionDetail | null>(null);
+  const [editedStem, setEditedStem] = useState("");
+  const [editedChoices, setEditedChoices] = useState<EditableChoice[]>([]);
+  const [editedCorrectAnswerText, setEditedCorrectAnswerText] = useState("");
+  const latestEditQuestionIdRef = useRef<string | null>(null);
+  const [showCropImage, setShowCropImage] = useState(false);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
+    setStorageReady(false);
+    setStoredResult(null);
+    setQuestions([]);
+    setError(null);
+    setLoading(true);
     const stored = sessionStorage.getItem(`practice:result:${sessionId}`);
     if (stored) {
       try {
@@ -215,6 +271,7 @@ export default function PracticeResultPage() {
         setStoredResult(null);
       }
     }
+    setStorageReady(true);
   }, [sessionId]);
 
   useEffect(() => {
@@ -226,27 +283,38 @@ export default function PracticeResultPage() {
   }, []);
 
   useEffect(() => {
+    if (!storageReady) return;
     let active = true;
     const loadResult = async () => {
-    if (!storedResult?.lectureId && !storedResult?.examId) {
-      setLoading(false);
-      setError("Result data missing. Please submit again.");
-      return;
-    }
+      setLoading(true);
+      setError(null);
+      const hasExamSet = Array.isArray(storedResult?.examIds) && storedResult.examIds.length > 0;
+      if (!storedResult?.lectureId && !storedResult?.examId && !hasExamSet) {
+        setLoading(false);
+        setError("Result data missing. Please submit again.");
+        return;
+      }
 
-    try {
+      try {
         const params = new URLSearchParams();
         params.set("includeAnswer", "true");
         if (storedResult.lectureId) {
           appendExamParams(params, storedResult.examIds, storedResult.filterActive);
         }
+        if (!storedResult.lectureId && !storedResult.examId && hasExamSet) {
+          for (const examId of storedResult.examIds ?? []) {
+            params.append("exam_ids", String(examId));
+          }
+        }
         const endpoint = storedResult.lectureId
           ? `/api/practice/lecture/${encodeURIComponent(
-              storedResult.lectureId
+            storedResult.lectureId
+          )}/result?${params.toString()}`
+          : storedResult.examId
+            ? `/api/practice/exam/${encodeURIComponent(
+              storedResult.examId
             )}/result?${params.toString()}`
-          : `/api/practice/exam/${encodeURIComponent(
-              storedResult.examId ?? ""
-            )}/result?${params.toString()}`;
+            : `/api/practice/exam-set/result?${params.toString()}`;
         const response = await apiFetch<unknown>(endpoint, { cache: "no-store" });
         const parsed = lectureResultSchema.safeParse(response);
         if (!parsed.success) {
@@ -254,6 +322,7 @@ export default function PracticeResultPage() {
         }
         if (!active) return;
         setQuestions((parsed.data.questions ?? []) as ResultQuestion[]);
+        setError(null);
       } catch (err) {
         if (!active) return;
         setError(err instanceof Error ? err.message : CONNECTION_ERROR_MESSAGE);
@@ -267,7 +336,13 @@ export default function PracticeResultPage() {
     return () => {
       active = false;
     };
-  }, [storedResult?.lectureId, storedResult?.examId]);
+  }, [
+    storageReady,
+    storedResult?.lectureId,
+    storedResult?.examId,
+    storedResult?.examIds,
+    storedResult?.filterActive,
+  ]);
 
   const resultItems = useMemo(() => {
     const items = storedResult?.items ?? [];
@@ -321,9 +396,9 @@ export default function PracticeResultPage() {
       const textPayload = buildCopyText({ question, result, index });
       const imageUrl = getPrimaryImageUrl(question);
       const notifySuccess = () =>
-        showCopyToast(String(question.questionId), `Copied question ${index + 1}.`);
+        showCopyToast(String(question.questionId), t("practiceResult.copied"));
       const notifyFailure = () =>
-        showCopyToast(String(question.questionId), "Copy failed.");
+        showCopyToast(String(question.questionId), t("practiceResult.copyFailed"));
 
       if (typeof navigator === "undefined" || !navigator.clipboard) {
         notifyFailure();
@@ -363,21 +438,19 @@ export default function PracticeResultPage() {
         notifyFailure();
       }
     },
-    [showCopyToast]
+    [showCopyToast, t]
   );
-
-  const scrollToQuestion = useCallback((questionId: string | number) => {
-    if (typeof document === "undefined") return;
-    const element = document.getElementById(`result-question-${questionId}`);
-    if (element) {
-      element.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  }, []);
 
   const focusQuestion = useCallback(
     (index: number) => {
       if (index < 0 || index >= filteredQuestions.length) return;
       setActiveIndex(index);
+      // Reset edit mode on navigation
+      setIsEditMode(false);
+      setShowCropImage(false);
+      setEditError(null);
+      setEditSuccess(null);
+      setQuestionDetail(null);
     },
     [filteredQuestions]
   );
@@ -390,20 +463,244 @@ export default function PracticeResultPage() {
   }, [activeIndex, filteredQuestions.length]);
 
   useEffect(() => {
-    if (!filteredQuestions.length) return;
-    const question = filteredQuestions[activeIndex];
-    if (!question) return;
-    scrollToQuestion(question.questionId);
-  }, [activeIndex, filteredQuestions, scrollToQuestion]);
+    setShowCropImage(false);
+  }, [sessionId, tab, activeIndex]);
+
+  // --- Edit handlers ---
+  const handleEnterEditMode = useCallback(async () => {
+    const currentQuestion = filteredQuestions[activeIndex];
+    if (!currentQuestion) return;
+    const targetQuestionId = String(currentQuestion.questionId);
+    latestEditQuestionIdRef.current = targetQuestionId;
+    setLoadingEditor(true);
+    setEditError(null);
+    setEditSuccess(null);
+
+    try {
+      const detail = await getQuestionDetail(targetQuestionId);
+      if (latestEditQuestionIdRef.current !== targetQuestionId) return;
+      setQuestionDetail(detail);
+      setEditedStem(detail.content ?? currentQuestion.stem ?? "");
+      setEditedChoices(toEditableChoicesFromManage(detail.choices));
+      setEditedCorrectAnswerText(
+        detail.correctAnswerText ?? detail.answer ?? ""
+      );
+      setIsEditMode(true);
+    } catch (err) {
+      if (latestEditQuestionIdRef.current !== targetQuestionId) return;
+      setEditError(
+        err instanceof Error ? err.message : "문제 정보를 불러오는 데 실패했습니다."
+      );
+    } finally {
+      if (latestEditQuestionIdRef.current === targetQuestionId) {
+        setLoadingEditor(false);
+      }
+    }
+  }, [filteredQuestions, activeIndex]);
+
+  const handleCancelEdit = useCallback(() => {
+    setIsEditMode(false);
+    setEditError(null);
+  }, []);
+
+  const handleSaveEdit = useCallback(async () => {
+    if (!questionDetail) {
+      setEditError("문제 정보를 불러오는 데 실패했습니다.");
+      return;
+    }
+    const currentQuestion = filteredQuestions[activeIndex];
+    if (!currentQuestion) return;
+    const targetQuestionId = String(currentQuestion.questionId);
+    setSavingEditor(true);
+    setEditError(null);
+    setEditSuccess(null);
+
+    try {
+      const type = questionDetail.type || "multiple_choice";
+      const choiceContentByNumber = new Map(
+        editedChoices.map((choice) => [choice.number, choice])
+      );
+      const existingChoices = sortManageChoices(questionDetail.choices);
+      const choicesPayload =
+        type === "short_answer"
+          ? []
+          : existingChoices.map((choice, index) => {
+            const number = getManageChoiceNumber(choice, index);
+            const edited = choiceContentByNumber.get(number);
+            return {
+              id: choice.id,
+              number,
+              content: edited?.content ?? choice.content ?? "",
+              isCorrect: edited?.isCorrect ?? Boolean(choice.isCorrect),
+              imagePath: choice.imagePath ?? null,
+            };
+          });
+
+      const saved = await updateQuestion(questionDetail.id, {
+        content: editedStem,
+        explanation: questionDetail.explanation ?? "",
+        type,
+        lectureId: questionDetail.lectureId ?? null,
+        correctAnswerText:
+          type === "short_answer" ? editedCorrectAnswerText : null,
+        choices: choicesPayload,
+      });
+      if (latestEditQuestionIdRef.current !== targetQuestionId) return;
+
+      // Update local questions state
+      const nextChoices =
+        type === "short_answer"
+          ? []
+          : sortManageChoices(saved.choices).map((choice, idx) => ({
+            number: getManageChoiceNumber(choice, idx),
+            content: choice.content ?? "",
+            image: choice.imagePath ?? undefined,
+          }));
+
+      const newCorrectChoiceNumbers =
+        type === "short_answer"
+          ? []
+          : sortManageChoices(saved.choices)
+            .filter((c) => c.isCorrect)
+            .map((c, idx) => getManageChoiceNumber(c, idx));
+
+      setQuestions((prev) =>
+        prev.map((item) =>
+          String(item.questionId) === targetQuestionId
+            ? {
+              ...item,
+              stem: saved.content ?? editedStem,
+              choices: nextChoices,
+              correctChoiceNumbers: newCorrectChoiceNumbers,
+              correctAnswerText:
+                type === "short_answer"
+                  ? saved.correctAnswerText ?? editedCorrectAnswerText
+                  : item.correctAnswerText,
+            }
+            : item
+        )
+      );
+
+      // --- Re-grade this question against user's answer ---
+      const resultItem = itemsById.get(targetQuestionId);
+      if (resultItem && storedResult) {
+        let newIsCorrect: boolean | null = null;
+        if (type === "short_answer") {
+          const newCorrectText = (saved.correctAnswerText ?? editedCorrectAnswerText ?? "").trim().toLowerCase();
+          const userText = (typeof resultItem.userAnswer === "string" ? resultItem.userAnswer : "").trim().toLowerCase();
+          if (newCorrectText && userText) {
+            newIsCorrect = userText === newCorrectText;
+          }
+        } else {
+          const userAnswer = resultItem.userAnswer;
+          if (Array.isArray(userAnswer) && userAnswer.length > 0) {
+            const userSet = new Set(userAnswer.map(Number));
+            const correctSet = new Set(newCorrectChoiceNumbers);
+            newIsCorrect =
+              userSet.size === correctSet.size &&
+              [...userSet].every((v) => correctSet.has(v));
+          }
+        }
+
+        // Update storedResult items + summary
+        setStoredResult((prev) => {
+          if (!prev) return prev;
+          const updatedItems = (prev.items ?? []).map((raw) => {
+            if (!raw || typeof raw !== "object") return raw;
+            const record = raw as Record<string, unknown>;
+            const rawId = record.questionId ?? record.question_id;
+            if (String(rawId) !== targetQuestionId) return raw;
+            if (typeof newIsCorrect !== "boolean") {
+              return record;
+            }
+            return { ...record, isCorrect: newIsCorrect };
+          });
+
+          // Recount correct answers
+          let correctCount = 0;
+          for (const raw of updatedItems) {
+            if (raw && typeof raw === "object") {
+              const r = raw as Record<string, unknown>;
+              if (r.isCorrect === true) correctCount++;
+            }
+          }
+
+          const updatedResult: StoredResult = {
+            ...prev,
+            items: updatedItems,
+          };
+          if (typeof newIsCorrect === "boolean") {
+            updatedResult.summary = {
+              ...(prev.summary ?? {}),
+              all: {
+                ...(prev.summary?.all ?? {}),
+                correct: correctCount,
+              },
+            };
+          }
+
+          // Persist to sessionStorage
+          if (typeof window !== "undefined") {
+            sessionStorage.setItem(
+              `practice:result:${sessionId}`,
+              JSON.stringify(updatedResult)
+            );
+          }
+          return updatedResult;
+        });
+      }
+
+      setQuestionDetail(saved);
+      setIsEditMode(false);
+      setEditSuccess("수정이 저장되었습니다.");
+    } catch (err) {
+      if (latestEditQuestionIdRef.current !== targetQuestionId) return;
+      setEditError(
+        err instanceof Error ? err.message : "저장에 실패했습니다."
+      );
+    } finally {
+      if (latestEditQuestionIdRef.current === targetQuestionId) {
+        setSavingEditor(false);
+      }
+    }
+  }, [editedChoices, editedCorrectAnswerText, editedStem, filteredQuestions, activeIndex, questionDetail, itemsById, storedResult, sessionId]);
+
+  const updateDraftChoice = useCallback((choiceNumber: number, value: string) => {
+    setEditedChoices((prev) =>
+      prev.map((choice) =>
+        choice.number === choiceNumber ? { ...choice, content: value } : choice
+      )
+    );
+  }, []);
+
+  const toggleChoiceCorrect = useCallback((choiceNumber: number) => {
+    setEditedChoices((prev) =>
+      prev.map((choice) =>
+        choice.number === choiceNumber
+          ? { ...choice, isCorrect: !choice.isCorrect }
+          : choice
+      )
+    );
+  }, []);
 
   const handleKeyboard = useCallback(
     (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target && ["INPUT", "TEXTAREA"].includes(target.tagName)) {
-        return;
-      }
+      if (event.isComposing) return;
+      if (isEditMode) return;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
       if (!filteredQuestions.length) return;
       const key = event.key.toLowerCase();
+
+      if (event.ctrlKey && event.shiftKey && key >= "1" && key <= "9") {
+        event.preventDefault();
+        const targetIndex = Number(key) - 1;
+        if (targetIndex >= 0 && targetIndex < filteredQuestions.length) {
+          focusQuestion(targetIndex);
+        }
+        return;
+      }
+
       if (key === "arrowright" || key === "j") {
         focusQuestion(Math.min(activeIndex + 1, filteredQuestions.length - 1));
       }
@@ -411,7 +708,7 @@ export default function PracticeResultPage() {
         focusQuestion(Math.max(activeIndex - 1, 0));
       }
     },
-    [activeIndex, filteredQuestions.length, focusQuestion]
+    [activeIndex, filteredQuestions.length, focusQuestion, isEditMode]
   );
 
   useEffect(() => {
@@ -429,7 +726,7 @@ export default function PracticeResultPage() {
   if (loading) {
     return (
       <div className="min-h-screen px-4 py-10">
-        <div className="mx-auto w-full max-w-7xl space-y-6">
+        <div className="mx-auto w-full max-w-screen-xl space-y-6">
           <div className="h-10 w-40 animate-pulse rounded-full bg-muted" />
           <div className="h-32 animate-pulse rounded-3xl bg-muted" />
           <div className="h-64 animate-pulse rounded-3xl bg-muted" />
@@ -441,13 +738,13 @@ export default function PracticeResultPage() {
   if (error) {
     return (
       <div className="min-h-screen px-4 py-10">
-        <div className="mx-auto w-full max-w-5xl">
+        <div className="mx-auto w-full max-w-screen-xl">
           <Card className="border border-danger/30 bg-danger/10">
             <CardContent className="space-y-2 p-6">
-              <p className="text-lg font-semibold text-foreground">Unable to load results</p>
+              <p className="text-lg font-semibold text-foreground">{t("practiceResult.errorLoad")}</p>
               <p className="text-sm text-muted-foreground">{error}</p>
               <Button onClick={() => router.back()} className="mt-4">
-                Go back
+                {t("practiceResult.goBack")}
               </Button>
             </CardContent>
           </Card>
@@ -456,52 +753,58 @@ export default function PracticeResultPage() {
     );
   }
 
+  const currentQuestion = filteredQuestions[activeIndex];
+
   return (
     <div className="min-h-screen px-4 py-10">
-      <div className="mx-auto w-full max-w-7xl space-y-8">
+      <div className="mx-auto w-full max-w-screen-xl space-y-8">
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
-            Result
+            {t("practiceResult.title")}
           </p>
-          <h1 className="text-3xl font-semibold text-foreground">Session summary</h1>
+          <h1 className="text-3xl font-semibold text-foreground">{t("practiceResult.sessionSummary")}</h1>
           <p className="text-sm text-muted-foreground">
-            Review your answers and revisit incorrect questions.
+            {t("practiceResult.sessionSummaryDesc")}
           </p>
         </div>
 
         <ResultSummary total={total} answered={answered} correct={correct} />
 
-        <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="grid gap-8 xl:grid-cols-[1fr_320px]">
           <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="inline-flex rounded-full border border-border/70 bg-muted/70 p-1 text-sm">
                 <button
-                  className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                    tab === "all"
-                      ? "bg-primary text-primary-foreground shadow-soft"
-                      : "text-muted-foreground"
-                  }`}
+                  className={`rounded-full px-4 py-2 text-sm font-semibold transition ${tab === "all"
+                    ? "bg-primary text-primary-foreground shadow-soft"
+                    : "text-muted-foreground"
+                    }`}
                   onClick={() => {
                     setTab("all");
                     setActiveIndex(0);
+                    setIsEditMode(false);
+                    setShowCropImage(false);
+                    setQuestionDetail(null);
                   }}
                   type="button"
                 >
-                  All
+                  {t("practiceResult.all")}
                 </button>
                 <button
-                  className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                    tab === "wrong"
-                      ? "bg-primary text-primary-foreground shadow-soft"
-                      : "text-muted-foreground"
-                  }`}
+                  className={`rounded-full px-4 py-2 text-sm font-semibold transition ${tab === "wrong"
+                    ? "bg-primary text-primary-foreground shadow-soft"
+                    : "text-muted-foreground"
+                    }`}
                   onClick={() => {
                     setTab("wrong");
                     setActiveIndex(0);
+                    setIsEditMode(false);
+                    setShowCropImage(false);
+                    setQuestionDetail(null);
                   }}
                   type="button"
                 >
-                  Wrong only
+                  {t("practiceResult.wrongOnly")}
                 </button>
               </div>
               <div className="flex items-center gap-2">
@@ -512,7 +815,7 @@ export default function PracticeResultPage() {
                   disabled={activeIndex === 0 || filteredQuestions.length === 0}
                 >
                   <ArrowLeft className="h-4 w-4" />
-                  Previous
+                  {t("practiceResult.previous")}
                 </Button>
                 <Button
                   size="sm"
@@ -522,76 +825,96 @@ export default function PracticeResultPage() {
                     activeIndex >= filteredQuestions.length - 1
                   }
                 >
-                  Next
+                  {t("practiceResult.next")}
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </div>
             </div>
 
+            {editError && (
+              <div className="rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
+                {editError}
+              </div>
+            )}
+            {editSuccess && (
+              <div className="rounded-lg border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
+                {editSuccess}
+              </div>
+            )}
+
             {filteredQuestions.length === 0 ? (
               <Card className="border border-border/70 bg-card/90">
                 <CardContent className="space-y-2 p-6">
                   <p className="text-sm font-semibold text-foreground">
-                    No questions in this view.
+                    {t("practiceResult.noQuestions")}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    Try switching back to the full list to continue reviewing.
+                    {t("practiceResult.noQuestionsDesc")}
                   </p>
                 </CardContent>
               </Card>
-            ) : (
-              <div className="space-y-6">
-                {filteredQuestions.map((question, index) => {
-                  const result = question.result;
-                  const isCorrect = result?.isCorrect;
-                  const userAnswer = result?.userAnswer;
-                  const correctAnswers =
-                    question.correctChoiceNumbers ??
-                    (Array.isArray(result?.correctAnswer) ? result?.correctAnswer : []);
-                  const correctAnswerText =
-                    question.correctAnswerText ?? result?.correctAnswerText ?? null;
-                  const statusVariant =
-                    isCorrect === true
-                      ? "success"
-                      : isCorrect === false
-                        ? "danger"
-                        : "neutral";
-                  const statusLabel =
-                    isCorrect === true
-                      ? "Correct"
-                      : isCorrect === false
-                        ? "Wrong"
-                        : "Pending";
-                  const isActive = index === activeIndex;
-                  const { text: stemText, images: stemImages } = parseStemContent(
-                    question.stem ?? ""
-                  );
-                  const imageCandidates = [
-                    resolveImageUrl(question.imageUrl ?? question.image),
-                    ...stemImages.map((image) => resolveImageUrl(image)),
-                  ].filter((value): value is string => Boolean(value));
-                  const questionImages = Array.from(new Set(imageCandidates));
-                  return (
-                    <Card
-                      key={question.questionId}
-                      id={`result-question-${question.questionId}`}
-                      className={`scroll-mt-24 border border-border/70 bg-card/90 ${
-                        isActive ? "ring-2 ring-primary/30" : ""
-                      }`}
-                    >
-                      <CardContent className="space-y-5 p-6">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="space-y-2">
-                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                              Question {index + 1} of {filteredQuestions.length}
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <Badge variant={statusVariant}>{statusLabel}</Badge>
-                              {!result?.isAnswered && (
-                                <Badge variant="neutral">Unanswered</Badge>
-                              )}
-                            </div>
+            ) : currentQuestion ? (
+              (() => {
+                const question = currentQuestion;
+                const index = activeIndex;
+                const result = question.result;
+                const isCorrect = result?.isCorrect;
+                const userAnswer = result?.userAnswer;
+                const correctAnswers =
+                  question.correctChoiceNumbers ??
+                  (Array.isArray(result?.correctAnswer) ? result?.correctAnswer : []);
+                const correctAnswerText =
+                  question.correctAnswerText ?? result?.correctAnswerText ?? null;
+                const statusVariant =
+                  isCorrect === true
+                    ? "success"
+                    : isCorrect === false
+                      ? "danger"
+                      : "neutral";
+                const statusLabel =
+                  isCorrect === true
+                    ? t("practiceResult.status.correct")
+                    : isCorrect === false
+                      ? t("practiceResult.status.wrong")
+                      : t("practiceResult.status.pending");
+                const { text: stemText, images: stemImages } = parseStemContent(
+                  question.stem ?? ""
+                );
+                const imageCandidates = [
+                  resolveImageUrl(question.imageUrl ?? question.image),
+                  ...stemImages.map((image) => resolveImageUrl(image)),
+                ].filter((value): value is string => Boolean(value));
+                const questionImages = Array.from(new Set(imageCandidates));
+                const detailMatchesCurrentQuestion =
+                  questionDetail !== null &&
+                  String(questionDetail.id) === String(question.questionId);
+                const questionCropImage = resolveImageUrl(question.originalImageUrl);
+                const referenceImage = detailMatchesCurrentQuestion
+                  ? resolveImageUrl(questionDetail?.originalImageUrl) ?? questionCropImage
+                  : questionCropImage;
+                const isShortAnswerEditor =
+                  questionDetail?.type === "short_answer" || Boolean(question.isShortAnswer);
+
+                return (
+                  <Card
+                    key={question.questionId}
+                    id={`result-question-${question.questionId}`}
+                    className="border border-border/70 bg-card/90 ring-2 ring-primary/30"
+                  >
+                    <CardContent className="space-y-5 p-6">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="space-y-2">
+                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                            {t("practiceResult.question")} {index + 1} {t("practiceResult.of")} {filteredQuestions.length}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={statusVariant}>{statusLabel}</Badge>
+                            {!result?.isAnswered && (
+                              <Badge variant="neutral">{t("practiceResult.unanswered")}</Badge>
+                            )}
                           </div>
+                        </div>
+                        <div className="flex items-center gap-2">
                           <Button
                             variant="outline"
                             size="sm"
@@ -603,138 +926,279 @@ export default function PracticeResultPage() {
                             ) : (
                               <Copy className="h-4 w-4" />
                             )}
-                            {copiedId === String(question.questionId) ? "Copied" : "Copy"}
+                            {copiedId === String(question.questionId) ? t("practiceResult.copied") : t("practiceResult.copy")}
                           </Button>
-                        </div>
-
-                        <div className="space-y-3">
-                          <p className="text-base leading-relaxed text-foreground">
-                            {stemText || "No prompt available."}
-                          </p>
-                          {questionImages.length > 0 && (
-                            <div className="grid gap-3 sm:grid-cols-2">
-                              {questionImages.map((src, imageIndex) => (
-                                <img
-                                  key={`${question.questionId}-image-${imageIndex}`}
-                                  src={src}
-                                  alt="Question visual"
-                                  className="max-h-96 w-full rounded-xl border border-border/60 object-contain"
-                                />
-                              ))}
-                            </div>
+                          {!isEditMode && (
+                            <Button
+                              variant={showCropImage ? "secondary" : "outline"}
+                              size="sm"
+                              onClick={() => setShowCropImage((prev) => !prev)}
+                              className="rounded-full"
+                              disabled={!questionCropImage}
+                            >
+                              <ImageIcon className="h-4 w-4" />
+                              {showCropImage ? "크롭 이미지 숨기기" : "크롭 이미지"}
+                            </Button>
+                          )}
+                          {!isEditMode ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => { void handleEnterEditMode(); }}
+                              disabled={loadingEditor}
+                            >
+                              {loadingEditor ? "불러오는 중..." : "수정"}
+                            </Button>
+                          ) : (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleCancelEdit}
+                                disabled={savingEditor}
+                              >
+                                취소
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={() => { void handleSaveEdit(); }}
+                                disabled={savingEditor}
+                              >
+                                {savingEditor ? "저장 중..." : "저장"}
+                              </Button>
+                            </>
                           )}
                         </div>
+                      </div>
 
-                        <div className="grid gap-2 rounded-xl border border-border/60 bg-muted/50 px-4 py-3 text-sm">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="text-muted-foreground">Your answer</span>
-                            <span className="font-semibold text-foreground">
-                              {formatAnswer(userAnswer)}
-                            </span>
-                          </div>
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="text-muted-foreground">Correct answer</span>
-                            <span className="font-semibold text-foreground">
-                              {question.isShortAnswer
-                                ? formatAnswer(correctAnswerText)
-                                : formatAnswer(correctAnswers)}
-                            </span>
-                          </div>
-                        </div>
-
-                        {question.isShortAnswer ? (
-                          isCorrect === null ? (
-                            <p className="text-xs text-muted-foreground">
-                              Short answers may require manual grading.
-                            </p>
-                          ) : null
-                        ) : (
-                          <div className="space-y-2 text-sm">
+                      {isEditMode ? (
+                        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,1fr)] items-start">
+                          <div className="space-y-5">
                             <div className="space-y-2">
-                              {(question.choices ?? []).map((choice, choiceIndex) => {
-                                const choiceId =
-                                  typeof choice.number === "number"
-                                    ? choice.number
-                                    : choiceIndex + 1;
-                                const isUserChoice = Array.isArray(userAnswer)
-                                  ? userAnswer.includes(choiceId)
-                                  : false;
-                                const isCorrectChoice = Array.isArray(correctAnswers)
-                                  ? correctAnswers.includes(choiceId)
-                                  : false;
-                                const choiceImage = resolveImageUrl(
-                                  choice.imageUrl ?? choice.image
-                                );
-                                return (
-                                  <div
-                                    key={choiceId}
-                                    className={`rounded-xl border px-4 py-3 ${
-                                      isCorrectChoice
+                              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                                문제 수정 모드
+                              </p>
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-sm font-semibold text-foreground">
+                                문제 내용
+                              </label>
+                              <Textarea
+                                value={editedStem}
+                                onChange={(event) => setEditedStem(event.target.value)}
+                                className="min-h-[180px]"
+                              />
+                            </div>
+                            {isShortAnswerEditor ? (
+                              <div className="space-y-2">
+                                <label className="text-sm font-semibold text-foreground">
+                                  정답
+                                </label>
+                                <Input
+                                  value={editedCorrectAnswerText}
+                                  onChange={(event) =>
+                                    setEditedCorrectAnswerText(event.target.value)
+                                  }
+                                  placeholder="정답 텍스트를 입력하세요"
+                                />
+                              </div>
+                            ) : (
+                              <div className="space-y-3">
+                                {editedChoices.map((choice) => (
+                                  <div key={`edit-choice-${choice.number}`} className="space-y-2">
+                                    <div className="flex items-center gap-2">
+                                      <label className="text-sm font-semibold text-foreground">
+                                        선택지 {choice.number}
+                                      </label>
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleChoiceCorrect(choice.number)}
+                                        className={`rounded-md border px-2 py-0.5 text-xs font-semibold transition ${choice.isCorrect
+                                          ? "border-success/50 bg-success/20 text-success"
+                                          : "border-border/70 bg-card text-muted-foreground hover:bg-muted"
+                                          }`}
+                                      >
+                                        {choice.isCorrect ? "✓ 정답" : "오답"}
+                                      </button>
+                                    </div>
+                                    <Textarea
+                                      value={choice.content}
+                                      onChange={(event) =>
+                                        updateDraftChoice(choice.number, event.target.value)
+                                      }
+                                      className="min-h-[96px]"
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <Card className="border border-border/70 bg-card/90 shadow-soft">
+                            <CardContent className="space-y-3 p-6">
+                              <p className="text-sm font-semibold text-foreground">
+                                원본 이미지
+                              </p>
+                              {typeof referenceImage === "string" && referenceImage.length > 0 ? (
+                                <img
+                                  src={referenceImage}
+                                  alt="원본 이미지"
+                                  className="max-h-[640px] w-full rounded-xl border border-border/60 object-contain"
+                                />
+                              ) : (
+                                <div className="rounded-xl border border-dashed border-border/70 bg-muted/30 px-4 py-8 text-sm text-muted-foreground">
+                                  원본 이미지가 없습니다
+                                </div>
+                              )}
+                            </CardContent>
+                          </Card>
+                        </div>
+                      ) : (
+                        <div className="grid gap-6 lg:grid-cols-2 items-start">
+                          <div className="space-y-4">
+                            <div className="space-y-3">
+                              <p className="text-base leading-relaxed text-foreground whitespace-pre-wrap">
+                                {stemText || t("practiceResult.noPrompt")}
+                              </p>
+                              {questionImages.length > 0 && (
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                  {questionImages.map((src, imageIndex) => (
+                                    <img
+                                      key={`${question.questionId}-question-image-${imageIndex}`}
+                                      src={src}
+                                      alt="문제 이미지"
+                                      className="max-h-96 w-full rounded-xl border border-border/60 object-contain"
+                                    />
+                                  ))}
+                                </div>
+                              )}
+                              {showCropImage && questionCropImage && (
+                                <div className="space-y-2">
+                                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                                    PDF 크롭 이미지
+                                  </p>
+                                  <img
+                                    src={questionCropImage}
+                                    alt="PDF 크롭 이미지"
+                                    className="max-h-96 w-full rounded-xl border border-border/60 object-contain"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                            {question.explanation && (
+                              <details className="rounded-xl border border-border/70 bg-muted/60 px-4 py-3 text-sm">
+                                <summary className="cursor-pointer font-semibold text-foreground">
+                                  {t("practiceResult.explanation")}
+                                </summary>
+                                <p className="mt-2 text-muted-foreground whitespace-pre-wrap">
+                                  {question.explanation}
+                                </p>
+                              </details>
+                            )}
+                          </div>
+
+                          <div className="space-y-4">
+                            <div className="grid gap-2 rounded-xl border border-border/60 bg-muted/50 px-4 py-3 text-sm">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="text-muted-foreground">{t("practiceResult.yourAnswer")}</span>
+                                <span className="font-semibold text-foreground">
+                                  {formatAnswer(userAnswer)}
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="text-muted-foreground">{t("practiceResult.correctAnswer")}</span>
+                                <span className="font-semibold text-foreground">
+                                  {question.isShortAnswer
+                                    ? formatAnswer(correctAnswerText)
+                                    : formatAnswer(correctAnswers)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {question.isShortAnswer ? (
+                              isCorrect === null ? (
+                                <p className="text-xs text-muted-foreground">
+                                  {t("practiceResult.manualGrading")}
+                                </p>
+                              ) : null
+                            ) : (
+                              <div className="space-y-2 text-sm">
+                                {(question.choices ?? []).map((choice, choiceIndex) => {
+                                  const choiceId =
+                                    typeof choice.number === "number"
+                                      ? choice.number
+                                      : choiceIndex + 1;
+                                  const isUserChoice = Array.isArray(userAnswer)
+                                    ? userAnswer.includes(choiceId)
+                                    : false;
+                                  const isCorrectChoice = Array.isArray(correctAnswers)
+                                    ? correctAnswers.includes(choiceId)
+                                    : false;
+                                  const choiceImage = resolveImageUrl(
+                                    choice.imageUrl ?? choice.image
+                                  );
+                                  return (
+                                    <div
+                                      key={choiceId}
+                                      className={`flex items-start gap-3 rounded-xl border px-4 py-3 ${isCorrectChoice
                                         ? "border-success/50 bg-success/10"
                                         : isUserChoice
                                           ? "border-danger/40 bg-danger/10"
                                           : "border-border/70 bg-card"
-                                    }`}
-                                  >
-                                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                                      {choiceId}
+                                        }`}
+                                    >
+                                      <div className={`text-sm font-semibold shrink-0 ${isCorrectChoice || isUserChoice ? (isCorrectChoice ? "text-success" : "text-danger") : "text-muted-foreground"
+                                        }`}
+                                      >
+                                        {choiceId}
+                                      </div>
+                                      <div className="flex-1 space-y-2">
+                                        <p className="text-sm text-foreground">
+                                          {choice.content ?? t("practiceResult.choice")}
+                                        </p>
+                                        {choiceImage && (
+                                          <img
+                                            src={choiceImage}
+                                            alt={`${t("practiceResult.choice")} ${choiceId}`}
+                                            className="mt-2 max-h-48 rounded-lg border border-border/60 object-contain"
+                                          />
+                                        )}
+                                      </div>
                                     </div>
-                                    <p className="text-sm text-foreground">
-                                      {choice.content ?? "Choice"}
-                                    </p>
-                                    {choiceImage && (
-                                      <img
-                                        src={choiceImage}
-                                        alt={`Choice ${choiceId}`}
-                                        className="mt-2 max-h-48 rounded-lg border border-border/60 object-contain"
-                                      />
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
-                        )}
-
-                        {question.explanation && (
-                          <details className="rounded-xl border border-border/70 bg-muted/60 px-4 py-3 text-sm">
-                            <summary className="cursor-pointer font-semibold text-foreground">
-                              Explanation
-                            </summary>
-                            <p className="mt-2 text-muted-foreground">
-                              {question.explanation}
-                            </p>
-                          </details>
-                        )}
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })()
+            ) : null}
           </div>
 
           <aside className="space-y-4 xl:sticky xl:top-24">
             <Card className="border border-border/70 bg-card/85 shadow-soft">
               <CardContent className="space-y-4 p-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                  Review tools
+                  {t("practiceResult.reviewTools")}
                 </p>
                 <div className="grid gap-2 text-sm">
                   <div className="flex items-center justify-between text-muted-foreground">
-                    <span>View</span>
+                    <span>{t("practiceResult.view")}</span>
                     <span className="font-semibold text-foreground">
-                      {tab === "all" ? "All questions" : "Wrong only"}
+                      {tab === "all" ? t("practiceResult.allQuestions") : t("practiceResult.wrongOnly")}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-muted-foreground">
-                    <span>Questions in view</span>
+                    <span>{t("practiceResult.questionsInView")}</span>
                     <span className="font-semibold text-foreground">
                       {filteredQuestions.length}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-muted-foreground">
-                    <span>Wrong answers</span>
+                    <span>{t("practiceResult.wrongAnswers")}</span>
                     <span className="font-semibold text-foreground">{wrongCount}</span>
                   </div>
                 </div>
@@ -745,10 +1209,13 @@ export default function PracticeResultPage() {
                   onClick={() => {
                     setTab("wrong");
                     setActiveIndex(0);
+                    setIsEditMode(false);
+                    setShowCropImage(false);
+                    setQuestionDetail(null);
                   }}
                   disabled={wrongCount === 0}
                 >
-                  Retry wrong answers
+                  {t("practiceResult.retryWrong")}
                 </Button>
               </CardContent>
             </Card>
@@ -756,10 +1223,10 @@ export default function PracticeResultPage() {
             <Card className="border border-border/70 bg-card/85 shadow-soft">
               <CardContent className="space-y-4 p-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                  Question navigator
+                  {t("practiceResult.questionNavigator")}
                 </p>
                 {filteredQuestions.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No questions to jump to.</p>
+                  <p className="text-xs text-muted-foreground">{t("practiceResult.noQuestionsToJump")}</p>
                 ) : (
                   <div className="grid grid-cols-6 gap-2">
                     {filteredQuestions.map((question, index) => {
@@ -771,15 +1238,14 @@ export default function PracticeResultPage() {
                           key={question.questionId}
                           type="button"
                           onClick={() => focusQuestion(index)}
-                          className={`relative flex h-10 w-10 items-center justify-center rounded-xl border text-sm font-semibold transition ${
-                            isActive
-                              ? "border-primary bg-primary text-primary-foreground shadow-soft"
-                              : isCorrect === true
-                                ? "border-success/40 bg-success/20 text-success"
-                                : isCorrect === false
-                                  ? "border-danger/40 bg-danger/10 text-danger"
-                                  : "border-border/70 bg-card text-muted-foreground hover:bg-muted"
-                          }`}
+                          className={`relative flex h-10 w-10 items-center justify-center rounded-xl border text-sm font-semibold transition ${isActive
+                            ? "border-primary bg-primary text-primary-foreground shadow-soft"
+                            : isCorrect === true
+                              ? "border-success/40 bg-success/20 text-success"
+                              : isCorrect === false
+                                ? "border-danger/40 bg-danger/10 text-danger"
+                                : "border-border/70 bg-card text-muted-foreground hover:bg-muted"
+                            }`}
                         >
                           {index + 1}
                         </button>

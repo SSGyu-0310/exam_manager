@@ -97,5 +97,19 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}) {
     throw new HttpError({ ok: false, status: response.status, message });
   }
 
-  return (await response.json()) as T;
+  // Handle empty or non-JSON success responses gracefully
+  const contentType = response.headers.get("content-type") ?? "";
+  if (
+    response.status === 204 ||
+    response.headers.get("content-length") === "0" ||
+    !contentType.includes("application/json")
+  ) {
+    return null as T;
+  }
+
+  try {
+    return (await response.json()) as T;
+  } catch {
+    return null as T;
+  }
 }
