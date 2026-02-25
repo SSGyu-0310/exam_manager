@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
-export default function ReviewPage() {
-    redirect("/review/notes");
+export default function Page() {
+  redirect("/review/notes");
 }

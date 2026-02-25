@@ -16,10 +16,16 @@ Example:
 - `scripts/dev-init-db`: initialize Postgres schema + FTS for local dev
 - `scripts/dev-backend`: run Flask in development mode on host (auto-start DB by default)
 - `scripts/dev-frontend`: run Next.js dev server on host
+- `scripts/dev-stack`: one-command launcher for DB + backend + frontend (`up/down/status/logs`)
 - `scripts/dev-test-backend`: run backend pytest against Postgres test DB (auto-create if missing)
 
 Example:
 ```bash
+./scripts/dev-stack up --init-db
+./scripts/dev-stack logs all
+./scripts/dev-stack down
+
+# split mode
 ./scripts/dev-db up -d db
 ./scripts/dev-init-db
 ./scripts/dev-backend   # terminal 1

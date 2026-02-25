@@ -1,0 +1,386 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RUN_DIR="$ROOT_DIR/.dev-runtime"
+LOG_DIR="$RUN_DIR/logs"
+PID_DIR="$RUN_DIR/pids"
+
+mkdir -p "$LOG_DIR" "$PID_DIR"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./scripts/dev-stack up [--init-db]
+  ./scripts/dev-stack down [--keep-db]
+  ./scripts/dev-stack restart [--init-db]
+  ./scripts/dev-stack status
+  ./scripts/dev-stack logs [backend|frontend|all]
+
+Examples:
+  ./scripts/dev-stack up --init-db
+  ./scripts/dev-stack logs all
+  ./scripts/dev-stack down
+EOF
+}
+
+pid_file_for() {
+  local name="$1"
+  echo "$PID_DIR/$name.pid"
+}
+
+log_file_for() {
+  local name="$1"
+  echo "$LOG_DIR/$name.log"
+}
+
+is_group_running() {
+  local pgid="$1"
+  kill -0 -- "-$pgid" >/dev/null 2>&1
+}
+
+is_port_listening() {
+  local port="$1"
+  ss -ltn 2>/dev/null | awk '{print $4}' | grep -E "[:.]${port}$" >/dev/null 2>&1
+}
+
+service_port() {
+  local name="$1"
+  case "$name" in
+    backend)
+      echo "5000"
+      ;;
+    frontend)
+      echo "4000"
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
+
+stop_process_fallback() {
+  local name="$1"
+  case "$name" in
+    backend)
+      if command -v pkill >/dev/null 2>&1; then
+        pkill -f "run.py" >/dev/null 2>&1 || true
+      fi
+      ;;
+    frontend)
+      if command -v pkill >/dev/null 2>&1; then
+        pkill -f "next dev -H 0.0.0.0 -p 4000" >/dev/null 2>&1 || true
+      fi
+      ;;
+  esac
+}
+
+spawn_detached() {
+  local command="$1"
+  if command -v setsid >/dev/null 2>&1; then
+    nohup setsid bash -lc "$command"
+  else
+    nohup bash -lc "$command"
+  fi
+}
+
+start_process() {
+  local name="$1"
+  local command="$2"
+  local pid_file
+  pid_file="$(pid_file_for "$name")"
+  local log_file
+  log_file="$(log_file_for "$name")"
+  local expected_port
+  expected_port="$(service_port "$name")"
+  touch "$log_file"
+
+  if [[ -f "$pid_file" ]]; then
+    local existing_pgid
+    existing_pgid="$(cat "$pid_file")"
+    if [[ -n "$existing_pgid" ]] && is_group_running "$existing_pgid"; then
+      echo "[dev-stack] $name already running (pgid=$existing_pgid)"
+      return 0
+    fi
+    rm -f "$pid_file"
+  fi
+
+  if [[ -n "$expected_port" ]] && is_port_listening "$expected_port"; then
+    echo "[dev-stack] $name already listening on :$expected_port (not managed by dev-stack)"
+    return 0
+  fi
+
+  echo "[dev-stack] starting $name"
+  spawn_detached "$command" >>"$log_file" 2>&1 &
+  local leader_pid=$!
+  local new_pgid="$leader_pid"
+  echo "$new_pgid" >"$pid_file"
+
+  local started=0
+  for _ in $(seq 1 24); do
+    if is_group_running "$new_pgid"; then
+      started=1
+      break
+    fi
+    if [[ -n "$expected_port" ]] && is_port_listening "$expected_port"; then
+      started=1
+      break
+    fi
+    sleep 0.5
+  done
+
+  if [[ "$started" -ne 1 ]]; then
+    echo "[dev-stack] failed to start $name. recent logs:"
+    tail -n 40 "$log_file" || true
+    rm -f "$pid_file"
+    exit 1
+  fi
+
+  echo "[dev-stack] $name started (pgid=$new_pgid)"
+}
+
+stop_process() {
+  local name="$1"
+  local pid_file
+  pid_file="$(pid_file_for "$name")"
+  if [[ ! -f "$pid_file" ]]; then
+    local expected_port
+    expected_port="$(service_port "$name")"
+    if [[ -n "$expected_port" ]] && is_port_listening "$expected_port"; then
+      echo "[dev-stack] stopping $name via fallback"
+      stop_process_fallback "$name"
+      for _ in $(seq 1 20); do
+        if ! is_port_listening "$expected_port"; then
+          echo "[dev-stack] $name stopped"
+          return 0
+        fi
+        sleep 0.25
+      done
+      echo "[dev-stack] $name still listening on :$expected_port"
+      return 1
+    fi
+
+    echo "[dev-stack] $name not running"
+    return 0
+  fi
+
+  local pgid
+  pgid="$(cat "$pid_file")"
+  rm -f "$pid_file"
+
+  if [[ -z "$pgid" ]] || ! is_group_running "$pgid"; then
+    local expected_port
+    expected_port="$(service_port "$name")"
+    if [[ -n "$expected_port" ]] && is_port_listening "$expected_port"; then
+      echo "[dev-stack] stopping $name via fallback"
+      stop_process_fallback "$name"
+      for _ in $(seq 1 20); do
+        if ! is_port_listening "$expected_port"; then
+          echo "[dev-stack] $name stopped"
+          return 0
+        fi
+        sleep 0.25
+      done
+    fi
+    echo "[dev-stack] $name already stopped"
+    return 0
+  fi
+
+  echo "[dev-stack] stopping $name (pgid=$pgid)"
+  kill -- "-$pgid" >/dev/null 2>&1 || true
+  for _ in $(seq 1 20); do
+    if ! is_group_running "$pgid"; then
+      echo "[dev-stack] $name stopped"
+      return 0
+    fi
+    sleep 0.25
+  done
+
+  echo "[dev-stack] force killing $name (pgid=$pgid)"
+  kill -9 -- "-$pgid" >/dev/null 2>&1 || true
+}
+
+print_status() {
+  local name="$1"
+  local pid_file
+  pid_file="$(pid_file_for "$name")"
+  if [[ -f "$pid_file" ]]; then
+    local pgid
+    pgid="$(cat "$pid_file")"
+    if [[ -n "$pgid" ]] && is_group_running "$pgid"; then
+      echo "[dev-stack] $name: running (pgid=$pgid)"
+      return 0
+    fi
+    local expected_port
+    expected_port="$(service_port "$name")"
+    if [[ -n "$expected_port" ]] && is_port_listening "$expected_port"; then
+      echo "[dev-stack] $name: running (managed, detached)"
+      return 0
+    fi
+    rm -f "$pid_file"
+  fi
+
+  local expected_port
+  expected_port="$(service_port "$name")"
+  if [[ -n "$expected_port" ]] && is_port_listening "$expected_port"; then
+    echo "[dev-stack] $name: running on :$expected_port (not managed by dev-stack)"
+    return 0
+  fi
+
+  echo "[dev-stack] $name: stopped"
+}
+
+start_db_only() {
+  echo "[dev-stack] starting db container"
+  "$ROOT_DIR/scripts/dev-db" up -d db >/dev/null
+}
+
+run_db_init() {
+  echo "[dev-stack] initializing db schema/migrations/fts"
+  "$ROOT_DIR/scripts/dev-init-db"
+}
+
+db_status() {
+  echo "[dev-stack] db container status"
+  local output
+  if output="$("$ROOT_DIR/scripts/dev-db" ps db 2>&1)"; then
+    if [[ -n "$output" ]]; then
+      echo "$output"
+    fi
+    return 0
+  fi
+
+  echo "[dev-stack] db status unavailable (docker permission or daemon issue)."
+  if [[ "${DEV_STACK_DEBUG:-0}" == "1" && -n "$output" ]]; then
+    echo "$output" | tail -n 1
+  else
+    echo "[dev-stack] set DEV_STACK_DEBUG=1 for raw docker error output."
+  fi
+}
+
+command="${1:-}"
+if [[ -z "$command" ]]; then
+  usage
+  exit 1
+fi
+shift || true
+
+case "$command" in
+  up)
+    init_db=0
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --init-db)
+          init_db=1
+          ;;
+        -h|--help)
+          usage
+          exit 0
+          ;;
+        *)
+          echo "[dev-stack] unknown option: $1" >&2
+          usage
+          exit 1
+          ;;
+      esac
+      shift
+    done
+
+    if [[ "$init_db" -eq 1 ]]; then
+      run_db_init
+    else
+      start_db_only
+    fi
+
+    start_process "backend" "cd \"$ROOT_DIR\" && FLASK_DEBUG=0 \"$ROOT_DIR/scripts/dev-backend\""
+    start_process "frontend" "cd \"$ROOT_DIR\" && \"$ROOT_DIR/scripts/dev-frontend\""
+
+    echo "[dev-stack] ready"
+    echo "[dev-stack] web: http://localhost:4000"
+    echo "[dev-stack] api: http://localhost:5000/health"
+    echo "[dev-stack] logs: ./scripts/dev-stack logs all"
+    ;;
+  down)
+    keep_db=0
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --keep-db)
+          keep_db=1
+          ;;
+        -h|--help)
+          usage
+          exit 0
+          ;;
+        *)
+          echo "[dev-stack] unknown option: $1" >&2
+          usage
+          exit 1
+          ;;
+      esac
+      shift
+    done
+
+    stop_process "frontend"
+    stop_process "backend"
+
+    if [[ "$keep_db" -eq 0 ]]; then
+      echo "[dev-stack] stopping db container"
+      "$ROOT_DIR/scripts/dev-db" down >/dev/null || true
+    else
+      echo "[dev-stack] keeping db container running"
+    fi
+    ;;
+  restart)
+    init_db_flag=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --init-db)
+          init_db_flag="--init-db"
+          ;;
+        -h|--help)
+          usage
+          exit 0
+          ;;
+        *)
+          echo "[dev-stack] unknown option: $1" >&2
+          usage
+          exit 1
+          ;;
+      esac
+      shift
+    done
+    "$ROOT_DIR/scripts/dev-stack" down --keep-db
+    "$ROOT_DIR/scripts/dev-stack" up $init_db_flag
+    ;;
+  status)
+    print_status "backend"
+    print_status "frontend"
+    db_status
+    ;;
+  logs)
+    target="${1:-all}"
+    case "$target" in
+      backend|frontend)
+        touch "$(log_file_for "$target")"
+        tail -n 120 -f "$(log_file_for "$target")"
+        ;;
+      all)
+        touch "$(log_file_for backend)" "$(log_file_for frontend)"
+        tail -n 120 -f "$(log_file_for backend)" "$(log_file_for frontend)"
+        ;;
+      *)
+        echo "[dev-stack] unknown logs target: $target" >&2
+        usage
+        exit 1
+        ;;
+    esac
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    echo "[dev-stack] unknown command: $command" >&2
+    usage
+    exit 1
+    ;;
+esac

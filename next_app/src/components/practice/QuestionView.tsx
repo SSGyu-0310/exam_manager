@@ -1,10 +1,24 @@
+/* eslint-disable @next/next/no-img-element */
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Bookmark, BookmarkCheck } from "lucide-react";
 
+import { useLanguage } from "@/context/LanguageContext";
+import {
+  getQuestionDetail,
+  updateQuestion,
+  type ManageChoice,
+  type ManageQuestionDetail,
+} from "@/lib/api/manage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { ChoiceList } from "@/components/practice/ChoiceList";
-import type { AnswerPayload, PracticeQuestion } from "@/components/practice/types";
+import type {
+  AnswerPayload,
+  PracticeChoice,
+  PracticeQuestion,
+} from "@/components/practice/types";
 import { resolveImageUrl } from "@/lib/image";
 
 type QuestionViewProps = {
@@ -15,7 +29,46 @@ type QuestionViewProps = {
   onAnswerChange: (payload: AnswerPayload | undefined) => void;
   bookmarked?: boolean;
   onToggleBookmark?: () => void;
+  onQuestionUpdated?: (
+    questionId: string,
+    payload: { stem: string; choices: PracticeChoice[] }
+  ) => void;
+  onEditModeChange?: (editing: boolean) => void;
 };
+
+type EditableChoice = {
+  number: number;
+  content: string;
+};
+
+const getChoiceId = (choice: PracticeChoice, index: number) =>
+  typeof choice.number === "number" ? choice.number : index + 1;
+
+const getManageChoiceNumber = (choice: ManageChoice, index: number) =>
+  typeof choice.number === "number"
+    ? choice.number
+    : typeof choice.choiceNumber === "number"
+      ? choice.choiceNumber
+      : index + 1;
+
+const sortManageChoices = (choices: ManageChoice[]) =>
+  [...choices].sort((left, right) => {
+    const leftNumber = getManageChoiceNumber(left, 0);
+    const rightNumber = getManageChoiceNumber(right, 0);
+    return leftNumber - rightNumber;
+  });
+
+const toEditableChoicesFromPractice = (choices: PracticeChoice[] | undefined) =>
+  (choices ?? []).map((choice, index) => ({
+    number: getChoiceId(choice, index),
+    content: choice.content ?? "",
+  }));
+
+const toEditableChoicesFromManage = (choices: ManageChoice[]) =>
+  sortManageChoices(choices).map((choice, index) => ({
+    number: getManageChoiceNumber(choice, index),
+    content: choice.content ?? "",
+  }));
 
 export function QuestionView({
   question,
@@ -25,78 +78,368 @@ export function QuestionView({
   onAnswerChange,
   bookmarked,
   onToggleBookmark,
+  onQuestionUpdated,
+  onEditModeChange,
 }: QuestionViewProps) {
+  const { t } = useLanguage();
   const isShortAnswer = Boolean(question.isShortAnswer);
   const selectedValues =
     answer && answer.type === "mcq" && Array.isArray(answer.value) ? answer.value : [];
   const shortAnswerValue = answer && answer.type === "short" ? answer.value : "";
   const image = resolveImageUrl(question.imageUrl ?? question.image);
 
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [loadingEditor, setLoadingEditor] = useState(false);
+  const [savingEditor, setSavingEditor] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSuccess, setEditSuccess] = useState<string | null>(null);
+  const [questionDetail, setQuestionDetail] = useState<ManageQuestionDetail | null>(null);
+  const [editedStem, setEditedStem] = useState(question.stem ?? "");
+  const [editedChoices, setEditedChoices] = useState<EditableChoice[]>(
+    toEditableChoicesFromPractice(question.choices)
+  );
+  const latestQuestionIdRef = useRef(String(question.questionId));
+
+  useEffect(() => {
+    const questionId = String(question.questionId);
+    latestQuestionIdRef.current = questionId;
+    setIsEditMode(false);
+    setLoadingEditor(false);
+    setSavingEditor(false);
+    setEditError(null);
+    setEditSuccess(null);
+    setQuestionDetail(null);
+    setEditedStem(question.stem ?? "");
+    setEditedChoices(toEditableChoicesFromPractice(question.choices));
+  }, [question.questionId, question.stem, question.choices]);
+
+  useEffect(() => {
+    onEditModeChange?.(isEditMode);
+  }, [isEditMode, onEditModeChange]);
+
+  const isShortAnswerEditor =
+    questionDetail?.type === "short_answer" || Boolean(question.isShortAnswer);
+
+  const referenceImage = resolveImageUrl(
+    questionDetail?.originalImageUrl ??
+      question.originalImageUrl
+  );
+
+  const updateDraftChoice = useCallback((choiceNumber: number, value: string) => {
+    setEditedChoices((prev) =>
+      prev.map((choice) =>
+        choice.number === choiceNumber ? { ...choice, content: value } : choice
+      )
+    );
+  }, []);
+
+  const handleEnterEditMode = useCallback(async () => {
+    const targetQuestionId = String(question.questionId);
+    setLoadingEditor(true);
+    setEditError(null);
+    setEditSuccess(null);
+
+    try {
+      const detail = await getQuestionDetail(targetQuestionId);
+      if (latestQuestionIdRef.current !== targetQuestionId) {
+        return;
+      }
+      setQuestionDetail(detail);
+      setEditedStem(detail.content ?? question.stem ?? "");
+      setEditedChoices(toEditableChoicesFromManage(detail.choices));
+      setIsEditMode(true);
+    } catch (err) {
+      if (latestQuestionIdRef.current !== targetQuestionId) {
+        return;
+      }
+      setEditError(
+        err instanceof Error ? err.message : t("practiceSession.editLoadFailed")
+      );
+    } finally {
+      if (latestQuestionIdRef.current === targetQuestionId) {
+        setLoadingEditor(false);
+      }
+    }
+  }, [question.questionId, question.stem, t]);
+
+  const handleCancelEdit = useCallback(() => {
+    setIsEditMode(false);
+    setEditError(null);
+    if (questionDetail) {
+      setEditedStem(questionDetail.content ?? question.stem ?? "");
+      setEditedChoices(toEditableChoicesFromManage(questionDetail.choices));
+      return;
+    }
+    setEditedStem(question.stem ?? "");
+    setEditedChoices(toEditableChoicesFromPractice(question.choices));
+  }, [question.stem, question.choices, questionDetail]);
+
+  const handleSaveEdit = useCallback(async () => {
+    if (!questionDetail) {
+      setEditError(t("practiceSession.editLoadFailed"));
+      return;
+    }
+
+    const targetQuestionId = String(question.questionId);
+    setSavingEditor(true);
+    setEditError(null);
+    setEditSuccess(null);
+
+    try {
+      const type = questionDetail.type || "multiple_choice";
+      const choiceContentByNumber = new Map(
+        editedChoices.map((choice) => [choice.number, choice.content])
+      );
+      const existingChoices = sortManageChoices(questionDetail.choices);
+      const choicesPayload =
+        type === "short_answer"
+          ? []
+          : existingChoices.map((choice, index) => {
+              const number = getManageChoiceNumber(choice, index);
+              return {
+                id: choice.id,
+                number,
+                content: choiceContentByNumber.get(number) ?? choice.content ?? "",
+                isCorrect: Boolean(choice.isCorrect),
+                imagePath: choice.imagePath ?? null,
+              };
+            });
+
+      const saved = await updateQuestion(questionDetail.id, {
+        content: editedStem,
+        explanation: questionDetail.explanation ?? "",
+        type,
+        lectureId: questionDetail.lectureId ?? null,
+        correctAnswerText:
+          type === "short_answer"
+            ? questionDetail.correctAnswerText ?? questionDetail.answer ?? ""
+            : null,
+        choices: choicesPayload,
+      });
+      if (latestQuestionIdRef.current !== targetQuestionId) {
+        return;
+      }
+
+      const nextChoices =
+        type === "short_answer"
+          ? []
+          : sortManageChoices(saved.choices).map((choice, index) => ({
+              number: getManageChoiceNumber(choice, index),
+              content: choice.content ?? "",
+              image: choice.imagePath ?? undefined,
+            }));
+
+      setQuestionDetail(saved);
+      setEditedStem(saved.content ?? editedStem);
+      setEditedChoices(toEditableChoicesFromManage(saved.choices));
+      setIsEditMode(false);
+      setEditSuccess(t("practiceSession.editSaveSuccess"));
+
+      onQuestionUpdated?.(targetQuestionId, {
+        stem: saved.content ?? editedStem,
+        choices: nextChoices,
+      });
+    } catch (err) {
+      if (latestQuestionIdRef.current !== targetQuestionId) {
+        return;
+      }
+      setEditError(
+        err instanceof Error ? err.message : t("practiceSession.editSaveFailed")
+      );
+    } finally {
+      if (latestQuestionIdRef.current === targetQuestionId) {
+        setSavingEditor(false);
+      }
+    }
+  }, [editedChoices, editedStem, onQuestionUpdated, question.questionId, questionDetail, t]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-            Question {index + 1} of {total}
+            {t("practiceSession.question")} {index + 1} {t("practiceSession.of")} {total}
           </p>
-          <h2 className="text-xl font-semibold text-foreground">Solve the question</h2>
+          <h2 className="text-xl font-semibold text-foreground">{t("practiceSession.solveQuestion")}</h2>
         </div>
-        {onToggleBookmark && (
-          <Button
-            variant={bookmarked ? "secondary" : "outline"}
-            size="sm"
-            onClick={onToggleBookmark}
-            className="rounded-full"
-          >
-            {bookmarked ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
-            {bookmarked ? "Bookmarked" : "Bookmark"}
-          </Button>
-        )}
-      </div>
-      <Card className="border border-border/70 bg-card/90 shadow-soft">
-        <CardContent className="space-y-4 p-6">
-          <p className="text-base leading-relaxed text-foreground">
-            {question.stem ?? "No prompt available for this question."}
-          </p>
-          {typeof image === "string" && image.length > 0 && (
-            <img
-              src={image}
-              alt="Question visual"
-              className="max-h-64 rounded-xl border border-border/60 object-contain"
-            />
+        <div className="flex flex-wrap items-center gap-2">
+          {onToggleBookmark && !isEditMode && (
+            <Button
+              variant={bookmarked ? "secondary" : "outline"}
+              size="sm"
+              onClick={onToggleBookmark}
+              className="rounded-full"
+            >
+              {bookmarked ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
+              {bookmarked ? t("practiceSession.bookmarked") : t("practiceSession.bookmark")}
+            </Button>
           )}
-        </CardContent>
-      </Card>
-      {isShortAnswer ? (
-        <div className="space-y-3">
-          <p className="text-sm font-semibold text-foreground">Your answer</p>
-          <Input
-            value={shortAnswerValue}
-            onChange={(event) =>
-              onAnswerChange({
-                type: "short",
-                value: event.target.value,
-              })
-            }
-            placeholder="Type your answer"
-          />
+          {!isEditMode ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void handleEnterEditMode();
+              }}
+              disabled={loadingEditor}
+            >
+              {loadingEditor
+                ? t("practiceSession.editLoading")
+                : t("practiceSession.edit")}
+            </Button>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCancelEdit}
+                disabled={savingEditor}
+              >
+                {t("practiceSession.editCancel")}
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  void handleSaveEdit();
+                }}
+                disabled={savingEditor}
+              >
+                {savingEditor
+                  ? t("practiceSession.submitDialog.submitting")
+                  : t("practiceSession.editSave")}
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {editError && (
+        <div className="rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
+          {editError}
+        </div>
+      )}
+      {editSuccess && (
+        <div className="rounded-lg border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
+          {editSuccess}
+        </div>
+      )}
+
+      {isEditMode ? (
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,1fr)] items-start">
+          <Card className="border border-border/70 bg-card/90 shadow-soft">
+            <CardContent className="space-y-5 p-6">
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                  {t("practiceSession.editMode")}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {t("practiceSession.editReferenceDesc")}
+                </p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-foreground">
+                  {t("practiceSession.editPrompt")}
+                </label>
+                <Textarea
+                  value={editedStem}
+                  onChange={(event) => setEditedStem(event.target.value)}
+                  className="min-h-[180px]"
+                />
+              </div>
+              {!isShortAnswerEditor && (
+                <div className="space-y-3">
+                  {editedChoices.map((choice) => (
+                    <div key={`edit-choice-${choice.number}`} className="space-y-2">
+                      <label className="text-sm font-semibold text-foreground">
+                        {t("practiceSession.editChoice")} {choice.number}
+                      </label>
+                      <Textarea
+                        value={choice.content}
+                        onChange={(event) =>
+                          updateDraftChoice(choice.number, event.target.value)
+                        }
+                        className="min-h-[96px]"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {isShortAnswerEditor && (
+                <p className="text-xs text-muted-foreground">
+                  {t("practiceSession.editShortAnswerHint")}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+          <Card className="border border-border/70 bg-card/90 shadow-soft">
+            <CardContent className="space-y-3 p-6">
+              <p className="text-sm font-semibold text-foreground">
+                {t("practiceSession.editReference")}
+              </p>
+              {typeof referenceImage === "string" && referenceImage.length > 0 ? (
+                <img
+                  src={referenceImage}
+                  alt={t("practiceSession.editReference")}
+                  className="max-h-[640px] w-full rounded-xl border border-border/60 object-contain"
+                />
+              ) : (
+                <div className="rounded-xl border border-dashed border-border/70 bg-muted/30 px-4 py-8 text-sm text-muted-foreground">
+                  {t("practiceSession.editNoReference")}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       ) : (
-        <ChoiceList
-          choices={question.choices ?? []}
-          multiple={Boolean(question.isMultipleResponse)}
-          selected={selectedValues}
-          onChange={(next) => {
-            onAnswerChange(
-              next.length > 0
-                ? {
-                    type: "mcq",
-                    value: next,
+        <div className="grid gap-6 lg:grid-cols-2 items-start">
+          <Card className="border border-border/70 bg-card/90 shadow-soft">
+            <CardContent className="space-y-4 p-6">
+              <p className="text-base leading-relaxed text-foreground whitespace-pre-wrap">
+                {question.stem ?? t("practiceSession.noPrompt")}
+              </p>
+              {typeof image === "string" && image.length > 0 && (
+                <img
+                  src={image}
+                  alt={t("practiceSession.questionVisual")}
+                  className="max-h-80 w-auto rounded-xl border border-border/60 object-contain mx-auto"
+                />
+              )}
+            </CardContent>
+          </Card>
+          <div className="space-y-4">
+            {isShortAnswer ? (
+              <div className="space-y-3">
+                <p className="text-sm font-semibold text-foreground">{t("practiceSession.yourAnswer")}</p>
+                <Input
+                  value={shortAnswerValue}
+                  onChange={(event) =>
+                    onAnswerChange({
+                      type: "short",
+                      value: event.target.value,
+                    })
                   }
-                : undefined
-            );
-          }}
-        />
+                  placeholder={t("practiceSession.typeAnswer")}
+                />
+              </div>
+            ) : (
+              <ChoiceList
+                choices={question.choices ?? []}
+                multiple={Boolean(question.isMultipleResponse)}
+                selected={selectedValues}
+                onChange={(next) => {
+                  onAnswerChange(
+                    next.length > 0
+                      ? {
+                          type: "mcq",
+                          value: next,
+                        }
+                      : undefined
+                  );
+                }}
+              />
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

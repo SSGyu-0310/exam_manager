@@ -41,6 +41,19 @@ const examSchema = z.object({
   questionCount: z.number().optional(),
   classifiedCount: z.number().optional(),
   unclassifiedCount: z.number().optional(),
+  blocks: z
+    .array(
+      z.object({
+        blockId: z.number(),
+        blockName: z.string(),
+        subject: z.string().nullable().optional(),
+        questionCount: z.number(),
+      })
+    )
+    .optional(),
+  primaryBlockId: z.number().nullable().optional(),
+  primaryBlockName: z.string().nullable().optional(),
+  primaryBlockSubject: z.string().nullable().optional(),
   createdAt: z.string().nullable().optional(),
   updatedAt: z.string().nullable().optional(),
 });

@@ -4,6 +4,11 @@ Recommended workflow for fast backend/frontend iteration:
 - Postgres in Docker
 - Flask + Next.js on host (hot reload)
 
+Quick start (one command):
+```bash
+./scripts/dev-stack up --init-db
+```
+
 ## 1) Prepare env files
 ```bash
 cp .env.example .env
@@ -58,6 +63,12 @@ Terminal 2:
 
 ## Local Dev Commands
 ```bash
+# one-command stack
+./scripts/dev-stack up
+./scripts/dev-stack status
+./scripts/dev-stack logs all
+./scripts/dev-stack down
+
 # DB lifecycle
 ./scripts/dev-db ps
 ./scripts/dev-db logs -f db

@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { TOP_NAV } from "@/config/navigation";
+import { NavContext, SIDEBAR_NAV, TOP_NAV } from "@/config/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { LanguageSwitcher } from "@/components/common/LanguageSwitcher";
 import { useLanguage } from "@/context/LanguageContext";
@@ -14,7 +14,12 @@ export function TopNav() {
     const pathname = usePathname();
     const { user, logout, isAuthenticated, isLoading } = useAuth();
     const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const [openTopNavDropdown, setOpenTopNavDropdown] = useState<NavContext | null>(null);
     const { t } = useLanguage();
+
+    useEffect(() => {
+        setOpenTopNavDropdown(null);
+    }, [pathname]);
 
     return (
         <header className="sticky top-0 z-20 flex h-16 w-full items-center justify-between border-b border-border/60 bg-card/80 px-4 backdrop-blur lg:px-8">
@@ -30,19 +35,82 @@ export function TopNav() {
                 {/* Desktop Navigation */}
                 <nav className="hidden items-center gap-6 md:flex">
                     {TOP_NAV.map((item) => {
+                        const navValue = item.value as NavContext;
                         const isActive = pathname.startsWith(item.href);
                         const label = item.key ? t(item.key) : item.label;
+                        const subItems = SIDEBAR_NAV[navValue] || [];
+                        const isDropdownOpen = openTopNavDropdown === navValue;
                         return (
-                            <Link
+                            <div
                                 key={item.value}
-                                href={item.href}
-                                className={cn(
-                                    "text-sm font-medium transition-colors hover:text-primary",
-                                    isActive ? "text-primary font-bold" : "text-muted-foreground"
-                                )}
+                                className="relative"
+                                onMouseEnter={() => setOpenTopNavDropdown(navValue)}
+                                onMouseLeave={() =>
+                                    setOpenTopNavDropdown((prev) =>
+                                        prev === navValue ? null : prev
+                                    )
+                                }
+                                onFocusCapture={() => setOpenTopNavDropdown(navValue)}
+                                onBlurCapture={(event) => {
+                                    const nextFocus = event.relatedTarget as Node | null;
+                                    if (!event.currentTarget.contains(nextFocus)) {
+                                        setOpenTopNavDropdown((prev) =>
+                                            prev === navValue ? null : prev
+                                        );
+                                    }
+                                }}
                             >
-                                {label}
-                            </Link>
+                                <Link
+                                    href={item.href}
+                                    onClick={() => setOpenTopNavDropdown(null)}
+                                    className={cn(
+                                        "inline-flex items-center rounded-md px-1 py-1 text-sm font-medium transition-colors hover:text-primary",
+                                        isActive ? "text-primary font-bold" : "text-muted-foreground"
+                                    )}
+                                >
+                                    {label}
+                                </Link>
+
+                                {subItems.length > 0 && (
+                                    <div
+                                        className={cn(
+                                            "absolute left-1/2 top-full z-30 w-56 -translate-x-1/2 rounded-xl border border-border bg-card p-1 shadow-xl ring-1 ring-black/5 transition-all duration-150",
+                                            "before:absolute before:-top-2 before:left-0 before:right-0 before:h-2 before:content-['']",
+                                            isDropdownOpen
+                                                ? "pointer-events-auto translate-y-0 opacity-100"
+                                                : "pointer-events-none translate-y-1 opacity-0",
+                                            "lg:hidden"
+                                        )}
+                                    >
+                                        <div className="mb-1 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70">
+                                            {label}
+                                        </div>
+                                        <div className="space-y-0.5">
+                                            {subItems.map((subItem) => {
+                                                const subLabel = subItem.key ? t(subItem.key) : subItem.label;
+                                                const isSubActive = pathname === subItem.href;
+                                                const Icon = subItem.icon;
+                                                return (
+                                                    <Link
+                                                        key={subItem.href}
+                                                        href={subItem.href}
+                                                        onClick={() => setOpenTopNavDropdown(null)}
+                                                        className={cn(
+                                                            "flex items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors",
+                                                            isSubActive
+                                                                ? "bg-primary/10 text-primary"
+                                                                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                                                        )}
+                                                    >
+                                                        <Icon className="h-4 w-4" />
+                                                        <span>{subLabel}</span>
+                                                    </Link>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         );
                     })}
                 </nav>

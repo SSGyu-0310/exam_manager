@@ -50,16 +50,17 @@ python -m pip install -r requirements.txt
 cd next_app && npm install
 ```
 
-3) DB 컨테이너 기동 + 스키마/FTS 초기화
+3) 원클릭 실행 (DB + 백엔드 + 프론트엔드)
+
+```bash
+./scripts/dev-stack up --init-db
+```
+
+기존 분리 실행 방식이 필요하면:
 
 ```bash
 ./scripts/dev-db up -d db
 ./scripts/dev-init-db
-```
-
-4) 백엔드/프론트엔드 실행 (각각 별도 터미널)
-
-```bash
 ./scripts/dev-backend
 ./scripts/dev-frontend
 ```
@@ -118,11 +119,17 @@ PYTHONPATH=. python -m pytest -q
 ## 자주 쓰는 명령
 
 ```bash
-# DB 상태
+# 원클릭 스택 제어
+./scripts/dev-stack up
+./scripts/dev-stack status
+./scripts/dev-stack logs all
+./scripts/dev-stack down
+
+# DB 전용 상태/로그
 ./scripts/dev-db ps
 ./scripts/dev-db logs -f db
 
-# 종료/정리
+# DB 종료/정리
 ./scripts/dev-db down
 ./scripts/dev-db down -v
 

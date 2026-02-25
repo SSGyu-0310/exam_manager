@@ -159,6 +159,57 @@ def _build_exam_counts(exam_ids, user):
     return counts
 
 
+def _build_exam_block_groups(exam_ids, user):
+    if not exam_ids:
+        return {}
+
+    questions = (
+        scope_query(
+            Question.query,
+            Question,
+            user,
+        )
+        .options(
+            selectinload(Question.lecture)
+            .selectinload(Lecture.block)
+            .selectinload(Block.subject_ref)
+        )
+        .filter(Question.exam_id.in_(exam_ids), Question.lecture_id.isnot(None))
+        .all()
+    )
+
+    counts = {}
+    for question in questions:
+        lecture = question.lecture
+        block = lecture.block if lecture else None
+        if not block:
+            continue
+        block_counts = counts.setdefault(question.exam_id, {})
+        subject_name = block.subject_ref.name if block.subject_ref else block.subject
+        payload = block_counts.setdefault(
+            block.id,
+            {
+                "blockId": block.id,
+                "blockName": block.name,
+                "subject": subject_name,
+                "questionCount": 0,
+            },
+        )
+        payload["questionCount"] += 1
+
+    grouped = {}
+    for exam_id, block_map in counts.items():
+        blocks = list(block_map.values())
+        blocks.sort(
+            key=lambda item: (
+                -int(item.get("questionCount") or 0),
+                str(item.get("blockName") or ""),
+            )
+        )
+        grouped[exam_id] = blocks
+    return grouped
+
+
 def _build_choices_map(question_ids):
     if not question_ids:
         return {}
@@ -300,7 +351,9 @@ def _lecture_payload(lecture, question_counts=None, classified_counts=None):
         "blockSubject": (
             lecture.block.subject_ref.name
             if lecture.block and lecture.block.subject_ref
-            else lecture.block.subject if lecture.block else None
+            else lecture.block.subject
+            if lecture.block
+            else None
         ),
         "folderId": lecture.folder_id,
         "title": lecture.title,
@@ -316,7 +369,7 @@ def _lecture_payload(lecture, question_counts=None, classified_counts=None):
     }
 
 
-def _exam_payload(exam, exam_counts=None):
+def _exam_payload(exam, exam_counts=None, exam_blocks=None):
     if exam_counts is not None and exam.id in exam_counts:
         counts = exam_counts[exam.id]
         question_count = counts.get("total", 0)
@@ -326,6 +379,9 @@ def _exam_payload(exam, exam_counts=None):
         question_count = exam.question_count
         classified_count = exam.classified_count
         unclassified_count = exam.unclassified_count
+    blocks = exam_blocks.get(exam.id, []) if exam_blocks else []
+    primary_block = blocks[0] if blocks else None
+
     return {
         "id": exam.id,
         "title": exam.title,
@@ -337,6 +393,10 @@ def _exam_payload(exam, exam_counts=None):
         "questionCount": question_count,
         "classifiedCount": classified_count,
         "unclassifiedCount": unclassified_count,
+        "blocks": blocks,
+        "primaryBlockId": primary_block.get("blockId") if primary_block else None,
+        "primaryBlockName": primary_block.get("blockName") if primary_block else None,
+        "primaryBlockSubject": primary_block.get("subject") if primary_block else None,
         "createdAt": exam.created_at.isoformat() if exam.created_at else None,
         "updatedAt": exam.updated_at.isoformat() if exam.updated_at else None,
     }
@@ -469,8 +529,12 @@ def list_blocks():
         .order_by(*block_ordering())
         .all()
     )
-    lecture_counts, question_counts = _build_block_counts([block.id for block in blocks], user)
-    return ok([_block_payload(block, lecture_counts, question_counts) for block in blocks])
+    lecture_counts, question_counts = _build_block_counts(
+        [block.id for block in blocks], user
+    )
+    return ok(
+        [_block_payload(block, lecture_counts, question_counts) for block in blocks]
+    )
 
 
 @api_manage_bp.get("/subjects")
@@ -535,7 +599,9 @@ def update_subject(subject_id):
     data = request.get_json(silent=True) or {}
     subject = get_scoped_by_id(Subject, subject_id, user, include_public=True)
     if not subject:
-        return error_response("Subject not found.", code="SUBJECT_NOT_FOUND", status=404)
+        return error_response(
+            "Subject not found.", code="SUBJECT_NOT_FOUND", status=404
+        )
     edit_error = _ensure_editable(subject, user, "Public subjects are read-only.")
     if edit_error:
         return edit_error
@@ -669,7 +735,6 @@ def get_block_workspace(block_id):
     )
 
 
-
 @api_manage_bp.put("/blocks/<int:block_id>")
 def update_block(block_id):
     user = current_user()
@@ -744,9 +809,9 @@ def list_lectures(block_id):
         user=user,
         include_public=True,
     )
-    query = scope_query(
-        Lecture.query, Lecture, user, include_public=True
-    ).filter(Lecture.block_id == block_id)
+    query = scope_query(Lecture.query, Lecture, user, include_public=True).filter(
+        Lecture.block_id == block_id
+    )
     query = query.options(selectinload(Lecture.block).selectinload(Block.subject_ref))
     if lecture_ids is not None:
         if lecture_ids:
@@ -754,7 +819,9 @@ def list_lectures(block_id):
         else:
             return ok(
                 {
-                    "block": _block_payload(block, *_build_block_counts([block.id], user)),
+                    "block": _block_payload(
+                        block, *_build_block_counts([block.id], user)
+                    ),
                     "lectures": [],
                     "scope": {
                         "blockId": block_id,
@@ -835,7 +902,9 @@ def get_lecture(lecture_id):
     user = current_user()
     lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
     if not lecture:
-        return error_response("Lecture not found.", code="LECTURE_NOT_FOUND", status=404)
+        return error_response(
+            "Lecture not found.", code="LECTURE_NOT_FOUND", status=404
+        )
     return ok(_lecture_payload(lecture))
 
 
@@ -845,7 +914,9 @@ def get_lecture_detail(lecture_id):
     user = current_user()
     lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
     if not lecture:
-        return error_response("Lecture not found.", code="LECTURE_NOT_FOUND", status=404)
+        return error_response(
+            "Lecture not found.", code="LECTURE_NOT_FOUND", status=404
+        )
 
     # Get classified questions for this lecture
     questions = (
@@ -872,20 +943,28 @@ def get_lecture_detail(lecture_id):
             .group_by(LectureChunk.material_id)
             .all()
         )
-        chunk_counts = {material_id: int(count or 0) for material_id, count in chunk_rows}
+        chunk_counts = {
+            material_id: int(count or 0) for material_id, count in chunk_rows
+        }
 
     materials_payload = []
     for material in materials:
         chunk_count = chunk_counts.get(material.id, 0)
-        materials_payload.append({
-            "id": material.id,
-            "originalFilename": material.original_filename,
-            "filePath": material.file_path,
-            "status": material.status,
-            "uploadedAt": material.uploaded_at.isoformat() if material.uploaded_at else None,
-            "indexedAt": material.indexed_at.isoformat() if material.indexed_at else None,
-            "chunks": chunk_count,
-        })
+        materials_payload.append(
+            {
+                "id": material.id,
+                "originalFilename": material.original_filename,
+                "filePath": material.file_path,
+                "status": material.status,
+                "uploadedAt": material.uploaded_at.isoformat()
+                if material.uploaded_at
+                else None,
+                "indexedAt": material.indexed_at.isoformat()
+                if material.indexed_at
+                else None,
+                "chunks": chunk_count,
+            }
+        )
 
     # Build question payloads with choices
     questions_payload = []
@@ -898,16 +977,22 @@ def get_lecture_detail(lecture_id):
         questions_payload.append(q_payload)
 
     lecture_counts, classified_counts = _build_lecture_counts([lecture.id], user)
-    block_lecture_counts, block_question_counts = _build_block_counts([lecture.block_id], user)
+    block_lecture_counts, block_question_counts = _build_block_counts(
+        [lecture.block_id], user
+    )
 
-    return ok({
-        "lecture": _lecture_payload(lecture, lecture_counts, classified_counts),
-        "block": _block_payload(lecture.block, block_lecture_counts, block_question_counts)
-        if lecture.block
-        else None,
-        "questions": questions_payload,
-        "materials": materials_payload,
-    })
+    return ok(
+        {
+            "lecture": _lecture_payload(lecture, lecture_counts, classified_counts),
+            "block": _block_payload(
+                lecture.block, block_lecture_counts, block_question_counts
+            )
+            if lecture.block
+            else None,
+            "questions": questions_payload,
+            "materials": materials_payload,
+        }
+    )
 
 
 @api_manage_bp.post("/lectures/<int:lecture_id>/materials")
@@ -915,7 +1000,9 @@ def upload_lecture_material(lecture_id):
     user = current_user()
     lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
     if not lecture:
-        return error_response("Lecture not found.", code="LECTURE_NOT_FOUND", status=404)
+        return error_response(
+            "Lecture not found.", code="LECTURE_NOT_FOUND", status=404
+        )
     edit_error = _ensure_editable(lecture, user, "Public lectures are read-only.")
     if edit_error:
         return edit_error
@@ -1023,7 +1110,9 @@ def update_lecture(lecture_id):
     user = current_user()
     lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
     if not lecture:
-        return error_response("Lecture not found.", code="LECTURE_NOT_FOUND", status=404)
+        return error_response(
+            "Lecture not found.", code="LECTURE_NOT_FOUND", status=404
+        )
     edit_error = _ensure_editable(lecture, user, "Public lectures are read-only.")
     if edit_error:
         return edit_error
@@ -1075,7 +1164,9 @@ def delete_lecture(lecture_id):
     user = current_user()
     lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
     if not lecture:
-        return error_response("Lecture not found.", code="LECTURE_NOT_FOUND", status=404)
+        return error_response(
+            "Lecture not found.", code="LECTURE_NOT_FOUND", status=404
+        )
     edit_error = _ensure_editable(lecture, user, "Public lectures are read-only.")
     if edit_error:
         return edit_error
@@ -1087,9 +1178,12 @@ def delete_lecture(lecture_id):
 @api_manage_bp.get("/exams")
 def list_exams():
     user = current_user()
-    exams = scope_model(PreviousExam, user).order_by(PreviousExam.exam_date.desc()).all()
+    exams = (
+        scope_model(PreviousExam, user).order_by(PreviousExam.exam_date.desc()).all()
+    )
     exam_counts = _build_exam_counts([exam.id for exam in exams], user)
-    return ok([_exam_payload(exam, exam_counts) for exam in exams])
+    exam_blocks = _build_exam_block_groups([exam.id for exam in exams], user)
+    return ok([_exam_payload(exam, exam_counts, exam_blocks) for exam in exams])
 
 
 @api_manage_bp.post("/exams")
@@ -1269,9 +1363,7 @@ def upload_pdf():
         db.session.rollback()
         if crop_dir:
             shutil.rmtree(crop_dir, ignore_errors=True)
-        return error_response(
-            str(exc), code="PDF_PARSE_INVALID", status=400
-        )
+        return error_response(str(exc), code="PDF_PARSE_INVALID", status=400)
     except ImportError as exc:
         db.session.rollback()
         if crop_dir:
@@ -1475,6 +1567,8 @@ def delete_exam(exam_id):
         return error_response("Exam not found.", code="EXAM_NOT_FOUND", status=404)
     delete_exam_with_assets(exam)
     return ok({"id": exam_id})
+
+
 def _subject_payload(subject):
     return {
         "id": subject.id,
@@ -1494,7 +1588,9 @@ def _resolve_subject_from_payload(data, user, is_public):
     subject_name = subject_name.strip()
 
     if subject_id:
-        subject = get_scoped_by_id(Subject, int(subject_id), user, include_public=not is_public)
+        subject = get_scoped_by_id(
+            Subject, int(subject_id), user, include_public=not is_public
+        )
         return subject
 
     if not subject_name:

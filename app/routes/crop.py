@@ -284,8 +284,12 @@ def crop_with_merge_contentaware(pdf_path: str,
         part_idx = len(qdict["parts"]) + 1
         fname = f"Q{qdict['qnum']:02d}_p{page_index+1:02d}_part{part_idx}.png"
         fpath = os.path.join(out_dir, fname)
-        pix = page.get_pixmap(clip=rect, dpi=dpi, alpha=False)
-        pix.save(fpath)
+        try:
+            pix = page.get_pixmap(clip=rect, dpi=dpi, alpha=False)
+            pix.save(fpath)
+        except Exception as exc:
+            print(f"Warning: skipping crop Q{qdict['qnum']} part {part_idx}: {exc}")
+            return
         qdict["parts"].append({
             "page": page_index + 1,
             "bbox": [rect.x0, rect.y0, rect.x1, rect.y1],

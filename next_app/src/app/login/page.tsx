@@ -115,7 +115,7 @@ function LoginFormFallback() {
 
 export default function LoginPage() {
     return (
-        <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <div className="flex min-h-[calc(100vh-8rem)] items-center justify-center bg-gray-50">
             <Suspense fallback={<LoginFormFallback />}>
                 <LoginForm />
             </Suspense>

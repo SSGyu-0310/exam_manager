@@ -37,7 +37,7 @@ export function ChoiceList({ choices, multiple, selected, onChange }: ChoiceList
           <label
             key={choiceId}
             className={cn(
-              "flex cursor-pointer gap-3 rounded-2xl border px-4 py-3 text-sm transition",
+              "flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 text-sm transition",
               checked
                 ? "border-primary bg-primary text-primary-foreground shadow-soft"
                 : "border-border/70 bg-card text-foreground hover:border-border/80"
@@ -48,12 +48,15 @@ export function ChoiceList({ choices, multiple, selected, onChange }: ChoiceList
               name="practice-choice"
               checked={checked}
               onChange={toggle}
-              className="mt-1 h-4 w-4 accent-primary"
+              className="mt-[3px] h-4 w-4 shrink-0 accent-primary"
             />
-            <div className="space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                {choiceId}
-              </div>
+            <div className={cn(
+              "text-sm font-semibold shrink-0",
+              checked ? "text-primary-foreground/70" : "text-muted-foreground"
+            )}>
+              {choiceId}
+            </div>
+            <div className="flex-1 space-y-2">
               <p className="text-sm leading-relaxed">{label}</p>
               {typeof image === "string" && image.length > 0 && (
                 <img

@@ -511,6 +511,7 @@ class PracticeSession(db.Model):
     lecture_ids_json = db.Column(db.Text)
     seed = db.Column(db.Integer)
     question_order = db.Column(db.Text)
+    current_question_index = db.Column(db.Integer, default=0)
     total_time_spent = db.Column(db.Integer)
     submission_count = db.Column(db.Integer, default=1)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

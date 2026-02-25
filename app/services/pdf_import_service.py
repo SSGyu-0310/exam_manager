@@ -25,10 +25,17 @@ def _resolve_question_image_path(
     crop_question_images: Mapping[Any, Any],
     crop_is_reliable: bool,
 ) -> Optional[str]:
+    if isinstance(parser_image_path, str):
+        normalized_parser_path = parser_image_path.strip()
+        if normalized_parser_path:
+            # Keep parser-extracted stem image if available. Cropped original
+            # is handled separately at read time and should not replace inline assets.
+            return normalized_parser_path
+
     crop_image_name = _resolve_crop_image_name(crop_question_images, question_number)
     if crop_is_reliable and crop_image_name:
         return (Path("exam_crops") / f"exam_{exam_id}" / crop_image_name).as_posix()
-    return parser_image_path
+    return None
 
 
 def _determine_question_type(question_data: Mapping[str, Any]) -> str:
