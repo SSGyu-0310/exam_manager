@@ -393,6 +393,12 @@
                 {% endif %}
             </div>
             <div class="nav-links">
+                {% if prev_lecture %}
+                <a id="prevLectureLink" href="{{ url_for('manage.view_lecture', lecture_id=prev_lecture.id) }}">← 이전 강의</a>
+                {% endif %}
+                {% if next_lecture %}
+                <a id="nextLectureLink" href="{{ url_for('manage.view_lecture', lecture_id=next_lecture.id) }}">다음 강의 →</a>
+                {% endif %}
                 <a href="{{ url_for('manage.list_lectures', block_id=block.id) }}">← 강의 목록</a>
                 <a href="{{ url_for('manage.edit_lecture', lecture_id=lecture.id) }}">✏️ 수정</a>
             </div>
@@ -509,6 +515,31 @@
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             refreshNoteStatus();
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.defaultPrevented) return;
+            if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+
+            const target = event.target;
+            const tagName = (target?.tagName || '').toLowerCase();
+            if (tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target?.isContentEditable) {
+                return;
+            }
+
+            if (event.key === 'ArrowLeft') {
+                const prevLink = document.getElementById('prevLectureLink');
+                if (prevLink) {
+                    event.preventDefault();
+                    window.location.href = prevLink.href;
+                }
+            } else if (event.key === 'ArrowRight') {
+                const nextLink = document.getElementById('nextLectureLink');
+                if (nextLink) {
+                    event.preventDefault();
+                    window.location.href = nextLink.href;
+                }
+            }
         });
 
         function toggleAnswer(questionId, btn) {

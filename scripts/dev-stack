@@ -41,7 +41,11 @@ is_group_running() {
 
 is_port_listening() {
   local port="$1"
-  ss -ltn 2>/dev/null | awk '{print $4}' | grep -E "[:.]${port}$" >/dev/null 2>&1
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -iTCP:"$port" -sTCP:LISTEN -P -n >/dev/null 2>&1
+  else
+    ss -ltn 2>/dev/null | awk '{print $4}' | grep -E "[:.]${port}$" >/dev/null 2>&1
+  fi
 }
 
 service_port() {

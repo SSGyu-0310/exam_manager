@@ -562,12 +562,33 @@ def view_lecture(lecture_id):
     # 모든 블록과 강의 정보 가져오기 (이동 모달용)
     all_blocks = scope_model(Block, user, include_public=True).order_by(*block_ordering()).all()
 
+    ordered_lectures = []
+    for b in all_blocks:
+        block_lectures = sorted(
+            list(b.lectures),
+            key=lambda l: ((l.order or 0), (l.title or "")),
+        )
+        ordered_lectures.extend(block_lectures)
+
+    current_index = next(
+        (idx for idx, item in enumerate(ordered_lectures) if item.id == lecture.id),
+        -1,
+    )
+    prev_lecture = ordered_lectures[current_index - 1] if current_index > 0 else None
+    next_lecture = (
+        ordered_lectures[current_index + 1]
+        if 0 <= current_index < len(ordered_lectures) - 1
+        else None
+    )
+
     return render_template(
         "manage/lecture_detail.html",
         lecture=lecture,
         block=lecture.block,
         questions=questions,
         all_blocks=all_blocks,
+        prev_lecture=prev_lecture,
+        next_lecture=next_lecture,
     )
 
 

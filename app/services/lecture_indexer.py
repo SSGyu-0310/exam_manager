@@ -6,10 +6,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple, Dict
 
+import fitz
 import pdfplumber
 from sqlalchemy import text
 
-from flask import current_app
+from flask import current_app, has_app_context
 
 from app import db
 from app.models import LectureMaterial, LectureChunk
@@ -18,19 +19,68 @@ from app.services.db_utils import is_postgres
 FTS_TABLE = "lecture_chunks_fts"
 
 
-def extract_pdf_pages(pdf_path: os.PathLike) -> List[Tuple[int, str]]:
+def _normalize_page_text(raw_text: str | None) -> str:
+    text_content = raw_text or ""
+    text_content = text_content.replace("\u00A0", " ").replace("\x00", "")
+    text_content = re.sub(r"[ \t]+", " ", text_content)
+    text_content = re.sub(r"\n{3,}", "\n\n", text_content)
+    return text_content.strip()
+
+
+def _extract_pages_pdfplumber(pdf_path: os.PathLike) -> List[Tuple[int, str]]:
     pages: List[Tuple[int, str]] = []
     with pdfplumber.open(str(pdf_path)) as pdf:
         for page_num, page in enumerate(pdf.pages, start=1):
-            text_content = page.extract_text() or ""
-            text_content = text_content.replace("\u00A0", " ").replace("\x00", "")
-            text_content = re.sub(r"[ \t]+", " ", text_content)
-            text_content = re.sub(r"\n{3,}", "\n\n", text_content)
-            text_content = text_content.strip()
+            text_content = _normalize_page_text(page.extract_text())
             if not text_content:
                 continue
             pages.append((page_num, text_content))
     return pages
+
+
+def _extract_pages_pymupdf(pdf_path: os.PathLike) -> List[Tuple[int, str]]:
+    pages: List[Tuple[int, str]] = []
+    with fitz.open(str(pdf_path)) as pdf:
+        for page_num, page in enumerate(pdf, start=1):
+            text_content = _normalize_page_text(page.get_text("text"))
+            if not text_content:
+                continue
+            pages.append((page_num, text_content))
+    return pages
+
+
+def _log_warning(message: str, *args) -> None:
+    if has_app_context():
+        current_app.logger.warning(message, *args)
+
+
+def extract_pdf_pages(pdf_path: os.PathLike) -> List[Tuple[int, str]]:
+    primary_error: Exception | None = None
+    try:
+        pages = _extract_pages_pdfplumber(pdf_path)
+        if pages:
+            return pages
+        _log_warning(
+            "No extractable text via pdfplumber for %s; retrying with PyMuPDF.",
+            pdf_path,
+        )
+    except Exception as exc:
+        primary_error = exc
+        _log_warning(
+            "pdfplumber failed for %s (%s); retrying with PyMuPDF.",
+            pdf_path,
+            exc,
+        )
+
+    try:
+        return _extract_pages_pymupdf(pdf_path)
+    except Exception as fallback_error:
+        if primary_error is None:
+            raise
+        raise RuntimeError(
+            f"PDF text extraction failed with pdfplumber ({primary_error}) "
+            f"and PyMuPDF ({fallback_error})"
+        ) from fallback_error
 
 
 def chunk_pages(

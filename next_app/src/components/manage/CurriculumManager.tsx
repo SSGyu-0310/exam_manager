@@ -1,8 +1,9 @@
 "use client";
 
-import { type ChangeEvent, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  ChevronLeft,
   ChevronDown,
   ChevronRight,
   FileText,
@@ -11,6 +12,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Trash2,
   X,
 } from "lucide-react";
 
@@ -20,6 +22,7 @@ import {
   createSubject,
   deleteBlock,
   deleteLecture,
+  deleteLectureMaterial,
   getBlocks,
   getLectureDetail,
   getLectures,
@@ -38,7 +41,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { useLanguage } from "@/context/LanguageContext";
 import { cn } from "@/lib/utils";
 
@@ -83,6 +85,7 @@ export function CurriculumManager() {
   const [lectureError, setLectureError] = useState<string | null>(null);
   const [lectureMaterials, setLectureMaterials] = useState<ManageMaterial[]>([]);
   const [materialUploading, setMaterialUploading] = useState(false);
+  const [materialDeletingId, setMaterialDeletingId] = useState<number | null>(null);
   const [materialMessage, setMaterialMessage] = useState<string | null>(null);
 
   const [dragSubjectId, setDragSubjectId] = useState<number | null>(null);
@@ -216,6 +219,26 @@ export function CurriculumManager() {
     }
   };
 
+  const handleDeleteMaterial = async (materialId: number) => {
+    if (!activeLectureId) return;
+    const confirmed = window.confirm(t("manage.lectureMaterialDeleteConfirm"));
+    if (!confirmed) return;
+
+    setLectureError(null);
+    setMaterialMessage(null);
+    setMaterialDeletingId(materialId);
+    try {
+      await deleteLectureMaterial(activeLectureId, materialId);
+      await reloadLectureDetail(activeLectureId);
+      await refreshData();
+      setMaterialMessage(t("manage.lectureMaterialDeleted"));
+    } catch (err) {
+      setLectureError(err instanceof Error ? err.message : t("manage.lectureMaterialDeleteError"));
+    } finally {
+      setMaterialDeletingId((prev) => (prev === materialId ? null : prev));
+    }
+  };
+
   const lecturesByBlock = useMemo(() => {
     const map = new Map<number, ManageLecture[]>();
     lectures.forEach((lecture) => {
@@ -228,6 +251,86 @@ export function CurriculumManager() {
     });
     return map;
   }, [lectures]);
+
+  const orderedLectures = useMemo(
+    () =>
+      [...lectures].sort((a, b) => {
+        const subjectCmp = (a.blockSubject ?? "").localeCompare(
+          b.blockSubject ?? "",
+          "ko"
+        );
+        if (subjectCmp !== 0) return subjectCmp;
+        const blockNameCmp = (a.blockName ?? "").localeCompare(
+          b.blockName ?? "",
+          "ko"
+        );
+        if (blockNameCmp !== 0) return blockNameCmp;
+        const blockIdCmp = (a.blockId ?? 0) - (b.blockId ?? 0);
+        if (blockIdCmp !== 0) return blockIdCmp;
+        const orderCmp = (a.order ?? 0) - (b.order ?? 0);
+        if (orderCmp !== 0) return orderCmp;
+        return a.title.localeCompare(b.title, "ko");
+      }),
+    [lectures]
+  );
+
+  const activeLectureIndex = useMemo(() => {
+    if (!activeLectureId) return -1;
+    return orderedLectures.findIndex((lecture) => lecture.id === activeLectureId);
+  }, [orderedLectures, activeLectureId]);
+
+  const previousLecture = useMemo(() => {
+    if (activeLectureIndex <= 0) return null;
+    return orderedLectures[activeLectureIndex - 1] ?? null;
+  }, [orderedLectures, activeLectureIndex]);
+
+  const nextLecture = useMemo(() => {
+    if (activeLectureIndex < 0 || activeLectureIndex >= orderedLectures.length - 1) {
+      return null;
+    }
+    return orderedLectures[activeLectureIndex + 1] ?? null;
+  }, [orderedLectures, activeLectureIndex]);
+
+  const moveToLecture = useCallback(
+    (targetLectureId: number | null | undefined) => {
+      if (!targetLectureId || targetLectureId === activeLectureId) return;
+      setActiveLectureId(targetLectureId);
+    },
+    [activeLectureId]
+  );
+
+  useEffect(() => {
+    if (!activeLectureId) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tagName = target.tagName.toLowerCase();
+        if (
+          tagName === "input" ||
+          tagName === "textarea" ||
+          tagName === "select" ||
+          target.isContentEditable
+        ) {
+          return;
+        }
+      }
+
+      if (event.key === "ArrowLeft" && previousLecture) {
+        event.preventDefault();
+        moveToLecture(previousLecture.id);
+      } else if (event.key === "ArrowRight" && nextLecture) {
+        event.preventDefault();
+        moveToLecture(nextLecture.id);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeLectureId, moveToLecture, previousLecture, nextLecture]);
 
   const subjectsGrouped = useMemo<SubjectGroup[]>(() => {
     const map = new Map<string, ManageBlock[]>();
@@ -427,7 +530,6 @@ export function CurriculumManager() {
       await updateLecture(lectureDetail.id, {
         title: lectureDetail.title.trim(),
         professor: lectureDetail.professor?.trim() || null,
-        description: lectureDetail.description?.trim() || null,
       });
       await refreshData();
     } catch (err) {
@@ -1091,6 +1193,24 @@ export function CurriculumManager() {
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => moveToLecture(previousLecture?.id)}
+                      disabled={!previousLecture}
+                    >
+                      <ChevronLeft className="mr-1 h-4 w-4" />
+                      {t("manage.previousLecture")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => moveToLecture(nextLecture?.id)}
+                      disabled={!nextLecture}
+                    >
+                      {t("manage.nextLecture")}
+                      <ChevronRight className="ml-1 h-4 w-4" />
+                    </Button>
                     <Button size="sm" variant="outline" asChild>
                       <Link href={`/manage/lectures/${activeLectureId}`}>
                         {t("manage.openLectureDetail")}
@@ -1105,6 +1225,9 @@ export function CurriculumManager() {
                     </Button>
                   </div>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  {t("manage.lecturePrevNextHint")}
+                </p>
 
                 {lectureLoading ? (
                   <div className="space-y-2">
@@ -1140,20 +1263,6 @@ export function CurriculumManager() {
                           }
                         />
                       </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                        {t("manage.lectureDescription")}
-                      </label>
-                      <Textarea
-                        value={lectureDetail.description ?? ""}
-                        onChange={(event) =>
-                          setLectureDetail({
-                            ...lectureDetail,
-                            description: event.target.value,
-                          })
-                        }
-                      />
                     </div>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <Badge variant="neutral">
@@ -1211,6 +1320,18 @@ export function CurriculumManager() {
                                 <span className="text-xs text-muted-foreground">
                                   {material.chunks ?? 0} chunks
                                 </span>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 px-2 text-danger hover:bg-danger/10 hover:text-danger"
+                                  onClick={() => handleDeleteMaterial(material.id)}
+                                  disabled={
+                                    materialDeletingId === material.id || materialUploading
+                                  }
+                                >
+                                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                  {t("common.delete")}
+                                </Button>
                               </div>
                             </div>
                           ))}

@@ -13,7 +13,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 
 type LectureFormProps = {
   blockId: string | number;
@@ -25,7 +24,6 @@ export function LectureForm({ blockId, initial }: LectureFormProps) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [professor, setProfessor] = useState(initial?.professor ?? "");
   const [order, setOrder] = useState(initial?.order ?? 1);
-  const [description, setDescription] = useState(initial?.description ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -38,7 +36,6 @@ export function LectureForm({ blockId, initial }: LectureFormProps) {
       title: title.trim(),
       professor: professor?.trim() || null,
       order: Number.isFinite(order) ? Number(order) : 1,
-      description: description?.trim() || null,
     };
     try {
       if (initial?.id) {
@@ -103,15 +100,6 @@ export function LectureForm({ blockId, initial }: LectureFormProps) {
               onChange={(event) => setOrder(Number(event.target.value))}
             />
           </div>
-        </div>
-        <div className="space-y-2">
-          <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-            Description
-          </label>
-          <Textarea
-            value={description ?? ""}
-            onChange={(event) => setDescription(event.target.value)}
-          />
         </div>
         {error && (
           <div className="rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
