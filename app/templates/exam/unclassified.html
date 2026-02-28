@@ -1092,13 +1092,23 @@
 
                 let html = '';
                 data.jobs.forEach(job => {
+                    const examTitle = (job.exam_title || '').trim();
+                    const blockName = (job.block_name || '').trim();
+                    let scopeLabel = '시험/블록 정보 없음';
+                    if (examTitle && blockName) {
+                        scopeLabel = `${examTitle} · ${blockName}`;
+                    } else if (examTitle) {
+                        scopeLabel = `${examTitle} · 블록 정보 없음`;
+                    } else if (blockName) {
+                        scopeLabel = `시험 정보 없음 · ${blockName}`;
+                    }
                     html += `
                         <div class="recent-job-item" onclick="window.location.href='/ai/classify/preview/${job.id}'">
                             <div class="job-info">
-                                <span class="job-time">${job.created_at}</span>
+                                <span class="job-time">${scopeLabel}</span>
                                 <span class="job-status ${job.status}">${job.status_label}</span>
                             </div>
-                            <span class="job-count">${job.total_count}문제</span>
+                            <span class="job-count">${job.created_at}</span>
                         </div>
                     `;
                 });

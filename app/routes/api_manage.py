@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 
 from flask import Blueprint, request, current_app, abort, url_for
-from sqlalchemy import func, case
+from sqlalchemy import func, case, text
 from sqlalchemy.orm import selectinload
 from werkzeug.utils import secure_filename
 
@@ -28,6 +28,7 @@ from app.services.markdown_images import strip_markdown_images
 from app.services.db_guard import guard_write_request
 from app.services.block_sort import block_ordering
 from app.services.pdf_import_service import save_parsed_questions
+from app.services.db_utils import is_postgres
 from app.services.user_scope import (
     attach_current_user,
     current_user,
@@ -1081,6 +1082,70 @@ def upload_lecture_material(lecture_id):
         return error_response(
             f"Lecture material indexing failed: {exc}",
             code="LECTURE_MATERIAL_INDEX_FAILED",
+            status=500,
+        )
+
+
+@api_manage_bp.delete("/lectures/<int:lecture_id>/materials/<int:material_id>")
+def delete_lecture_material(lecture_id, material_id):
+    user = current_user()
+    lecture = get_scoped_by_id(Lecture, lecture_id, user, include_public=True)
+    if not lecture:
+        return error_response(
+            "Lecture not found.", code="LECTURE_NOT_FOUND", status=404
+        )
+    edit_error = _ensure_editable(lecture, user, "Public lectures are read-only.")
+    if edit_error:
+        return edit_error
+
+    material = LectureMaterial.query.filter_by(
+        id=material_id, lecture_id=lecture.id
+    ).first()
+    if not material:
+        return error_response(
+            "Lecture material not found.",
+            code="LECTURE_MATERIAL_NOT_FOUND",
+            status=404,
+        )
+
+    try:
+        chunk_ids = [
+            row.id
+            for row in LectureChunk.query.with_entities(LectureChunk.id)
+            .filter_by(material_id=material.id)
+            .all()
+        ]
+        if chunk_ids and not is_postgres():
+            placeholders = ", ".join([f":id_{idx}" for idx in range(len(chunk_ids))])
+            params = {f"id_{idx}": chunk_id for idx, chunk_id in enumerate(chunk_ids)}
+            try:
+                db.session.execute(
+                    text(f"DELETE FROM lecture_chunks_fts WHERE chunk_id IN ({placeholders})"),
+                    params,
+                )
+            except Exception:
+                current_app.logger.warning(
+                    "FTS delete failed for lecture material %s", material.id
+                )
+
+        file_path = Path(material.file_path)
+        if not file_path.is_absolute():
+            file_path = _resolve_upload_folder() / file_path
+        _remove_material_file(file_path)
+
+        db.session.delete(material)
+        db.session.commit()
+        return ok({"id": material_id})
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Lecture material delete failed for lecture_id=%s material_id=%s",
+            lecture_id,
+            material_id,
+        )
+        return error_response(
+            f"Unable to delete lecture material: {exc}",
+            code="LECTURE_MATERIAL_DELETE_FAILED",
             status=500,
         )
 
