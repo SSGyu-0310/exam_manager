@@ -29,6 +29,7 @@ const CONNECTION_ERROR_MESSAGE = "연결 실패(엔드포인트/응답 확인 �
 
 type StoredResult = {
   lectureId?: string;
+  lectureTitle?: string;
   examId?: string;
   examTitle?: string;
   submittedAt?: string;
@@ -119,6 +120,13 @@ const parseStemContent = (value?: string) => {
     text: cleaned.replace(/\s{2,}/g, " ").trim(),
     images,
   };
+};
+
+const stripStemMarkdownForDisplay = (value?: string | null) => {
+  if (!value) {
+    return "";
+  }
+  return value.replace(MARKDOWN_IMAGE_REGEX, "").replace(/\r\n?/g, "\n").trim();
 };
 
 const getPrimaryImageUrl = (question: ResultQuestion) => {
@@ -762,7 +770,9 @@ export default function PracticeResultPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
             {t("practiceResult.title")}
           </p>
-          <h1 className="text-3xl font-semibold text-foreground">{t("practiceResult.sessionSummary")}</h1>
+          <h1 className="text-3xl font-semibold text-foreground">
+            {storedResult?.lectureTitle || storedResult?.examTitle || t("practiceResult.sessionSummary")}
+          </h1>
           <p className="text-sm text-muted-foreground">
             {t("practiceResult.sessionSummaryDesc")}
           </p>
@@ -877,9 +887,8 @@ export default function PracticeResultPage() {
                     : isCorrect === false
                       ? t("practiceResult.status.wrong")
                       : t("practiceResult.status.pending");
-                const { text: stemText, images: stemImages } = parseStemContent(
-                  question.stem ?? ""
-                );
+                const { images: stemImages } = parseStemContent(question.stem ?? "");
+                const stemText = stripStemMarkdownForDisplay(question.stem ?? "");
                 const imageCandidates = [
                   resolveImageUrl(question.imageUrl ?? question.image),
                   ...stemImages.map((image) => resolveImageUrl(image)),
@@ -904,8 +913,19 @@ export default function PracticeResultPage() {
                     <CardContent className="space-y-5 p-6">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="space-y-2">
-                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                            {t("practiceResult.question")} {index + 1} {t("practiceResult.of")} {filteredQuestions.length}
+                          <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                            <span>
+                              {t("practiceResult.question")} {index + 1} {t("practiceResult.of")} {filteredQuestions.length}
+                            </span>
+                            {question.examTitle && (
+                              <>
+                                <span>&bull;</span>
+                                <span className="text-muted-foreground/80 lowercase tracking-normal bg-muted px-1.5 py-0.5 rounded-sm">
+                                  {question.examTitle}
+                                  {question.questionNumber ? ` - Q${question.questionNumber}` : ""}
+                                </span>
+                              </>
+                            )}
                           </p>
                           <div className="flex items-center gap-2">
                             <Badge variant={statusVariant}>{statusLabel}</Badge>

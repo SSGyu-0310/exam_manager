@@ -969,8 +969,14 @@ export default function PracticeSessionPage() {
       if (isQuestionEditing) {
         return;
       }
-      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) {
+      if (target && ["TEXTAREA", "SELECT"].includes(target.tagName)) {
         return;
+      }
+      if (target && target.tagName === "INPUT") {
+        const inputType = (target as HTMLInputElement).type;
+        if (inputType !== "radio" && inputType !== "checkbox") {
+          return;
+        }
       }
       if (!currentQuestion) return;
 
@@ -1012,10 +1018,12 @@ export default function PracticeSessionPage() {
 
       const key = shortcutKey;
       if (key === "arrowright" || key === "j") {
+        event.preventDefault();
         setCurrentIndex((prev) => Math.min(prev + 1, orderedQuestions.length - 1));
         return;
       }
       if (key === "arrowleft" || key === "k") {
+        event.preventDefault();
         setCurrentIndex((prev) => Math.max(prev - 1, 0));
         return;
       }
@@ -1158,6 +1166,7 @@ export default function PracticeSessionPage() {
         JSON.stringify({
           ...resultPayload,
           lectureId,
+          lectureTitle: sessionContext.lectureTitle,
           examId,
           examIds,
           examTitle: sessionContext.examTitle,

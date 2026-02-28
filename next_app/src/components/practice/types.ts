@@ -21,6 +21,7 @@ export const examOptionSchema = z
 export const questionSchema = z
   .object({
     questionId: z.union([z.number(), z.string()]),
+    questionNumber: z.number().nullable().optional(),
     stem: z.string().nullable().optional(),
     choices: z.array(choiceSchema).optional(),
     isShortAnswer: z.boolean().optional(),

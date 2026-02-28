@@ -1,3 +1,5 @@
+import { BookOpen, PenLine, Search, Sigma, Timer } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,126 +53,140 @@ export function StartCard({
   validationMessage,
 }: StartCardProps) {
   return (
-    <Card className="w-full max-w-2xl border border-border/70 bg-card/85 shadow-soft backdrop-blur">
+    <Card className="w-full max-w-4xl border border-border/70 bg-card/85 shadow-soft backdrop-blur">
       <CardHeader className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
-          Practice Session
-        </p>
-        <CardTitle className="text-2xl text-foreground">Start your session</CardTitle>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardDescription className="text-sm text-muted-foreground">
-            {title ?? "Pick a lecture to begin your practice run."}
+        <div className="flex items-center gap-2 mb-1">
+          <Badge variant="outline" className="text-[10px] font-semibold tracking-widest text-primary border-primary/30 bg-primary/5 uppercase">
+            문제 풀이
+          </Badge>
+        </div>
+        <CardTitle className="text-2xl font-bold tracking-tight text-foreground">학습 시작하기</CardTitle>
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+          <CardDescription className="text-sm text-muted-foreground/80">
+            {title ?? "학습을 시작할 단원을 선택하세요."}
           </CardDescription>
           {typeof questionCount === "number" && (
             <Badge variant="neutral" className="w-fit">
-              {questionCount} questions available
+              총 {questionCount}문제
             </Badge>
           )}
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
         {stats && (
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-border/60 bg-muted/60 p-3 text-center">
-                <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                  Total
-                </p>
-                <p className="text-lg font-semibold text-foreground">{stats.total}</p>
+              <div className="flex flex-col items-center justify-center rounded-2xl border border-border/50 bg-gradient-to-br from-card to-muted/30 p-4 text-center shadow-sm">
+                <div className="mb-2 rounded-full bg-primary/10 p-2 text-primary">
+                  <Sigma className="h-4 w-4" />
+                </div>
+                <p className="text-[10px] sm:text-xs uppercase tracking-wider text-muted-foreground font-medium">전체 문제</p>
+                <p className="mt-1 text-2xl font-bold text-foreground">{stats.total}</p>
               </div>
-              <div className="rounded-2xl border border-border/60 bg-muted/60 p-3 text-center">
-                <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                  Objective
-                </p>
-                <p className="text-lg font-semibold text-foreground">
-                  {stats.objective}
-                </p>
+              <div className="flex flex-col items-center justify-center rounded-2xl border border-border/50 bg-gradient-to-br from-card to-muted/30 p-4 text-center shadow-sm">
+                <div className="mb-2 rounded-full bg-blue-500/10 p-2 text-blue-500">
+                  <Search className="h-4 w-4" />
+                </div>
+                <p className="text-[10px] sm:text-xs uppercase tracking-wider text-muted-foreground font-medium">객관식</p>
+                <p className="mt-1 text-2xl font-bold text-foreground">{stats.objective}</p>
               </div>
-              <div className="rounded-2xl border border-border/60 bg-muted/60 p-3 text-center">
-                <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                  Subjective
-                </p>
-                <p className="text-lg font-semibold text-foreground">
-                  {stats.subjective}
-                </p>
+              <div className="flex flex-col items-center justify-center rounded-2xl border border-border/50 bg-gradient-to-br from-card to-muted/30 p-4 text-center shadow-sm">
+                <div className="mb-2 rounded-full bg-purple-500/10 p-2 text-purple-500">
+                  <PenLine className="h-4 w-4" />
+                </div>
+                <p className="text-[10px] sm:text-xs uppercase tracking-wider text-muted-foreground font-medium">주관식/서술형</p>
+                <p className="mt-1 text-2xl font-bold text-foreground">{stats.subjective}</p>
               </div>
             </div>
             {stats.multiple && stats.multiple > 0 && (
-              <p className="text-xs text-muted-foreground">
-                Multiple response: {stats.multiple}
+              <p className="text-xs text-muted-foreground text-right">
+                * 다중 응답 객관식: {stats.multiple}개 포함
               </p>
             )}
           </div>
         )}
         {examFilter && examFilter.options.length > 0 && (
-          <div className="rounded-2xl border border-border/60 bg-muted/60 p-4">
+          <div className="rounded-2xl border border-border/60 bg-muted/30 p-5 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm font-semibold text-foreground">Exam filter</p>
+              <p className="text-sm font-semibold text-foreground">기출문제 필터</p>
               <div className="flex flex-wrap items-center gap-2">
                 {examFilter.onReset && (
-                  <Button size="sm" variant="ghost" onClick={examFilter.onReset}>
-                    Reset
+                  <Button size="sm" variant="ghost" onClick={examFilter.onReset} className="h-8 text-xs">
+                    초기화
                   </Button>
                 )}
-                <Button size="sm" variant="outline" onClick={examFilter.onApply}>
-                  Apply
+                <Button size="sm" variant="outline" onClick={examFilter.onApply} className="h-8 text-xs bg-card">
+                  적용
                 </Button>
               </div>
             </div>
-            <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
+            <div className="mt-4 flex flex-wrap gap-2">
               {examFilter.options.map((exam) => {
                 const checked = examFilter.selectedIds.includes(exam.id);
                 return (
-                  <label key={exam.id} className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => examFilter.onToggle(exam.id)}
-                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
-                    />
-                    <span>{exam.title}</span>
-                  </label>
+                  <button
+                    key={exam.id}
+                    type="button"
+                    onClick={() => examFilter.onToggle(exam.id)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-200 border ${checked
+                      ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                      : "border-border/60 bg-card text-muted-foreground hover:border-primary/50 hover:bg-muted"
+                      }`}
+                  >
+                    {exam.title}
+                  </button>
                 );
               })}
             </div>
             {examFilter.active && stats && stats.total === 0 && (
-              <p className="mt-2 text-xs text-danger">No questions in this filter.</p>
+              <p className="mt-3 text-xs font-medium text-danger">선택한 필터에 해당하는 문제가 없습니다.</p>
             )}
           </div>
         )}
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           {(
             [
               {
                 value: "practice",
-                title: "Practice",
-                description: "Review questions at your own pace.",
+                title: "일반 모드 (자율 학습)",
+                description: "시간 제한 없이 자유롭게 문제를 풀고 즉시 복습합니다.",
+                icon: BookOpen,
+                activeColor: "text-blue-500",
+                activeBg: "bg-blue-500/10",
+                activeBorder: "border-blue-500/50",
               },
               {
                 value: "timed",
-                title: "Timed",
-                description: "Simulate test conditions with a timer.",
+                title: "실전 모드 (타이머)",
+                description: "실제 시험처럼 제한 시간 내에 문제를 푸는 모드입니다.",
+                icon: Timer,
+                activeColor: "text-orange-500",
+                activeBg: "bg-orange-500/10",
+                activeBorder: "border-orange-500/50",
               },
             ] as const
           ).map((option) => {
             const active = mode === option.value;
+            const Icon = option.icon;
             return (
               <button
                 key={option.value}
                 type="button"
                 onClick={() => onModeChange(option.value)}
-                className={`rounded-2xl border p-4 text-left transition ${
-                  active
-                    ? "border-primary bg-primary text-primary-foreground shadow-soft"
-                    : "border-border/70 bg-card text-foreground hover:border-border/80"
-                }`}
-              >
-                <p className="text-base font-semibold">{option.title}</p>
-                <p
-                  className={`text-xs ${
-                    active ? "text-primary-foreground/80" : "text-muted-foreground"
+                className={`relative overflow-hidden rounded-2xl border p-5 text-left transition-all duration-200 ${active
+                  ? `${option.activeBorder} ${option.activeBg} shadow-sm ring-1 ring-${option.activeBorder.split("-")[1]}-500/20`
+                  : "border-border/70 bg-card hover:border-border/100 hover:bg-muted/30"
                   }`}
-                >
+              >
+                <div className="flex items-center gap-3 mb-2">
+                  <div className={`rounded-xl p-2 ${active ? `${option.activeBg} ${option.activeColor}` : "bg-muted text-muted-foreground"}`}>
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <p className={`text-base font-bold ${active ? "text-foreground" : "text-foreground/80"}`}>
+                    {option.title}
+                  </p>
+                </div>
+                <p className={`text-xs leading-relaxed ${active ? "text-foreground/70" : "text-muted-foreground"}`}>
                   {option.description}
                 </p>
               </button>
@@ -190,15 +206,15 @@ export function StartCard({
         <Button
           onClick={onStart}
           disabled={loading}
-          className="w-full rounded-full py-6 text-base font-semibold"
+          className="w-full rounded-2xl py-6 text-base font-bold shadow-sm transition-transform active:scale-[0.98]"
         >
           {loading ? (
-            <>
+            <div className="flex items-center gap-2">
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-              Starting...
-            </>
+              <span>준비 중...</span>
+            </div>
           ) : (
-            "Start exam"
+            "학습 시작"
           )}
         </Button>
       </CardContent>
