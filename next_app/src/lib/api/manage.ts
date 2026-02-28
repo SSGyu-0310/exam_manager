@@ -451,6 +451,19 @@ export async function uploadLectureMaterial(
   return okResponse(uploadLectureMaterialSchema).parse(payload).data;
 }
 
+export async function deleteLectureMaterial(
+  lectureId: string | number,
+  materialId: string | number
+) {
+  const payload = await apiFetch<unknown>(
+    `/api/manage/lectures/${encodeURIComponent(String(lectureId))}/materials/${encodeURIComponent(String(materialId))}`,
+    {
+      method: "DELETE",
+    }
+  );
+  return okResponse(z.object({ id: z.number() })).parse(payload).data;
+}
+
 export async function getExams() {
   const payload = await apiFetch<unknown>("/api/manage/exams", { cache: "no-store" });
   return okResponse(examsSchema).parse(payload).data;

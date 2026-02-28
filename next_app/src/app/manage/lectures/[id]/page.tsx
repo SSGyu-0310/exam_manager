@@ -1,14 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, FileText, Hash, BookOpen, Pencil, Check, X } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  Hash,
+  BookOpen,
+  Pencil,
+  Trash2,
+  Check,
+  X,
+} from "lucide-react";
 
 import {
+  deleteLectureMaterial,
   getLectureDetail,
+  getLectures,
   uploadLectureMaterial,
   updateLecture,
+  type ManageLecture,
   type ManageLectureDetail,
   type ManageLectureQuestion,
 } from "@/lib/api/manage";
@@ -28,11 +42,13 @@ export default function LectureDetailPage() {
   const lectureId = params?.id as string;
 
   const [data, setData] = useState<ManageLectureDetail | null>(null);
+  const [lectureList, setLectureList] = useState<ManageLecture[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [deletingMaterialId, setDeletingMaterialId] = useState<number | null>(null);
 
   // Inline editing
   const [editing, setEditing] = useState(false);
@@ -48,10 +64,14 @@ export default function LectureDetailPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const result = await getLectureDetail(lectureId);
-      setData(result);
-      setEditTitle(result.lecture.title);
-      setEditProfessor(result.lecture.professor ?? "");
+      const [detailResult, lecturesResult] = await Promise.all([
+        getLectureDetail(lectureId),
+        getLectures(),
+      ]);
+      setData(detailResult);
+      setLectureList(lecturesResult);
+      setEditTitle(detailResult.lecture.title);
+      setEditProfessor(detailResult.lecture.professor ?? "");
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Unable to load lecture");
     } finally {
@@ -59,9 +79,88 @@ export default function LectureDetailPage() {
     }
   }, [lectureId]);
 
+  const lectureIdNumber = useMemo(() => Number(lectureId), [lectureId]);
+
+  const orderedLectures = useMemo(
+    () =>
+      [...lectureList].sort((a, b) => {
+        const subjectCmp = (a.blockSubject ?? "").localeCompare(
+          b.blockSubject ?? "",
+          "ko"
+        );
+        if (subjectCmp !== 0) return subjectCmp;
+        const blockNameCmp = (a.blockName ?? "").localeCompare(
+          b.blockName ?? "",
+          "ko"
+        );
+        if (blockNameCmp !== 0) return blockNameCmp;
+        const blockIdCmp = (a.blockId ?? 0) - (b.blockId ?? 0);
+        if (blockIdCmp !== 0) return blockIdCmp;
+        const orderCmp = (a.order ?? 0) - (b.order ?? 0);
+        if (orderCmp !== 0) return orderCmp;
+        return a.title.localeCompare(b.title, "ko");
+      }),
+    [lectureList]
+  );
+
+  const currentLectureIndex = useMemo(
+    () => orderedLectures.findIndex((lecture) => lecture.id === lectureIdNumber),
+    [orderedLectures, lectureIdNumber]
+  );
+
+  const previousLecture = useMemo(() => {
+    if (currentLectureIndex <= 0) return null;
+    return orderedLectures[currentLectureIndex - 1] ?? null;
+  }, [orderedLectures, currentLectureIndex]);
+
+  const nextLecture = useMemo(() => {
+    if (currentLectureIndex < 0 || currentLectureIndex >= orderedLectures.length - 1) {
+      return null;
+    }
+    return orderedLectures[currentLectureIndex + 1] ?? null;
+  }, [orderedLectures, currentLectureIndex]);
+
+  const moveToLecture = useCallback(
+    (targetLectureId: number | null | undefined) => {
+      if (!targetLectureId || targetLectureId === lectureIdNumber) return;
+      router.push(`/manage/lectures/${targetLectureId}`);
+    },
+    [router, lectureIdNumber]
+  );
+
   useEffect(() => {
     void loadLectureDetail();
   }, [loadLectureDetail]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tagName = target.tagName.toLowerCase();
+        if (
+          tagName === "input" ||
+          tagName === "textarea" ||
+          target.isContentEditable
+        ) {
+          return;
+        }
+      }
+
+      if (event.key === "ArrowLeft" && previousLecture) {
+        event.preventDefault();
+        moveToLecture(previousLecture.id);
+      } else if (event.key === "ArrowRight" && nextLecture) {
+        event.preventDefault();
+        moveToLecture(nextLecture.id);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [moveToLecture, previousLecture, nextLecture]);
 
   const handleSave = async () => {
     if (!data || !editTitle.trim()) return;
@@ -125,6 +224,30 @@ export default function LectureDetailPage() {
     } finally {
       setUploading(false);
       input.value = "";
+    }
+  };
+
+  const handleDeleteMaterial = async (
+    materialId: number,
+    originalFilename?: string | null
+  ) => {
+    const displayName = originalFilename ?? "PDF";
+    const confirmed = window.confirm(
+      `Delete "${displayName}" and all indexed chunks from this lecture?`
+    );
+    if (!confirmed) return;
+
+    setActionError(null);
+    setUploadMessage(null);
+    setDeletingMaterialId(materialId);
+    try {
+      await deleteLectureMaterial(lectureId, materialId);
+      setUploadMessage(`Deleted "${displayName}" and removed indexed chunks.`);
+      await loadLectureDetail();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Unable to delete lecture PDF");
+    } finally {
+      setDeletingMaterialId((prev) => (prev === materialId ? null : prev));
     }
   };
 
@@ -204,7 +327,30 @@ export default function LectureDetailPage() {
             </div>
           )}
         </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => moveToLecture(previousLecture?.id)}
+            disabled={!previousLecture}
+          >
+            <ChevronLeft className="h-4 w-4" />
+            Previous
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => moveToLecture(nextLecture?.id)}
+            disabled={!nextLecture}
+          >
+            Next
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
+      <p className="text-xs text-muted-foreground">
+        Use ← / → to move to previous or next lecture.
+      </p>
 
       {/* Stats */}
       <div className="grid gap-4 md:grid-cols-3">
@@ -294,6 +440,16 @@ export default function LectureDetailPage() {
                   <span className="text-xs text-muted-foreground">
                     {m.chunks ?? 0} chunks
                   </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 px-2 text-danger hover:bg-danger/10 hover:text-danger"
+                    onClick={() => handleDeleteMaterial(m.id, m.originalFilename)}
+                    disabled={deletingMaterialId === m.id || uploading}
+                  >
+                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                    Delete
+                  </Button>
                 </div>
               </div>
             ))

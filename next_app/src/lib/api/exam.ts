@@ -6,6 +6,9 @@ const examSchema = z.object({
   id: z.number(),
   title: z.string(),
   examDate: z.string().nullable().optional(),
+  year: z.number().nullable().optional(),
+  term: z.string().nullable().optional(),
+  subject: z.string().nullable().optional(),
   questionCount: z.number().optional(),
 });
 
@@ -32,6 +35,7 @@ const questionSchema = z.object({
   blockId: z.number().nullable().optional(),
   blockName: z.string().nullable().optional(),
   isClassified: z.boolean(),
+  content: z.string().nullable().optional(),
   snippet: z.string().optional(),
   hasImage: z.boolean().optional(),
 });

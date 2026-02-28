@@ -741,7 +741,10 @@ export default function PracticeSessionPage() {
     }
     if (previousQuestionIdRef.current === currentQuestionId) return;
     previousQuestionIdRef.current = currentQuestionId;
-    questionTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (questionTopRef.current) {
+      const y = questionTopRef.current.getBoundingClientRect().top + window.scrollY - 120;
+      window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+    }
   }, [currentQuestionId]);
 
   const answeredCount = useMemo(() => {
@@ -1266,7 +1269,7 @@ export default function PracticeSessionPage() {
                 {copyMessage}
               </div>
             )}
-            <div ref={questionTopRef} className="scroll-mt-24">
+            <div ref={questionTopRef} className="scroll-mt-32">
               <QuestionView
                 question={currentQuestion}
                 index={currentIndex}

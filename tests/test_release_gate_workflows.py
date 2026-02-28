@@ -1090,3 +1090,71 @@ def test_upload_lecture_material_keeps_pdf_when_enabled(client, app, monkeypatch
         assert material is not None
         stored_path = Path(app.config["UPLOAD_FOLDER"]) / material.file_path
         assert stored_path.exists()
+
+
+def test_delete_lecture_material_removes_file_and_chunks_in_api_manage(client, app):
+    with app.app_context():
+        user = _create_user("gate-lecture-material-delete@example.com")
+        token = create_access_token(identity=str(user.id))
+
+        block = Block(name="Neuro", user_id=user.id)
+        db.session.add(block)
+        db.session.flush()
+        lecture = Lecture(block_id=block.id, title="Neuron", user_id=user.id, order=1)
+        db.session.add(lecture)
+        db.session.flush()
+
+        relative_path = Path("lecture_notes") / str(lecture.id) / "to_delete.pdf"
+        stored_path = Path(app.config["UPLOAD_FOLDER"]) / relative_path
+        stored_path.parent.mkdir(parents=True, exist_ok=True)
+        stored_path.write_bytes(b"%PDF-1.4 material")
+
+        material = LectureMaterial(
+            lecture_id=lecture.id,
+            file_path=relative_path.as_posix(),
+            original_filename="to_delete.pdf",
+            status=LectureMaterial.STATUS_INDEXED,
+            indexed_at=datetime.utcnow(),
+        )
+        db.session.add(material)
+        db.session.flush()
+
+        db.session.add_all(
+            [
+                LectureChunk(
+                    lecture_id=lecture.id,
+                    material_id=material.id,
+                    page_start=1,
+                    page_end=1,
+                    content="chunk one",
+                    char_len=9,
+                ),
+                LectureChunk(
+                    lecture_id=lecture.id,
+                    material_id=material.id,
+                    page_start=2,
+                    page_end=2,
+                    content="chunk two",
+                    char_len=9,
+                ),
+            ]
+        )
+        db.session.commit()
+
+        lecture_id = lecture.id
+        material_id = material.id
+
+    response = client.delete(
+        f"/api/manage/lectures/{lecture_id}/materials/{material_id}",
+        headers=_auth_header(token),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["data"]["id"] == material_id
+    assert not stored_path.exists()
+
+    with app.app_context():
+        assert db.session.get(LectureMaterial, material_id) is None
+        assert LectureChunk.query.filter_by(material_id=material_id).count() == 0
