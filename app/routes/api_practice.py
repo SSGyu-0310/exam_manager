@@ -315,6 +315,7 @@ def _build_question_payload(question, choices_by_question, include_answer=False)
 
     payload = {
         "questionId": question.id,
+        "questionNumber": question.question_number,
         "stem": question.content or "",
         "choices": [
             {

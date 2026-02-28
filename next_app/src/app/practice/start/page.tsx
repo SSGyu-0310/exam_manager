@@ -112,7 +112,7 @@ function PracticeStartContent() {
     let active = true;
     if (!lectureIdParam) {
       setLoading(false);
-      setError("Missing lecture selection.");
+      setError("단원이 선택되지 않았습니다.");
       return;
     }
 
@@ -210,17 +210,17 @@ function PracticeStartContent() {
   const startDisabled = filterActive && appliedExamIds.length === 0;
   const validationMessage =
     filterActive && appliedExamIds.length === 0
-      ? "Select at least one exam to continue."
+      ? "진행하려면 하나 이상의 기출문제를 선택해 주세요."
       : null;
   const displayQuestionCount = filterActive ? stats.total : questionCount ?? stats.total;
 
   const handleStart = async () => {
     if (!lectureIdParam) {
-      setError("Missing lecture selection.");
+      setError("단원이 선택되지 않았습니다.");
       return;
     }
     if (startDisabled) {
-      setError("Select at least one exam to continue.");
+      setError("진행하려면 하나 이상의 기출문제를 선택해 주세요.");
       return;
     }
     setStartLoading(true);
@@ -266,9 +266,9 @@ function PracticeStartContent() {
 
   return (
     <div className="min-h-[70vh]">
-      <div className="mx-auto flex w-full max-w-5xl flex-col items-center justify-center gap-8">
+      <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-center gap-8">
         {loading ? (
-          <div className="w-full max-w-2xl animate-pulse rounded-3xl border border-border/60 bg-card/70 p-8 shadow-soft backdrop-blur">
+          <div className="w-full max-w-4xl animate-pulse rounded-3xl border border-border/60 bg-card/70 p-8 shadow-soft backdrop-blur">
             <div className="h-4 w-32 rounded-full bg-muted" />
             <div className="mt-4 h-6 w-64 rounded-full bg-muted" />
             <div className="mt-2 h-4 w-48 rounded-full bg-muted" />
@@ -300,7 +300,7 @@ function PracticeStartContent() {
           />
         )}
         {!safeLectureId && (
-          <p className="text-sm text-muted-foreground">Select a lecture to continue.</p>
+          <p className="text-sm text-muted-foreground">계속하려면 단원을 선택해 주세요.</p>
         )}
       </div>
     </div>
@@ -310,7 +310,7 @@ function PracticeStartContent() {
 
 export default function PracticeStartPage() {
   return (
-    <Suspense fallback={<div className="min-h-[70vh] flex items-center justify-center">Loading...</div>}>
+    <Suspense fallback={<div className="min-h-[70vh] flex items-center justify-center text-muted-foreground">불러오는 중...</div>}>
       <PracticeStartContent />
     </Suspense>
   );
