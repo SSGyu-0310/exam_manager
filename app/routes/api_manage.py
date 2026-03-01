@@ -24,6 +24,12 @@ from app.models import (
     Subject,
 )
 from app.services.exam_cleanup import delete_exam_with_assets
+from app.services.material_storage import (
+    remove_material_file,
+    resolve_material_path,
+    resolve_upload_folder,
+    should_keep_pdf_after_index,
+)
 from app.services.markdown_images import strip_markdown_images
 from app.services.db_guard import guard_write_request
 from app.services.block_sort import block_ordering
@@ -255,24 +261,6 @@ def _parse_year(value):
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
-def _resolve_upload_folder() -> Path:
-    upload_folder = current_app.config.get("UPLOAD_FOLDER")
-    if not upload_folder:
-        upload_folder = Path(current_app.static_folder) / "uploads"
-    return Path(upload_folder)
-
-
-def _should_keep_pdf_after_index() -> bool:
-    return bool(current_app.config.get("KEEP_PDF_AFTER_INDEX", False))
-
-
-def _remove_material_file(path: Path) -> None:
-    try:
-        path.unlink(missing_ok=True)
-    except OSError:
-        current_app.logger.warning("Failed to delete uploaded material: %s", path)
 
 
 def _compose_exam_title(subject=None, year=None, term=None, fallback=None):
@@ -1021,7 +1009,7 @@ def upload_lecture_material(lecture_id):
             "Only PDF files are allowed.", code="PDF_INVALID_TYPE", status=400
         )
 
-    upload_folder = _resolve_upload_folder()
+    upload_folder = resolve_upload_folder()
     target_dir = upload_folder / "lecture_notes" / str(lecture.id)
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1050,8 +1038,8 @@ def upload_lecture_material(lecture_id):
         from app.services.lecture_indexer import index_material
 
         index_result = index_material(material)
-        if not _should_keep_pdf_after_index():
-            _remove_material_file(stored_path)
+        if not should_keep_pdf_after_index():
+            remove_material_file(stored_path)
         chunk_count = LectureChunk.query.filter_by(material_id=material.id).count()
         return ok(
             {
@@ -1128,10 +1116,8 @@ def delete_lecture_material(lecture_id, material_id):
                     "FTS delete failed for lecture material %s", material.id
                 )
 
-        file_path = Path(material.file_path)
-        if not file_path.is_absolute():
-            file_path = _resolve_upload_folder() / file_path
-        _remove_material_file(file_path)
+        file_path = resolve_material_path(material.file_path)
+        remove_material_file(file_path)
 
         db.session.delete(material)
         db.session.commit()

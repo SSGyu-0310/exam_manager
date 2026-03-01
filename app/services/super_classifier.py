@@ -71,6 +71,18 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _normalize_int_list(raw_values: Any) -> List[int]:
+    if not isinstance(raw_values, (list, tuple, set)):
+        return []
+    normalized: List[int] = []
+    for raw_value in raw_values:
+        try:
+            normalized.append(int(raw_value))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(normalized))
+
+
 def _truncate_text(value: str, max_chars: int) -> str:
     if max_chars <= 0 or len(value) <= max_chars:
         return value
@@ -185,12 +197,7 @@ def _load_exam_questions(
 
     query = Question.query.filter(Question.exam_id == exam_id)
     if question_ids is not None:
-        normalized_question_ids: List[int] = []
-        for raw_question_id in question_ids:
-            try:
-                normalized_question_ids.append(int(raw_question_id))
-            except (TypeError, ValueError):
-                continue
+        normalized_question_ids = _normalize_int_list(question_ids)
         if not normalized_question_ids:
             return []
         query = query.filter(Question.id.in_(normalized_question_ids))
@@ -304,6 +311,7 @@ def _parse_super_result(
     """Gemini 응답을 파싱하여 기존 결과 형식으로 변환."""
     valid_lecture_ids = {lec["id"] for lec in lectures}
     lecture_map = {lec["id"]: lec for lec in lectures}
+    candidate_ids = [lec["id"] for lec in lectures]
     question_map = {q["id"]: q for q in questions}
     question_number_map = {
         int(q["question_number"]): int(q["id"])
@@ -445,7 +453,7 @@ def _parse_super_result(
             "rejudge_reason": None,
             "final_decision_source": "super",
             "response_omitted": False,
-            "candidate_ids": [lec["id"] for lec in lectures],
+            "candidate_ids": candidate_ids,
             "will_change": bool(
                 lecture_id and lecture_id != current_lecture_id
             ),
@@ -539,6 +547,7 @@ def _build_super_no_match_result(
     lectures: List[Dict[str, Any]],
     *,
     reason: str,
+    candidate_ids: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
     question_obj = question_data["question"]
     current_lecture = question_obj.lecture
@@ -575,7 +584,11 @@ def _build_super_no_match_result(
         "rejudge_reason": None,
         "final_decision_source": "super",
         "response_omitted": True,
-        "candidate_ids": [lec["id"] for lec in lectures],
+        "candidate_ids": (
+            candidate_ids
+            if candidate_ids is not None
+            else [lec["id"] for lec in lectures]
+        ),
         "will_change": bool(current_lecture_id),
         "error": False,
     }
@@ -669,6 +682,19 @@ class SuperClassifier:
             _env_int("SUPER_CLASSIFY_RETRY_BATCH_SIZE", DEFAULT_SUPER_RETRY_BATCH_SIZE),
         )
 
+    def _generate_json_response(self, prompt: str) -> str:
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.1,
+                top_p=0.9,
+                max_output_tokens=self.max_output_tokens,
+                response_mime_type="application/json",
+            ),
+        )
+        return (response.text or "").strip()
+
     def _recover_missing_results(
         self,
         exam_id: int,
@@ -698,17 +724,7 @@ class SuperClassifier:
                 max_chars_per_question=self.max_chars_per_question,
             )
             try:
-                response = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=retry_prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.1,
-                        top_p=0.9,
-                        max_output_tokens=self.max_output_tokens,
-                        response_mime_type="application/json",
-                    ),
-                )
-                raw_text = (response.text or "").strip()
+                raw_text = self._generate_json_response(retry_prompt)
                 logger.info(
                     "SUPER_CLASSIFY_RETRY_RESPONSE exam_id=%s batch_size=%s response_len=%s",
                     exam_id,
@@ -807,18 +823,7 @@ class SuperClassifier:
         )
 
         # 4. Call Gemini API (single request)
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.1,
-                top_p=0.9,
-                max_output_tokens=self.max_output_tokens,
-                response_mime_type="application/json",
-            ),
-        )
-
-        raw_text = (response.text or "").strip()
+        raw_text = self._generate_json_response(prompt)
         logger.info(
             "SUPER_CLASSIFY_RESPONSE exam_id=%s response_len=%s",
             exam_id,
@@ -868,6 +873,7 @@ class SuperClassifier:
                 for question in questions
                 if question.get("id") is not None
             }
+            candidate_ids = [lecture["id"] for lecture in lectures]
             for missing_id in remaining_missing_ids:
                 question_data = question_lookup.get(missing_id)
                 if not question_data:
@@ -877,6 +883,7 @@ class SuperClassifier:
                         question_data,
                         lectures,
                         reason="모델 응답 누락으로 자동 no_match 처리",
+                        candidate_ids=candidate_ids,
                     )
                 )
             logger.warning(
@@ -939,13 +946,7 @@ class SuperClassifier:
                 .all()
             ]
         else:
-            normalized_question_ids: List[int] = []
-            for raw_question_id in question_ids:
-                try:
-                    normalized_question_ids.append(int(raw_question_id))
-                except (TypeError, ValueError):
-                    continue
-            question_ids = sorted(set(normalized_question_ids))
+            question_ids = _normalize_int_list(question_ids)
 
         question_count = len(question_ids)
         if question_count == 0:
@@ -965,13 +966,7 @@ class SuperClassifier:
         scope_meta = dict(scope_meta_raw) if isinstance(scope_meta_raw, dict) else {}
 
         if lecture_ids is not None:
-            normalized_lecture_ids: List[int] = []
-            for raw_lecture_id in lecture_ids:
-                try:
-                    normalized_lecture_ids.append(int(raw_lecture_id))
-                except (TypeError, ValueError):
-                    continue
-            lecture_ids = sorted(set(normalized_lecture_ids))
+            lecture_ids = _normalize_int_list(lecture_ids)
             scope_meta["lecture_ids"] = lecture_ids
 
         if block_id is not None:
