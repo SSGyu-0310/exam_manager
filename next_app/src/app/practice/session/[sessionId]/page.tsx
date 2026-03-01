@@ -822,7 +822,15 @@ export default function PracticeSessionPage() {
   }, []);
 
   const handleQuestionUpdated = useCallback(
-    (questionId: string, payload: { stem: string; choices: PracticeChoice[] }) => {
+    (
+      questionId: string,
+      payload: {
+        stem: string;
+        choices: PracticeChoice[];
+        isShortAnswer: boolean;
+        isMultipleResponse: boolean;
+      }
+    ) => {
       setQuestions((prev) =>
         prev.map((item) =>
           String(item.questionId) === questionId
@@ -830,10 +838,21 @@ export default function PracticeSessionPage() {
               ...item,
               stem: payload.stem,
               choices: payload.choices,
+              isShortAnswer: payload.isShortAnswer,
+              isMultipleResponse: payload.isMultipleResponse,
             }
             : item
         )
       );
+      setAnswers((prev) => {
+        const current = prev[questionId];
+        if (!current) return prev;
+        const expectedType = payload.isShortAnswer ? "short" : "mcq";
+        if (current.type === expectedType) return prev;
+        const next = { ...prev };
+        delete next[questionId];
+        return next;
+      });
     },
     []
   );

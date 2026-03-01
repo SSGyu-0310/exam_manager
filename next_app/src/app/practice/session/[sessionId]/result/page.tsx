@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import { mergeChoicesIntoStem } from "@/lib/question_edit";
 import {
   AnswerPayload,
   lectureResultSchema,
@@ -68,6 +69,11 @@ type EditableChoice = {
   content: string;
   isCorrect: boolean;
 };
+
+type EditableQuestionType =
+  | "multiple_choice"
+  | "multiple_response"
+  | "short_answer";
 
 const normalizeResultItem = (raw: unknown): ResultItem | null => {
   if (!raw || typeof raw !== "object") return null;
@@ -234,6 +240,18 @@ const toEditableChoicesFromManage = (choices: ManageChoice[]): EditableChoice[] 
     isCorrect: Boolean(choice.isCorrect),
   }));
 
+const resolveQuestionType = (
+  rawType: string | null | undefined,
+  fallback: ResultQuestion
+): EditableQuestionType => {
+  if (rawType === "short_answer") return "short_answer";
+  if (rawType === "multiple_response") return "multiple_response";
+  if (rawType === "multiple_choice") return "multiple_choice";
+  if (fallback.isShortAnswer) return "short_answer";
+  if (fallback.isMultipleResponse) return "multiple_response";
+  return "multiple_choice";
+};
+
 export default function PracticeResultPage() {
   const { t } = useLanguage();
   const router = useRouter();
@@ -258,6 +276,7 @@ export default function PracticeResultPage() {
   const [editError, setEditError] = useState<string | null>(null);
   const [editSuccess, setEditSuccess] = useState<string | null>(null);
   const [questionDetail, setQuestionDetail] = useState<ManageQuestionDetail | null>(null);
+  const [editedType, setEditedType] = useState<EditableQuestionType>("multiple_choice");
   const [editedStem, setEditedStem] = useState("");
   const [editedChoices, setEditedChoices] = useState<EditableChoice[]>([]);
   const [editedCorrectAnswerText, setEditedCorrectAnswerText] = useState("");
@@ -488,6 +507,7 @@ export default function PracticeResultPage() {
       const detail = await getQuestionDetail(targetQuestionId);
       if (latestEditQuestionIdRef.current !== targetQuestionId) return;
       setQuestionDetail(detail);
+      setEditedType(resolveQuestionType(detail.type, currentQuestion));
       setEditedStem(detail.content ?? currentQuestion.stem ?? "");
       setEditedChoices(toEditableChoicesFromManage(detail.choices));
       setEditedCorrectAnswerText(
@@ -507,9 +527,29 @@ export default function PracticeResultPage() {
   }, [filteredQuestions, activeIndex]);
 
   const handleCancelEdit = useCallback(() => {
+    const currentQuestion = filteredQuestions[activeIndex];
+    if (questionDetail && currentQuestion) {
+      setEditedType(resolveQuestionType(questionDetail.type, currentQuestion));
+      setEditedStem(questionDetail.content ?? currentQuestion.stem ?? "");
+      setEditedChoices(toEditableChoicesFromManage(questionDetail.choices));
+      setEditedCorrectAnswerText(
+        questionDetail.correctAnswerText ?? questionDetail.answer ?? ""
+      );
+    }
     setIsEditMode(false);
     setEditError(null);
-  }, []);
+  }, [activeIndex, filteredQuestions, questionDetail]);
+
+  const handleTypeChange = useCallback(
+    (nextType: EditableQuestionType) => {
+      if (editedType === nextType) return;
+      if (nextType === "short_answer" && editedType !== "short_answer") {
+        setEditedStem((prev) => mergeChoicesIntoStem(prev, editedChoices));
+      }
+      setEditedType(nextType);
+    },
+    [editedChoices, editedType]
+  );
 
   const handleSaveEdit = useCallback(async () => {
     if (!questionDetail) {
@@ -524,7 +564,7 @@ export default function PracticeResultPage() {
     setEditSuccess(null);
 
     try {
-      const type = questionDetail.type || "multiple_choice";
+      const type = editedType;
       const choiceContentByNumber = new Map(
         editedChoices.map((choice) => [choice.number, choice])
       );
@@ -579,6 +619,8 @@ export default function PracticeResultPage() {
               ...item,
               stem: saved.content ?? editedStem,
               choices: nextChoices,
+              isShortAnswer: type === "short_answer",
+              isMultipleResponse: type === "multiple_response",
               correctChoiceNumbers: newCorrectChoiceNumbers,
               correctAnswerText:
                 type === "short_answer"
@@ -619,9 +661,16 @@ export default function PracticeResultPage() {
             const rawId = record.questionId ?? record.question_id;
             if (String(rawId) !== targetQuestionId) return raw;
             if (typeof newIsCorrect !== "boolean") {
-              return record;
+              return {
+                ...record,
+                type: type === "short_answer" ? "short" : "mcq",
+              };
             }
-            return { ...record, isCorrect: newIsCorrect };
+            return {
+              ...record,
+              isCorrect: newIsCorrect,
+              type: type === "short_answer" ? "short" : "mcq",
+            };
           });
 
           // Recount correct answers
@@ -659,6 +708,7 @@ export default function PracticeResultPage() {
       }
 
       setQuestionDetail(saved);
+      setEditedType(resolveQuestionType(saved.type, currentQuestion));
       setIsEditMode(false);
       setEditSuccess("수정이 저장되었습니다.");
     } catch (err) {
@@ -671,7 +721,18 @@ export default function PracticeResultPage() {
         setSavingEditor(false);
       }
     }
-  }, [editedChoices, editedCorrectAnswerText, editedStem, filteredQuestions, activeIndex, questionDetail, itemsById, storedResult, sessionId]);
+  }, [
+    activeIndex,
+    editedChoices,
+    editedCorrectAnswerText,
+    editedStem,
+    editedType,
+    filteredQuestions,
+    itemsById,
+    questionDetail,
+    sessionId,
+    storedResult,
+  ]);
 
   const updateDraftChoice = useCallback((choiceNumber: number, value: string) => {
     setEditedChoices((prev) =>
@@ -914,8 +975,7 @@ export default function PracticeResultPage() {
                 const referenceImage = detailMatchesCurrentQuestion
                   ? resolveImageUrl(questionDetail?.originalImageUrl) ?? questionCropImage
                   : questionCropImage;
-                const isShortAnswerEditor =
-                  questionDetail?.type === "short_answer" || Boolean(question.isShortAnswer);
+                const isShortAnswerEditor = editedType === "short_answer";
 
                 return (
                   <Card
@@ -1011,6 +1071,40 @@ export default function PracticeResultPage() {
                               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                                 문제 수정 모드
                               </p>
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-sm font-semibold text-foreground">
+                                문제 유형
+                              </label>
+                              <div className="flex flex-wrap gap-2">
+                                <Button
+                                  type="button"
+                                  variant={editedType === "multiple_choice" ? "primary" : "outline"}
+                                  size="sm"
+                                  onClick={() => handleTypeChange("multiple_choice")}
+                                  disabled={savingEditor}
+                                >
+                                  객관식
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant={editedType === "multiple_response" ? "primary" : "outline"}
+                                  size="sm"
+                                  onClick={() => handleTypeChange("multiple_response")}
+                                  disabled={savingEditor}
+                                >
+                                  복수정답
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant={editedType === "short_answer" ? "primary" : "outline"}
+                                  size="sm"
+                                  onClick={() => handleTypeChange("short_answer")}
+                                  disabled={savingEditor}
+                                >
+                                  주관식
+                                </Button>
+                              </div>
                             </div>
                             <div className="space-y-2">
                               <label className="text-sm font-semibold text-foreground">
