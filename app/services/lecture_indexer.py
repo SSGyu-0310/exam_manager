@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime
-from pathlib import Path
 from typing import List, Tuple, Dict
 
 import fitz
@@ -15,6 +14,7 @@ from flask import current_app, has_app_context
 from app import db
 from app.models import LectureMaterial, LectureChunk
 from app.services.db_utils import is_postgres
+from app.services.material_storage import resolve_material_path
 
 FTS_TABLE = "lecture_chunks_fts"
 
@@ -145,16 +145,6 @@ def chunk_pages(
     return chunks
 
 
-def _resolve_material_path(file_path: str) -> Path:
-    candidate = Path(file_path)
-    if candidate.is_absolute():
-        return candidate
-    upload_folder = current_app.config.get('UPLOAD_FOLDER')
-    if not upload_folder:
-        upload_folder = Path(current_app.static_folder) / 'uploads'
-    return Path(upload_folder) / file_path
-
-
 def _delete_fts_rows(chunk_ids: List[int]) -> None:
     if not chunk_ids or is_postgres():
         return
@@ -198,7 +188,7 @@ def index_material(
     max_chars: int = 2600,
 ) -> Dict[str, int]:
     try:
-        material_path = _resolve_material_path(material.file_path)
+        material_path = resolve_material_path(material.file_path)
         pages = extract_pdf_pages(material_path)
         chunk_defs = chunk_pages(pages, target_chars=target_chars, max_chars=max_chars)
 

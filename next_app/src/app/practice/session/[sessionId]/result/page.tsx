@@ -695,6 +695,12 @@ export default function PracticeResultPage() {
     (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (event.isComposing) return;
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        if (!isEditMode || savingEditor) return;
+        event.preventDefault();
+        void handleSaveEdit();
+        return;
+      }
       if (isEditMode) return;
       if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
       if (!filteredQuestions.length) return;
@@ -716,7 +722,14 @@ export default function PracticeResultPage() {
         focusQuestion(Math.max(activeIndex - 1, 0));
       }
     },
-    [activeIndex, filteredQuestions.length, focusQuestion, isEditMode]
+    [
+      activeIndex,
+      filteredQuestions.length,
+      focusQuestion,
+      handleSaveEdit,
+      isEditMode,
+      savingEditor,
+    ]
   );
 
   useEffect(() => {

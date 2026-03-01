@@ -253,6 +253,21 @@ export function QuestionView({
     }
   }, [editedChoices, editedStem, onQuestionUpdated, question.questionId, questionDetail, t]);
 
+  useEffect(() => {
+    if (!isEditMode) return;
+
+    const handleEditShortcut = (event: KeyboardEvent) => {
+      if (event.isComposing) return;
+      if (savingEditor) return;
+      if (!(event.ctrlKey || event.metaKey) || event.key !== "Enter") return;
+      event.preventDefault();
+      void handleSaveEdit();
+    };
+
+    window.addEventListener("keydown", handleEditShortcut);
+    return () => window.removeEventListener("keydown", handleEditShortcut);
+  }, [handleSaveEdit, isEditMode, savingEditor]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">

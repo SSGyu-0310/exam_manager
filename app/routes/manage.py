@@ -33,6 +33,12 @@ from app.services.db_guard import guard_write_request
 from app.services.db_utils import is_postgres
 from app.services.pdf_import_service import save_parsed_questions
 from app.services.manage_service import get_dashboard_stats
+from app.services.material_storage import (
+    remove_material_file,
+    resolve_material_path,
+    resolve_upload_folder,
+    should_keep_pdf_after_index,
+)
 from app.services.api_response import (
     success_response as _success_response,
     error_response as _error_response,
@@ -165,24 +171,6 @@ def _get_or_create_unassigned_block(user, is_public):
 def allowed_file(filename, allowed_extensions):
     """허용된 파일 확장자 확인"""
     return "." in filename and filename.rsplit(".", 1)[1].lower() in allowed_extensions
-
-
-def _resolve_upload_folder() -> Path:
-    upload_folder = current_app.config.get("UPLOAD_FOLDER")
-    if not upload_folder:
-        upload_folder = Path(current_app.static_folder) / "uploads"
-    return Path(upload_folder)
-
-
-def _should_keep_pdf_after_index() -> bool:
-    return bool(current_app.config.get("KEEP_PDF_AFTER_INDEX", False))
-
-
-def _remove_material_file(path: Path) -> None:
-    try:
-        path.unlink(missing_ok=True)
-    except OSError:
-        current_app.logger.warning("Lecture note file delete failed: %s", path)
 
 
 def _ensure_editable(resource, user):
@@ -388,7 +376,7 @@ def upload_lecture_note(lecture_id):
         )
 
     try:
-        upload_folder = _resolve_upload_folder()
+        upload_folder = resolve_upload_folder()
         target_dir = upload_folder / "lecture_notes" / str(lecture.id)
         target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -414,8 +402,11 @@ def upload_lecture_note(lecture_id):
         from app.services.lecture_indexer import index_material
 
         index_result = index_material(material)
-        if not _should_keep_pdf_after_index():
-            _remove_material_file(stored_path)
+        if not should_keep_pdf_after_index():
+            remove_material_file(
+                stored_path,
+                log_message="Lecture note file delete failed: %s",
+            )
 
         material_payload = {
             "materialId": material.id,
@@ -515,13 +506,11 @@ def delete_lecture_note(lecture_id, material_id):
                     "FTS delete failed for material %s", material.id
                 )
 
-        file_path = Path(material.file_path)
-        if not file_path.is_absolute():
-            file_path = _resolve_upload_folder() / file_path
-        try:
-            file_path.unlink(missing_ok=True)
-        except Exception:
-            current_app.logger.warning("Lecture note file delete failed: %s", file_path)
+        file_path = resolve_material_path(material.file_path)
+        remove_material_file(
+            file_path,
+            log_message="Lecture note file delete failed: %s",
+        )
 
         db.session.delete(material)
         db.session.commit()
