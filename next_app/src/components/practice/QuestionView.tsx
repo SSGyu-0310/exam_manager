@@ -14,6 +14,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ChoiceList } from "@/components/practice/ChoiceList";
+import { mergeChoicesIntoStem } from "@/lib/question_edit";
 import type {
   AnswerPayload,
   PracticeChoice,
@@ -31,10 +32,20 @@ type QuestionViewProps = {
   onToggleBookmark?: () => void;
   onQuestionUpdated?: (
     questionId: string,
-    payload: { stem: string; choices: PracticeChoice[] }
+    payload: {
+      stem: string;
+      choices: PracticeChoice[];
+      isShortAnswer: boolean;
+      isMultipleResponse: boolean;
+    }
   ) => void;
   onEditModeChange?: (editing: boolean) => void;
 };
+
+type EditableQuestionType =
+  | "multiple_choice"
+  | "multiple_response"
+  | "short_answer";
 
 type EditableChoice = {
   number: number;
@@ -70,6 +81,21 @@ const toEditableChoicesFromManage = (choices: ManageChoice[]) =>
     content: choice.content ?? "",
   }));
 
+const resolveQuestionType = (
+  rawType: string | null | undefined,
+  fallback: {
+    isShortAnswer?: boolean | null;
+    isMultipleResponse?: boolean | null;
+  }
+): EditableQuestionType => {
+  if (rawType === "short_answer") return "short_answer";
+  if (rawType === "multiple_response") return "multiple_response";
+  if (rawType === "multiple_choice") return "multiple_choice";
+  if (fallback.isShortAnswer) return "short_answer";
+  if (fallback.isMultipleResponse) return "multiple_response";
+  return "multiple_choice";
+};
+
 export function QuestionView({
   question,
   index,
@@ -83,6 +109,8 @@ export function QuestionView({
 }: QuestionViewProps) {
   const { t } = useLanguage();
   const isShortAnswer = Boolean(question.isShortAnswer);
+  const isFallbackShortAnswer = Boolean(question.isShortAnswer);
+  const isFallbackMultipleResponse = Boolean(question.isMultipleResponse);
   const selectedValues =
     answer && answer.type === "mcq" && Array.isArray(answer.value) ? answer.value : [];
   const shortAnswerValue = answer && answer.type === "short" ? answer.value : "";
@@ -94,10 +122,17 @@ export function QuestionView({
   const [editError, setEditError] = useState<string | null>(null);
   const [editSuccess, setEditSuccess] = useState<string | null>(null);
   const [questionDetail, setQuestionDetail] = useState<ManageQuestionDetail | null>(null);
+  const [editedType, setEditedType] = useState<EditableQuestionType>(
+    resolveQuestionType(undefined, {
+      isShortAnswer: isFallbackShortAnswer,
+      isMultipleResponse: isFallbackMultipleResponse,
+    })
+  );
   const [editedStem, setEditedStem] = useState(question.stem ?? "");
   const [editedChoices, setEditedChoices] = useState<EditableChoice[]>(
     toEditableChoicesFromPractice(question.choices)
   );
+  const [editedCorrectAnswerText, setEditedCorrectAnswerText] = useState("");
   const latestQuestionIdRef = useRef(String(question.questionId));
 
   useEffect(() => {
@@ -109,16 +144,30 @@ export function QuestionView({
     setEditError(null);
     setEditSuccess(null);
     setQuestionDetail(null);
+    setEditedType(
+      resolveQuestionType(undefined, {
+        isShortAnswer: isFallbackShortAnswer,
+        isMultipleResponse: isFallbackMultipleResponse,
+      })
+    );
     setEditedStem(question.stem ?? "");
     setEditedChoices(toEditableChoicesFromPractice(question.choices));
-  }, [question.questionId, question.stem, question.choices]);
+    setEditedCorrectAnswerText("");
+  }, [
+    question.questionId,
+    question.stem,
+    question.choices,
+    question.isShortAnswer,
+    question.isMultipleResponse,
+    isFallbackShortAnswer,
+    isFallbackMultipleResponse,
+  ]);
 
   useEffect(() => {
     onEditModeChange?.(isEditMode);
   }, [isEditMode, onEditModeChange]);
 
-  const isShortAnswerEditor =
-    questionDetail?.type === "short_answer" || Boolean(question.isShortAnswer);
+  const isShortAnswerEditor = editedType === "short_answer";
 
   const referenceImage = resolveImageUrl(
     questionDetail?.originalImageUrl ??
@@ -145,8 +194,15 @@ export function QuestionView({
         return;
       }
       setQuestionDetail(detail);
+      setEditedType(
+        resolveQuestionType(detail.type, {
+          isShortAnswer: isFallbackShortAnswer,
+          isMultipleResponse: isFallbackMultipleResponse,
+        })
+      );
       setEditedStem(detail.content ?? question.stem ?? "");
       setEditedChoices(toEditableChoicesFromManage(detail.choices));
+      setEditedCorrectAnswerText(detail.correctAnswerText ?? detail.answer ?? "");
       setIsEditMode(true);
     } catch (err) {
       if (latestQuestionIdRef.current !== targetQuestionId) {
@@ -160,19 +216,58 @@ export function QuestionView({
         setLoadingEditor(false);
       }
     }
-  }, [question.questionId, question.stem, t]);
+  }, [
+    isFallbackMultipleResponse,
+    isFallbackShortAnswer,
+    question.questionId,
+    question.stem,
+    t,
+  ]);
 
   const handleCancelEdit = useCallback(() => {
     setIsEditMode(false);
     setEditError(null);
     if (questionDetail) {
+      setEditedType(
+        resolveQuestionType(questionDetail.type, {
+          isShortAnswer: isFallbackShortAnswer,
+          isMultipleResponse: isFallbackMultipleResponse,
+        })
+      );
       setEditedStem(questionDetail.content ?? question.stem ?? "");
       setEditedChoices(toEditableChoicesFromManage(questionDetail.choices));
+      setEditedCorrectAnswerText(
+        questionDetail.correctAnswerText ?? questionDetail.answer ?? ""
+      );
       return;
     }
+    setEditedType(
+      resolveQuestionType(undefined, {
+        isShortAnswer: isFallbackShortAnswer,
+        isMultipleResponse: isFallbackMultipleResponse,
+      })
+    );
     setEditedStem(question.stem ?? "");
     setEditedChoices(toEditableChoicesFromPractice(question.choices));
-  }, [question.stem, question.choices, questionDetail]);
+    setEditedCorrectAnswerText("");
+  }, [
+    isFallbackMultipleResponse,
+    isFallbackShortAnswer,
+    question.stem,
+    question.choices,
+    questionDetail,
+  ]);
+
+  const handleTypeChange = useCallback(
+    (nextType: EditableQuestionType) => {
+      if (editedType === nextType) return;
+      if (nextType === "short_answer" && editedType !== "short_answer") {
+        setEditedStem((prev) => mergeChoicesIntoStem(prev, editedChoices));
+      }
+      setEditedType(nextType);
+    },
+    [editedChoices, editedType]
+  );
 
   const handleSaveEdit = useCallback(async () => {
     if (!questionDetail) {
@@ -186,7 +281,7 @@ export function QuestionView({
     setEditSuccess(null);
 
     try {
-      const type = questionDetail.type || "multiple_choice";
+      const type = editedType;
       const choiceContentByNumber = new Map(
         editedChoices.map((choice) => [choice.number, choice.content])
       );
@@ -212,7 +307,7 @@ export function QuestionView({
         lectureId: questionDetail.lectureId ?? null,
         correctAnswerText:
           type === "short_answer"
-            ? questionDetail.correctAnswerText ?? questionDetail.answer ?? ""
+            ? editedCorrectAnswerText
             : null,
         choices: choicesPayload,
       });
@@ -230,14 +325,25 @@ export function QuestionView({
             }));
 
       setQuestionDetail(saved);
+      setEditedType(
+        resolveQuestionType(saved.type, {
+          isShortAnswer: isFallbackShortAnswer,
+          isMultipleResponse: isFallbackMultipleResponse,
+        })
+      );
       setEditedStem(saved.content ?? editedStem);
       setEditedChoices(toEditableChoicesFromManage(saved.choices));
+      setEditedCorrectAnswerText(
+        saved.correctAnswerText ?? saved.answer ?? editedCorrectAnswerText
+      );
       setIsEditMode(false);
       setEditSuccess(t("practiceSession.editSaveSuccess"));
 
       onQuestionUpdated?.(targetQuestionId, {
         stem: saved.content ?? editedStem,
         choices: nextChoices,
+        isShortAnswer: type === "short_answer",
+        isMultipleResponse: type === "multiple_response",
       });
     } catch (err) {
       if (latestQuestionIdRef.current !== targetQuestionId) {
@@ -251,7 +357,18 @@ export function QuestionView({
         setSavingEditor(false);
       }
     }
-  }, [editedChoices, editedStem, onQuestionUpdated, question.questionId, questionDetail, t]);
+  }, [
+    editedChoices,
+    editedCorrectAnswerText,
+    editedStem,
+    editedType,
+    isFallbackMultipleResponse,
+    isFallbackShortAnswer,
+    onQuestionUpdated,
+    question.questionId,
+    questionDetail,
+    t,
+  ]);
 
   useEffect(() => {
     if (!isEditMode) return;
@@ -353,6 +470,40 @@ export function QuestionView({
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-semibold text-foreground">
+                  문제 유형
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant={editedType === "multiple_choice" ? "primary" : "outline"}
+                    size="sm"
+                    onClick={() => handleTypeChange("multiple_choice")}
+                    disabled={savingEditor}
+                  >
+                    객관식
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={editedType === "multiple_response" ? "primary" : "outline"}
+                    size="sm"
+                    onClick={() => handleTypeChange("multiple_response")}
+                    disabled={savingEditor}
+                  >
+                    복수정답
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={editedType === "short_answer" ? "primary" : "outline"}
+                    size="sm"
+                    onClick={() => handleTypeChange("short_answer")}
+                    disabled={savingEditor}
+                  >
+                    주관식
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-foreground">
                   {t("practiceSession.editPrompt")}
                 </label>
                 <Textarea
@@ -380,9 +531,19 @@ export function QuestionView({
                 </div>
               )}
               {isShortAnswerEditor && (
-                <p className="text-xs text-muted-foreground">
-                  {t("practiceSession.editShortAnswerHint")}
-                </p>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-foreground">
+                    정답
+                  </label>
+                  <Input
+                    value={editedCorrectAnswerText}
+                    onChange={(event) => setEditedCorrectAnswerText(event.target.value)}
+                    placeholder="정답 텍스트를 입력하세요"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {t("practiceSession.editShortAnswerHint")}
+                  </p>
+                </div>
               )}
             </CardContent>
           </Card>

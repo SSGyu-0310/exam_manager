@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { resolveImageUrl } from "@/lib/image";
+import { mergeChoicesIntoStem } from "@/lib/question_edit";
 import {
   getApiEnvelopeData,
   getApiEnvelopeMessage,
@@ -68,6 +69,14 @@ export function QuestionEditor({ question, lectures }: QuestionEditorProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const handleTypeChange = (nextType: string) => {
+    if (type === nextType) return;
+    if (nextType === "short_answer" && type !== "short_answer") {
+      setContent((prev) => mergeChoicesIntoStem(prev, choices));
+    }
+    setType(nextType);
+  };
 
   const groupedLectures = useMemo(() => {
     const groups = new Map<string, { subject: string; block: string; lectures: ManageLecture[] }>();
@@ -198,7 +207,7 @@ export function QuestionEditor({ question, lectures }: QuestionEditorProps) {
                 type="button"
                 variant={type === option.value ? "primary" : "outline"}
                 size="sm"
-                onClick={() => setType(option.value)}
+                onClick={() => handleTypeChange(option.value)}
               >
                 {option.label}
               </Button>
