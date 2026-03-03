@@ -14,6 +14,7 @@ interface ReviewNote {
     questionNumber: number;
     content: string;
     examTitle: string;
+    lectureId: number | null;
     lectureTitle: string | null;
     hasNote: boolean;
     isWrong: boolean;
@@ -62,7 +63,16 @@ export default function ReviewNotesPage() {
                     notes.map((note) => (
                         <Card key={note.id} className="group overflow-hidden border-border bg-card hover:border-primary/50 transition-colors">
                             <CardContent className="p-0">
-                                <Link href={`/practice/session/0?questionId=${note.id}`} className="flex items-center p-4">
+                                <Link
+                                    href={
+                                        note.lectureId
+                                            ? `/practice/session/lecture-${encodeURIComponent(
+                                                String(note.lectureId)
+                                            )}?questionId=${encodeURIComponent(String(note.id))}`
+                                            : "/learn/practice"
+                                    }
+                                    className="flex items-center p-4"
+                                >
                                     <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-secondary text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary transition-colors">
                                         <FileText className="h-6 w-6" />
                                     </div>
@@ -88,4 +98,3 @@ export default function ReviewNotesPage() {
         </div>
     );
 }
-

@@ -8,6 +8,7 @@ import { StartCard } from "@/components/practice/StartCard";
 import {
   examOptionSchema,
   lectureDetailSchema,
+  sessionDetailSchema,
   type PracticeQuestion,
 } from "@/components/practice/types";
 
@@ -17,7 +18,18 @@ type ExamOption = {
   title: string;
 };
 
+type SessionSummary = {
+  sessionId: string;
+  mode: PracticeMode;
+  finishedAt: string | null;
+  examIds: number[];
+  answeredCount: number;
+  totalQuestions: number;
+  createdAt: string | null;
+};
+
 const CONNECTION_ERROR_MESSAGE = "연결 실패(엔드포인트/응답 확인 필요)";
+const RESUME_LOAD_ERROR_MESSAGE = "이어하기 세션을 불러오지 못했습니다. 새로 시작해 주세요.";
 
 const extractSessionId = (payload: unknown): string | number | null => {
   if (!payload || typeof payload !== "object") return null;
@@ -89,6 +101,63 @@ const createSession = async (
   return { sessionId: null, error: lastError ?? null, unsupported };
 };
 
+const normalizeExamIds = (value: unknown): number[] => {
+  if (!Array.isArray(value)) return [];
+  const set = new Set<number>();
+  for (const item of value) {
+    const parsed = Number(item);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      set.add(parsed);
+    }
+  }
+  return Array.from(set).sort((a, b) => a - b);
+};
+
+const normalizeScopeExamIds = (examIds: number[], filterActive: boolean): number[] =>
+  filterActive ? normalizeExamIds(examIds) : [];
+
+const areSameNumberArrays = (left: number[], right: number[]) => {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+};
+
+const parseSessionSummaries = (payload: unknown): SessionSummary[] => {
+  if (!payload || typeof payload !== "object") return [];
+  const sessionsRaw = (payload as Record<string, unknown>).sessions;
+  if (!Array.isArray(sessionsRaw)) return [];
+
+  const result: SessionSummary[] = [];
+  for (const raw of sessionsRaw) {
+    if (!raw || typeof raw !== "object") continue;
+    const record = raw as Record<string, unknown>;
+    const rawSessionId = record.sessionId;
+    if (typeof rawSessionId !== "string" && typeof rawSessionId !== "number") {
+      continue;
+    }
+
+    const modeValue = record.mode;
+    const mode: PracticeMode = modeValue === "timed" ? "timed" : "practice";
+    const finishedAt =
+      typeof record.finishedAt === "string" ? record.finishedAt : null;
+    const answeredCount =
+      typeof record.answeredCount === "number" ? record.answeredCount : 0;
+    const totalQuestions =
+      typeof record.totalQuestions === "number" ? record.totalQuestions : 0;
+    const createdAt = typeof record.createdAt === "string" ? record.createdAt : null;
+
+    result.push({
+      sessionId: String(rawSessionId),
+      mode,
+      finishedAt,
+      examIds: normalizeExamIds(record.examIds),
+      answeredCount,
+      totalQuestions,
+      createdAt,
+    });
+  }
+  return result;
+};
+
 function PracticeStartContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -104,6 +173,8 @@ function PracticeStartContent() {
   const [filterActive, setFilterActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [startLoading, setStartLoading] = useState(false);
+  const [resumeLoading, setResumeLoading] = useState(false);
+  const [resumeCandidates, setResumeCandidates] = useState<SessionSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const safeLectureId = useMemo(() => lectureIdParam ?? "", [lectureIdParam]);
@@ -162,6 +233,31 @@ function PracticeStartContent() {
     };
   }, [lectureIdParam]);
 
+  useEffect(() => {
+    let active = true;
+    if (!lectureIdParam) {
+      setResumeCandidates([]);
+      return;
+    }
+
+    apiFetch<unknown>(
+      `/api/practice/sessions?lectureId=${encodeURIComponent(lectureIdParam)}`,
+      { cache: "no-store" }
+    )
+      .then((payload) => {
+        if (!active) return;
+        setResumeCandidates(parseSessionSummaries(payload));
+      })
+      .catch(() => {
+        if (!active) return;
+        setResumeCandidates([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [lectureIdParam]);
+
   const allExamIds = useMemo(
     () => examOptions.map((option) => option.id),
     [examOptions]
@@ -213,6 +309,64 @@ function PracticeStartContent() {
       ? "진행하려면 하나 이상의 기출문제를 선택해 주세요."
       : null;
   const displayQuestionCount = filterActive ? stats.total : questionCount ?? stats.total;
+  const targetExamScope = useMemo(
+    () => normalizeScopeExamIds(appliedExamIds, filterActive),
+    [appliedExamIds, filterActive]
+  );
+  const resumeCandidate = useMemo(() => {
+    if (filterActive && targetExamScope.length === 0) {
+      return null;
+    }
+    return (
+      resumeCandidates.find((session) => {
+        if (session.finishedAt) return false;
+        if (session.mode !== mode) return false;
+        return areSameNumberArrays(session.examIds, targetExamScope);
+      }) ?? null
+    );
+  }, [mode, resumeCandidates, targetExamScope]);
+
+  const handleResume = async () => {
+    if (!lectureIdParam || !resumeCandidate) return;
+
+    setResumeLoading(true);
+    setError(null);
+    try {
+      const sessionId = resumeCandidate.sessionId;
+      const detailResponse = await apiFetch<unknown>(
+        `/api/practice/sessions/${encodeURIComponent(sessionId)}`,
+        { cache: "no-store" }
+      );
+      const parsed = sessionDetailSchema.safeParse(detailResponse);
+      if (parsed.success && parsed.data.finishedAt) {
+        router.push(`/practice/session/${sessionId}/result`);
+        return;
+      }
+
+      const sessionPayload = {
+        lectureId: lectureIdParam,
+        lectureTitle,
+        mode,
+        fallback: false,
+        examIds: targetExamScope,
+        filterActive,
+        createdAt: Date.now(),
+        warning: null,
+        source: "resume-session",
+      };
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem(
+          `practice:session:${sessionId}`,
+          JSON.stringify(sessionPayload)
+        );
+      }
+      router.push(`/practice/session/${sessionId}`);
+    } catch {
+      setError(RESUME_LOAD_ERROR_MESSAGE);
+    } finally {
+      setResumeLoading(false);
+    }
+  };
 
   const handleStart = async () => {
     if (!lectureIdParam) {
@@ -229,7 +383,7 @@ function PracticeStartContent() {
     const result = await createSession(
       lectureIdParam,
       mode,
-      filterActive ? appliedExamIds : [],
+      targetExamScope,
       filterActive
     );
     const sessionId =
@@ -241,7 +395,7 @@ function PracticeStartContent() {
       lectureTitle,
       mode,
       fallback: result.sessionId === null,
-      examIds: filterActive ? appliedExamIds : [],
+      examIds: targetExamScope,
       filterActive,
       createdAt: Date.now(),
       warning: shouldWarn ? result.error : null,
@@ -293,6 +447,16 @@ function PracticeStartContent() {
             }}
             mode={mode}
             onModeChange={setMode}
+            resumeSession={
+              resumeCandidate
+                ? {
+                    answeredCount: resumeCandidate.answeredCount,
+                    totalQuestions: resumeCandidate.totalQuestions,
+                  }
+                : null
+            }
+            onResume={resumeCandidate ? handleResume : undefined}
+            resumeLoading={resumeLoading}
             onStart={handleStart}
             loading={startLoading}
             error={error}

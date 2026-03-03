@@ -52,7 +52,12 @@ export function Bookmarks() {
                         <p className="text-sm text-muted-foreground py-2 text-center">{t("dashboard.bookmarksEmpty")}</p>
                     ) : (
                         bookmarks.map((bookmark) => (
-                            <Link key={bookmark.id} href={`/practice/session/0?questionId=${bookmark.id}`}>
+                            <Link
+                                key={bookmark.id}
+                                href={`/practice/session/lecture-${encodeURIComponent(
+                                    String(bookmark.lectureId)
+                                )}?questionId=${encodeURIComponent(String(bookmark.id))}`}
+                            >
                                 <div className="group flex items-center justify-between rounded-md px-2 py-2 text-sm hover:bg-muted transition-colors cursor-pointer">
                                     <span className="truncate text-foreground/80 group-hover:text-primary transition-colors">{bookmark.title}</span>
                                     <ArrowRight className="h-3 w-3 text-muted-foreground opacity-0 -translate-x-2 transition-all group-hover:opacity-100 group-hover:translate-x-0" />
