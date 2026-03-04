@@ -4,6 +4,11 @@ export type Lecture = Record<string, unknown> & {
   lecture_id?: number | string;
   title?: string;
   name?: string;
+  order?: number;
+  lectureOrder?: number;
+  lecture_order?: number;
+  sortOrder?: number;
+  sort_order?: number;
   questionCount?: number;
   question_count?: number;
   numQuestions?: number;
@@ -13,7 +18,15 @@ export type Lecture = Record<string, unknown> & {
 export type NormalizedLecture = {
   id?: number | string;
   title?: string;
+  order?: number;
   questionCount?: number;
+};
+
+export type LectureStudyMeta = {
+  lastStudiedAt: string | null;
+  inProgressSessionId: string | null;
+  answeredCount: number;
+  totalQuestions: number;
 };
 
 export type Block = Record<string, unknown> & {
@@ -22,10 +35,17 @@ export type Block = Record<string, unknown> & {
   lectures?: Lecture[];
 };
 
-export type LectureSort = "title" | "questions";
+export type LectureSort = "title" | "questions" | "recent" | "manual";
 
 const LECTURE_ID_KEYS = ["id", "lectureId", "lecture_id", "lectureID", "uuid"];
 const LECTURE_TITLE_KEYS = ["title", "name", "lectureTitle", "lecture_name"];
+const LECTURE_ORDER_KEYS = [
+  "order",
+  "lectureOrder",
+  "lecture_order",
+  "sortOrder",
+  "sort_order",
+];
 const QUESTION_COUNT_KEYS = [
   "questionCount",
   "question_count",
@@ -83,6 +103,7 @@ export function normalizeLecture(raw: unknown): NormalizedLecture {
   return {
     id: pickFirst(raw, LECTURE_ID_KEYS, toId),
     title: pickFirst(raw, LECTURE_TITLE_KEYS, toTitle),
+    order: pickFirst(raw, LECTURE_ORDER_KEYS, toNumber),
     questionCount: pickFirst(raw, QUESTION_COUNT_KEYS, toNumber),
   };
 }
