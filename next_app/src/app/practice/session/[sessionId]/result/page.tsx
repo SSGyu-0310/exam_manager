@@ -1,13 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Check, Copy, ImageIcon } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Bot,
+  Check,
+  Copy,
+  ImageIcon,
+  Loader2,
+  SendHorizontal,
+  Sparkles,
+} from "lucide-react";
 
 import { apiFetch } from "@/lib/http";
 import { resolveImageUrl } from "@/lib/image";
 import { useLanguage } from "@/context/LanguageContext";
-import { ResultSummary } from "@/components/practice/ResultSummary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,6 +46,9 @@ import {
 const CONNECTION_ERROR_MESSAGE = "연결 실패(엔드포인트/응답 확인 필요)";
 const RESULT_MISSING_MESSAGE = "Result data missing. Please submit again.";
 const RESULT_NOT_SUBMITTED_MESSAGE = "This session has not been submitted yet.";
+const DEFAULT_PRACTICE_CHAT_MODEL = "gemini-3.1-flash-lite-preview";
+const DEFAULT_EXPLANATION_PROMPT =
+  "현재 문제를 JSON 기준으로 풀이해줘. 핵심 개념 강의 + 정답 근거 + 오답 포인트 + 실전에서 빠르게 푸는 팁까지 설명해줘.";
 
 type StoredResult = {
   lectureId?: string;
@@ -77,6 +96,17 @@ type EditableQuestionType =
   | "multiple_choice"
   | "multiple_response"
   | "short_answer";
+
+type ChatRole = "user" | "assistant";
+
+type ChatMessage = {
+  id: string;
+  role: ChatRole;
+  content: string;
+  createdAt: number;
+  canSaveToExplanation?: boolean;
+  relatedQuestionId?: string;
+};
 
 const normalizeResultItem = (raw: unknown): ResultItem | null => {
   if (!raw || typeof raw !== "object") return null;
@@ -206,6 +236,252 @@ const parseStemContent = (value?: string) => {
     text: cleaned.replace(/\s{2,}/g, " ").trim(),
     images,
   };
+};
+
+const toRecord = (value: unknown): Record<string, unknown> | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+};
+
+const extractPracticeChatReply = (payload: unknown) => {
+  const root = toRecord(payload);
+  if (!root) {
+    throw new Error("AI 응답 형식이 올바르지 않습니다.");
+  }
+
+  const data = toRecord(root.data);
+  const replyCandidate = data?.reply ?? root.reply;
+  const modelCandidate = data?.model ?? root.model;
+  const reply =
+    typeof replyCandidate === "string" ? replyCandidate.trim() : "";
+  if (!reply) {
+    throw new Error("AI 응답 본문이 비어 있습니다.");
+  }
+
+  const model =
+    typeof modelCandidate === "string" && modelCandidate.trim().length > 0
+      ? modelCandidate.trim()
+      : DEFAULT_PRACTICE_CHAT_MODEL;
+
+  return { reply, model };
+};
+
+const renderInlineMarkdown = (text: string): ReactNode[] => {
+  const nodes: ReactNode[] = [];
+  const pattern = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+  let lastIndex = 0;
+  let keyIndex = 0;
+
+  for (const match of text.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    if (start > lastIndex) {
+      nodes.push(text.slice(lastIndex, start));
+    }
+    const token = match[0];
+    if (token.startsWith("**") && token.endsWith("**")) {
+      nodes.push(
+        <strong key={`strong-${keyIndex}`}>{token.slice(2, -2)}</strong>
+      );
+    } else if (token.startsWith("`") && token.endsWith("`")) {
+      nodes.push(
+        <code
+          key={`code-${keyIndex}`}
+          className="rounded bg-muted px-1 py-0.5 font-mono text-[0.92em]"
+        >
+          {token.slice(1, -1)}
+        </code>
+      );
+    } else {
+      nodes.push(token);
+    }
+    keyIndex += 1;
+    lastIndex = start + token.length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes.length ? nodes : [text];
+};
+
+const ChatMarkdown = ({
+  content,
+  className,
+}: {
+  content: string;
+  className?: string;
+}) => {
+  const lines = content.replace(/\r\n?/g, "\n").split("\n");
+  const blocks: ReactNode[] = [];
+  let paragraphLines: string[] = [];
+  let listType: "ul" | "ol" | null = null;
+  let listItems: string[] = [];
+  let blockIndex = 0;
+
+  const flushParagraph = () => {
+    if (!paragraphLines.length) return;
+    const paragraphText = paragraphLines.join(" ").trim();
+    if (paragraphText) {
+      blocks.push(
+        <p key={`p-${blockIndex}`} className="leading-relaxed">
+          {renderInlineMarkdown(paragraphText)}
+        </p>
+      );
+      blockIndex += 1;
+    }
+    paragraphLines = [];
+  };
+
+  const flushList = () => {
+    if (!listType || !listItems.length) {
+      listType = null;
+      listItems = [];
+      return;
+    }
+    const Tag = listType;
+    blocks.push(
+      <Tag
+        key={`${listType}-${blockIndex}`}
+        className={listType === "ul" ? "list-disc space-y-1 pl-5" : "list-decimal space-y-1 pl-5"}
+      >
+        {listItems.map((item, itemIndex) => (
+          <li key={`${listType}-${blockIndex}-${itemIndex}`}>
+            {renderInlineMarkdown(item)}
+          </li>
+        ))}
+      </Tag>
+    );
+    blockIndex += 1;
+    listType = null;
+    listItems = [];
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    if (/^---+$/.test(line)) {
+      flushParagraph();
+      flushList();
+      blocks.push(<hr key={`hr-${blockIndex}`} className="my-4 border-border/70" />);
+      blockIndex += 1;
+      continue;
+    }
+
+    const headingMatch = line.match(/^(#{1,4})\s+(.+)$/);
+    if (headingMatch) {
+      flushParagraph();
+      flushList();
+      const level = Math.min(4, headingMatch[1].length);
+      const headingText = headingMatch[2].trim();
+      const headingClass =
+        level === 1
+          ? "text-xl font-bold tracking-tight"
+          : level === 2
+            ? "text-lg font-bold tracking-tight"
+            : level === 3
+              ? "text-base font-semibold"
+              : "text-sm font-semibold";
+      blocks.push(
+        <p key={`h-${blockIndex}`} className={headingClass}>
+          {renderInlineMarkdown(headingText)}
+        </p>
+      );
+      blockIndex += 1;
+      continue;
+    }
+
+    const unorderedMatch = line.match(/^[-*]\s+(.+)$/);
+    const orderedMatch = line.match(/^\d+\.\s+(.+)$/);
+    if (unorderedMatch || orderedMatch) {
+      flushParagraph();
+      const nextType: "ul" | "ol" = unorderedMatch ? "ul" : "ol";
+      const itemText = (unorderedMatch?.[1] ?? orderedMatch?.[1] ?? "").trim();
+      if (listType && listType !== nextType) {
+        flushList();
+      }
+      if (!listType) {
+        listType = nextType;
+      }
+      if (itemText) {
+        listItems.push(itemText);
+      }
+      continue;
+    }
+
+    flushList();
+    paragraphLines.push(line);
+  }
+
+  flushParagraph();
+  flushList();
+
+  return (
+    <div className={className ?? "space-y-3 text-[15px] leading-7"}>{blocks}</div>
+  );
+};
+
+const extractEvidenceSection = (content: string) => {
+  const lines = content.replace(/\r\n?/g, "\n").split("\n");
+  const startIndex = lines.findIndex((line) =>
+    /근거\s*설명/i.test(line.trim())
+  );
+  if (startIndex < 0) {
+    return content;
+  }
+
+  const sectionLines: string[] = [];
+  for (let index = startIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    const isMarkdownHeading = /^#{1,6}\s+/.test(trimmed);
+    const isNumberedHeading = /^\d+\)\s+/.test(trimmed);
+    const isNextSectionTitle =
+      /오답|함정|실전|복습|체크|핵심\s*결론|요약|추가\s*설명/i.test(trimmed);
+
+    if ((isMarkdownHeading || isNumberedHeading) && isNextSectionTitle) {
+      break;
+    }
+    if (isMarkdownHeading && !/근거\s*설명/i.test(trimmed)) {
+      break;
+    }
+    sectionLines.push(line);
+  }
+
+  const section = sectionLines.join("\n").trim();
+  return section || content;
+};
+
+const markdownToPlainTextWithBreaks = (content: string) => {
+  const normalized = extractEvidenceSection(content)
+    .replace(/\r\n?/g, "\n")
+    .replace(/^```[^\n]*$/gm, "")
+    .replace(/!\[[^\]]*]\(([^)]+)\)/g, "")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/^\s*\d+\)\s+/gm, "")
+    .replace(/^\s*-{3,}\s*$/gm, "");
+
+  const lines = normalized
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+$/g, ""))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return lines;
 };
 
 const stripStemMarkdownForDisplay = (value?: string | null) => {
@@ -362,6 +638,28 @@ export default function PracticeResultPage() {
   const [editedCorrectAnswerText, setEditedCorrectAnswerText] = useState("");
   const latestEditQuestionIdRef = useRef<string | null>(null);
   const [showCropImage, setShowCropImage] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => [
+    {
+      id: "assistant-welcome",
+      role: "assistant",
+      content:
+        "현재 보고 있는 문제 JSON을 함께 보내서 해설해드립니다. 질문을 입력하거나 아래 기본 해설 요청 버튼을 눌러주세요.",
+      createdAt: Date.now(),
+    },
+  ]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [chatModelName, setChatModelName] = useState(DEFAULT_PRACTICE_CHAT_MODEL);
+  const chatMessagesRef = useRef<ChatMessage[]>([]);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const [savingExplanationMessageId, setSavingExplanationMessageId] =
+    useState<string | null>(null);
+  const [savedExplanationByMessageId, setSavedExplanationByMessageId] = useState<
+    Record<string, true>
+  >({});
+  const [explanationSaveErrorByMessageId, setExplanationSaveErrorByMessageId] =
+    useState<Record<string, string>>({});
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -370,6 +668,21 @@ export default function PracticeResultPage() {
     setQuestions([]);
     setError(null);
     setLoading(true);
+    setChatInput("");
+    setChatError(null);
+    setChatModelName(DEFAULT_PRACTICE_CHAT_MODEL);
+    setSavingExplanationMessageId(null);
+    setSavedExplanationByMessageId({});
+    setExplanationSaveErrorByMessageId({});
+    setChatMessages([
+      {
+        id: "assistant-welcome",
+        role: "assistant",
+        content:
+          "현재 보고 있는 문제 JSON을 함께 보내서 해설해드립니다. 질문을 입력하거나 아래 기본 해설 요청 버튼을 눌러주세요.",
+        createdAt: Date.now(),
+      },
+    ]);
     const stored = sessionStorage.getItem(`practice:result:${sessionId}`);
     if (stored) {
       try {
@@ -388,6 +701,18 @@ export default function PracticeResultPage() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    chatMessagesRef.current = chatMessages;
+  }, [chatMessages]);
+
+  useEffect(() => {
+    if (!chatScrollRef.current) {
+      return;
+    }
+    const container = chatScrollRef.current;
+    container.scrollTop = container.scrollHeight;
+  }, [chatMessages, chatLoading]);
 
   useEffect(() => {
     if (!storageReady) return;
@@ -547,6 +872,69 @@ export default function PracticeResultPage() {
         .length,
     [combinedQuestions]
   );
+  const currentQuestion = filteredQuestions[activeIndex];
+
+  const activeQuestionPayload = useMemo(() => {
+    if (!currentQuestion) {
+      return null;
+    }
+    const { images: stemImages } = parseStemContent(currentQuestion.stem ?? "");
+    const result = currentQuestion.result;
+    const choiceImageUrls = (currentQuestion.choices ?? [])
+      .map((choice) => resolveImageUrl(choice.imageUrl ?? choice.image))
+      .filter((value): value is string => Boolean(value));
+    const questionImageUrls = Array.from(
+      new Set(
+        [
+          resolveImageUrl(currentQuestion.imageUrl ?? currentQuestion.image),
+          resolveImageUrl(currentQuestion.originalImageUrl),
+          ...stemImages.map((imageUrl) => resolveImageUrl(imageUrl)),
+          ...choiceImageUrls,
+        ].filter((value): value is string => Boolean(value))
+      )
+    );
+
+    return {
+      sessionId,
+      lectureTitle: storedResult?.lectureTitle ?? null,
+      examTitle: currentQuestion.examTitle ?? storedResult?.examTitle ?? null,
+      questionImageUrls,
+      question: {
+        questionId: currentQuestion.questionId,
+        questionNumber: currentQuestion.questionNumber ?? null,
+        stem: currentQuestion.stem ?? "",
+        choices: (currentQuestion.choices ?? []).map((choice, index) => ({
+          number:
+            typeof choice.number === "number" ? choice.number : index + 1,
+          content: choice.content ?? "",
+          imageUrl: resolveImageUrl(choice.imageUrl ?? choice.image),
+        })),
+        isShortAnswer: Boolean(currentQuestion.isShortAnswer),
+        isMultipleResponse: Boolean(currentQuestion.isMultipleResponse),
+        explanation: currentQuestion.explanation ?? null,
+        correctChoiceNumbers: currentQuestion.correctChoiceNumbers ?? [],
+        correctAnswerText: currentQuestion.correctAnswerText ?? null,
+        imageUrl: resolveImageUrl(currentQuestion.imageUrl ?? currentQuestion.image),
+        stemImageUrls: stemImages
+          .map((imageUrl) => resolveImageUrl(imageUrl))
+          .filter((value): value is string => Boolean(value)),
+        originalImageUrl: resolveImageUrl(currentQuestion.originalImageUrl),
+      },
+      result: {
+        isAnswered: Boolean(result?.isAnswered),
+        isCorrect:
+          typeof result?.isCorrect === "boolean" ? result.isCorrect : null,
+        userAnswer: result?.userAnswer ?? null,
+        correctAnswer: result?.correctAnswer ?? null,
+        correctAnswerText: result?.correctAnswerText ?? null,
+      },
+    };
+  }, [
+    currentQuestion,
+    sessionId,
+    storedResult?.examTitle,
+    storedResult?.lectureTitle,
+  ]);
 
   const showCopyToast = useCallback((questionId: string, message: string) => {
     setCopiedId(questionId);
@@ -559,6 +947,159 @@ export default function PracticeResultPage() {
       setCopyMessage(null);
     }, 2000);
   }, []);
+
+  const sendPracticeChat = useCallback(
+    async (
+      message: string,
+      options?: { source?: "manual" | "default_explanation" }
+    ) => {
+      const trimmed = message.trim();
+      if (!trimmed || chatLoading) {
+        return;
+      }
+      if (!activeQuestionPayload) {
+        setChatError("현재 문제를 불러온 뒤 다시 시도해주세요.");
+        return;
+      }
+      const source = options?.source ?? "manual";
+      const relatedQuestionId = String(activeQuestionPayload.question.questionId);
+      const displayUserMessage =
+        source === "default_explanation" ? "기본해설요청" : trimmed;
+
+      const userMessage: ChatMessage = {
+        id: `user-${Date.now()}`,
+        role: "user",
+        content: displayUserMessage,
+        createdAt: Date.now(),
+      };
+      const historyForRequest = chatMessagesRef.current
+        .filter((item) => item.id !== "assistant-welcome")
+        .slice(-12)
+        .map((item) => ({ role: item.role, content: item.content }));
+
+      setChatMessages((prev) => [...prev, userMessage]);
+      setChatInput("");
+      setChatError(null);
+      setChatLoading(true);
+
+      try {
+        const payload = await apiFetch<unknown>("/ai/practice-chat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            model: DEFAULT_PRACTICE_CHAT_MODEL,
+            message: trimmed,
+            requestSource: source,
+            messages: historyForRequest,
+            currentQuestion: activeQuestionPayload,
+          }),
+        });
+        const { reply, model } = extractPracticeChatReply(payload);
+        setChatModelName(model);
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            id: `assistant-${Date.now()}`,
+            role: "assistant",
+            content: reply,
+            createdAt: Date.now(),
+            canSaveToExplanation: source === "default_explanation",
+            relatedQuestionId,
+          },
+        ]);
+      } catch (err) {
+        setChatError(
+          err instanceof Error ? err.message : "AI 응답 요청에 실패했습니다."
+        );
+      } finally {
+        setChatLoading(false);
+      }
+    },
+    [activeQuestionPayload, chatLoading]
+  );
+
+  const handleAskDefaultExplanation = useCallback(() => {
+    void sendPracticeChat(DEFAULT_EXPLANATION_PROMPT, {
+      source: "default_explanation",
+    });
+  }, [sendPracticeChat]);
+
+  const handleSaveAiExplanation = useCallback(async (message: ChatMessage) => {
+    if (!message.canSaveToExplanation || !message.relatedQuestionId) {
+      return;
+    }
+    if (savedExplanationByMessageId[message.id]) {
+      return;
+    }
+
+    setSavingExplanationMessageId(message.id);
+    setExplanationSaveErrorByMessageId((prev) => {
+      const next = { ...prev };
+      delete next[message.id];
+      return next;
+    });
+
+    try {
+      const detail = await getQuestionDetail(message.relatedQuestionId);
+      const aiExplanation = markdownToPlainTextWithBreaks(message.content);
+      if (!aiExplanation) {
+        throw new Error("저장할 해설 본문이 비어 있습니다.");
+      }
+
+      const targetType: EditableQuestionType =
+        detail.type === "short_answer"
+          ? "short_answer"
+          : detail.type === "multiple_response"
+            ? "multiple_response"
+            : "multiple_choice";
+
+      const choicesPayload =
+        targetType === "short_answer"
+          ? []
+          : sortManageChoices(detail.choices).map((choice, index) => ({
+            id: choice.id,
+            number: getManageChoiceNumber(choice, index),
+            content: choice.content ?? "",
+            isCorrect: Boolean(choice.isCorrect),
+            imagePath: choice.imagePath ?? null,
+          }));
+
+      const saved = await updateQuestion(detail.id, {
+        content: detail.content ?? "",
+        explanation: aiExplanation,
+        type: targetType,
+        lectureId: detail.lectureId ?? null,
+        correctAnswerText:
+          targetType === "short_answer"
+            ? detail.correctAnswerText ?? detail.answer ?? ""
+            : null,
+        choices: choicesPayload,
+      });
+
+      setQuestions((prev) =>
+        prev.map((item) =>
+          String(item.questionId) === String(saved.id)
+            ? { ...item, explanation: saved.explanation ?? aiExplanation }
+            : item
+        )
+      );
+      setQuestionDetail((prev) =>
+        prev && String(prev.id) === String(saved.id) ? saved : prev
+      );
+      setSavedExplanationByMessageId((prev) => ({ ...prev, [message.id]: true }));
+      setEditSuccess("AI 해설을 문제 해설에 저장했습니다.");
+    } catch (err) {
+      setExplanationSaveErrorByMessageId((prev) => ({
+        ...prev,
+        [message.id]:
+          err instanceof Error ? err.message : "해설 저장에 실패했습니다.",
+      }));
+    } finally {
+      setSavingExplanationMessageId((prev) =>
+        prev === message.id ? null : prev
+      );
+    }
+  }, [savedExplanationByMessageId]);
 
   const handleCopy = useCallback(
     async (question: ResultQuestion, result: ResultItem | undefined, index: number) => {
@@ -946,10 +1487,28 @@ export default function PracticeResultPage() {
     summary?.answered ??
     resultItems.filter((item) => item.isAnswered || item.userAnswer).length;
   const correct = summary?.correct ?? resultItems.filter((item) => item.isCorrect).length;
+  const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
+  const accuracyValue = Math.max(0, Math.min(100, accuracy));
+  const accuracyRingRadius = 32;
+  const accuracyRingCircumference = 2 * Math.PI * accuracyRingRadius;
+  const accuracyRingOffset =
+    accuracyRingCircumference * (1 - accuracyValue / 100);
+  const accuracyStrokeColor =
+    accuracyValue >= 80
+      ? "var(--color-success)"
+      : accuracyValue >= 60
+        ? "var(--color-warning)"
+        : "var(--color-danger)";
+  const accuracyTrackColor =
+    accuracyValue >= 80
+      ? "rgb(var(--color-success-rgb) / 0.18)"
+      : accuracyValue >= 60
+        ? "rgb(var(--color-warning-rgb) / 0.18)"
+        : "rgb(var(--color-danger-rgb) / 0.18)";
 
   if (loading) {
     return (
-      <div className="min-h-screen px-4 py-10">
+      <div className="min-h-screen px-4 py-6">
         <div className="mx-auto w-full max-w-screen-xl space-y-6">
           <div className="h-10 w-40 animate-pulse rounded-full bg-muted" />
           <div className="h-32 animate-pulse rounded-3xl bg-muted" />
@@ -961,7 +1520,7 @@ export default function PracticeResultPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen px-4 py-10">
+      <div className="min-h-screen px-4 py-6">
         <div className="mx-auto w-full max-w-screen-xl">
           <Card className="border border-danger/30 bg-danger/10">
             <CardContent className="space-y-2 p-6">
@@ -977,26 +1536,62 @@ export default function PracticeResultPage() {
     );
   }
 
-  const currentQuestion = filteredQuestions[activeIndex];
-
   return (
-    <div className="min-h-screen px-4 py-10">
-      <div className="mx-auto w-full max-w-screen-xl space-y-8">
-        <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
-            {t("practiceResult.title")}
-          </p>
-          <h1 className="text-3xl font-semibold text-foreground">
-            {storedResult?.lectureTitle || storedResult?.examTitle || t("practiceResult.sessionSummary")}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {t("practiceResult.sessionSummaryDesc")}
-          </p>
-        </div>
+    <div className="min-h-screen px-4 py-6">
+      <div className="mx-auto w-full max-w-screen-xl space-y-6">
+        <Card className="border border-border/70 bg-card/90 shadow-soft">
+          <CardContent className="p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0 space-y-2">
+                <h1 className="truncate text-3xl font-semibold text-foreground">
+                  {storedResult?.lectureTitle || storedResult?.examTitle || t("practiceResult.sessionSummary")}
+                </h1>
+                <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                  <span className="font-medium">{t("practiceResult.metricTotal")} {total}</span>
+                  <span>&middot;</span>
+                  <span className="font-medium">{t("practiceResult.metricAnswered")} {answered}</span>
+                  <span>&middot;</span>
+                  <span className="font-medium">{t("practiceResult.metricCorrect")} {correct}</span>
+                </div>
+              </div>
+              <div className="shrink-0">
+                <div className="relative h-24 w-24">
+                  <svg className="h-24 w-24" viewBox="0 0 96 96" aria-hidden="true">
+                    <circle
+                      cx="48"
+                      cy="48"
+                      r={accuracyRingRadius}
+                      fill="none"
+                      stroke={accuracyTrackColor}
+                      strokeWidth="10"
+                    />
+                    <circle
+                      cx="48"
+                      cy="48"
+                      r={accuracyRingRadius}
+                      fill="none"
+                      stroke={accuracyStrokeColor}
+                      strokeWidth="10"
+                      strokeLinecap="round"
+                      strokeDasharray={accuracyRingCircumference}
+                      strokeDashoffset={accuracyRingOffset}
+                      transform="rotate(-90 48 48)"
+                      style={{ filter: "drop-shadow(0 1px 3px rgba(15,23,42,0.18))" }}
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
+                    <span className="text-base font-bold text-foreground">{accuracyValue}%</span>
+                    <span className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                      {t("practiceResult.metricAccuracy")}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-        <ResultSummary total={total} answered={answered} correct={correct} />
-
-        <div className="grid gap-8 xl:grid-cols-[1fr_320px]">
+        <div className="grid gap-8 xl:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)]">
           <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="inline-flex rounded-full border border-border/70 bg-muted/70 p-1 text-sm">
@@ -1448,6 +2043,143 @@ export default function PracticeResultPage() {
           </div>
 
           <aside className="space-y-4 xl:sticky xl:top-24">
+            <Card className="overflow-hidden border border-border/70 bg-card/90 shadow-soft">
+              <CardContent className="p-0">
+                <div className="flex items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
+                  <div>
+                    <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                      <Bot className="h-3.5 w-3.5" />
+                      AI Tutor
+                    </p>
+                    <p className="text-xs text-muted-foreground">{chatModelName}</p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleAskDefaultExplanation}
+                    disabled={chatLoading || !activeQuestionPayload}
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    기본 해설 요청
+                  </Button>
+                </div>
+
+                <div
+                  ref={chatScrollRef}
+                  className="min-h-[420px] max-h-[56vh] overflow-y-auto bg-card"
+                >
+                  {chatMessages.map((message, index) =>
+                    message.role === "user" ? (
+                      <div key={message.id} className="flex justify-end px-4 pb-2 pt-4">
+                        <p className="max-w-[90%] rounded-full bg-muted px-4 py-2 text-[13px] leading-relaxed text-foreground">
+                          {message.content}
+                        </p>
+                      </div>
+                    ) : (
+                      <article
+                        key={message.id}
+                        className={`px-4 py-5 ${index === 0 ? "" : "border-t border-border/70"}`}
+                      >
+                        {message.canSaveToExplanation && message.relatedQuestionId && (
+                          <div className="mb-3 flex items-center justify-between gap-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                              AI 해설
+                            </p>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={
+                                savedExplanationByMessageId[message.id]
+                                  ? "secondary"
+                                  : "outline"
+                              }
+                              className="h-8"
+                              disabled={
+                                savingExplanationMessageId === message.id ||
+                                Boolean(savedExplanationByMessageId[message.id])
+                              }
+                              onClick={() => {
+                                void handleSaveAiExplanation(message);
+                              }}
+                            >
+                              {savingExplanationMessageId === message.id
+                                ? "저장 중..."
+                                : savedExplanationByMessageId[message.id]
+                                  ? "저장됨"
+                                  : "해설에 저장"}
+                            </Button>
+                          </div>
+                        )}
+                        {explanationSaveErrorByMessageId[message.id] && (
+                          <p className="mb-3 text-xs text-danger">
+                            {explanationSaveErrorByMessageId[message.id]}
+                          </p>
+                        )}
+                        <ChatMarkdown
+                          content={message.content}
+                          className="space-y-3 text-[16px] leading-8 text-foreground"
+                        />
+                      </article>
+                    )
+                  )}
+                  {chatLoading && (
+                    <div className="border-t border-border/70 px-4 py-5">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        답변 생성 중...
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {chatError && (
+                  <div className="border-t border-danger/30 bg-danger/10 px-4 py-2 text-xs text-danger">
+                    {chatError}
+                  </div>
+                )}
+
+                <form
+                  className="space-y-2 border-t border-border/70 bg-card px-3 py-3"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void sendPracticeChat(chatInput);
+                  }}
+                >
+                  <Textarea
+                    value={chatInput}
+                    onChange={(event) => setChatInput(event.target.value)}
+                    placeholder="질문을 입력하세요 (예: 왜 이 선택지가 정답인지 단계별로 설명해줘)"
+                    className="min-h-[88px] resize-none bg-card"
+                    disabled={chatLoading || !activeQuestionPayload}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        void sendPracticeChat(chatInput);
+                      }
+                    }}
+                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-muted-foreground">
+                      현재 문제 JSON이 함께 전송됩니다.
+                    </p>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      disabled={
+                        chatLoading ||
+                        !activeQuestionPayload ||
+                        chatInput.trim().length === 0
+                      }
+                    >
+                      <SendHorizontal className="h-4 w-4" />
+                      전송
+                    </Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+
             <Card className="border border-border/70 bg-card/85 shadow-soft">
               <CardContent className="space-y-4 p-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
