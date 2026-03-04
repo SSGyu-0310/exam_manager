@@ -183,6 +183,7 @@ def review_notes():
                 'questionNumber': q.question_number,
                 'content': q.content[:100] + "..." if q.content else "",
                 'examTitle': q.exam.title,
+                'lectureId': q.lecture_id,
                 'lectureTitle': q.lecture.title if q.lecture else None,
                 'hasNote': q.id in note_ids,
                 'isWrong': q.id in user_wrong_ids,
@@ -247,6 +248,7 @@ def review_history():
     user = current_user()
     sessions = (
         scope_query(PracticeSession.query, PracticeSession, user)
+        .filter(PracticeSession.finished_at.isnot(None))
         .options(selectinload(PracticeSession.lecture))
         .order_by(PracticeSession.created_at.desc())
         .all()

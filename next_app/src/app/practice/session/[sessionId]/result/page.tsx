@@ -18,6 +18,7 @@ import {
   AnswerPayload,
   lectureResultSchema,
   PracticeQuestion,
+  sessionDetailSchema,
 } from "@/components/practice/types";
 import {
   getQuestionDetail,
@@ -27,6 +28,8 @@ import {
 } from "@/lib/api/manage";
 
 const CONNECTION_ERROR_MESSAGE = "연결 실패(엔드포인트/응답 확인 필요)";
+const RESULT_MISSING_MESSAGE = "Result data missing. Please submit again.";
+const RESULT_NOT_SUBMITTED_MESSAGE = "This session has not been submitted yet.";
 
 type StoredResult = {
   lectureId?: string;
@@ -89,6 +92,83 @@ const normalizeResultItem = (raw: unknown): ResultItem | null => {
     correctAnswer: record.correctAnswer,
     correctAnswerText:
       typeof record.correctAnswerText === "string" ? record.correctAnswerText : null,
+  };
+};
+
+const isPersistedSessionId = (value: string) => /^\d+$/.test(value);
+
+const toOptionalString = (value: unknown): string | undefined => {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value);
+  }
+  return undefined;
+};
+
+const normalizeRecoveredResultItems = (items: unknown): ResultItem[] => {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+  const normalized: ResultItem[] = [];
+  for (const raw of items) {
+    if (!raw || typeof raw !== "object") continue;
+    const record = raw as Record<string, unknown>;
+    const rawId = record.questionId ?? record.question_id;
+    if (typeof rawId !== "string" && typeof rawId !== "number") continue;
+    const answer =
+      record.answer && typeof record.answer === "object"
+        ? (record.answer as Record<string, unknown>)
+        : null;
+    const answerType =
+      answer && typeof answer.type === "string" ? answer.type : undefined;
+    const answerValue = answer ? answer.value : undefined;
+    const isAnswered =
+      typeof record.isAnswered === "boolean"
+        ? record.isAnswered
+        : answerValue !== undefined;
+
+    normalized.push({
+      questionId: String(rawId),
+      type: answerType,
+      isAnswered,
+      isCorrect: typeof record.isCorrect === "boolean" ? record.isCorrect : null,
+      userAnswer: answerValue,
+    });
+  }
+  return normalized;
+};
+
+const buildStoredResultFromSessionDetail = (
+  payload: unknown
+): StoredResult | null => {
+  const parsed = sessionDetailSchema.safeParse(payload);
+  if (!parsed.success) {
+    return null;
+  }
+
+  const normalizedItems = normalizeRecoveredResultItems(parsed.data.items ?? []);
+  const answered = normalizedItems.filter(
+    (item) => item.isAnswered || item.userAnswer !== undefined
+  ).length;
+  const correct = normalizedItems.filter((item) => item.isCorrect === true).length;
+
+  return {
+    lectureId: toOptionalString(parsed.data.lectureId),
+    lectureTitle: parsed.data.lectureTitle ?? undefined,
+    examTitle: parsed.data.examTitle ?? undefined,
+    submittedAt: parsed.data.finishedAt ?? undefined,
+    summary: {
+      all: {
+        total: normalizedItems.length,
+        answered,
+        correct,
+      },
+    },
+    items: normalizedItems,
+    mode: parsed.data.mode ?? undefined,
+    examIds: parsed.data.examIds ?? undefined,
   };
 };
 
@@ -315,31 +395,92 @@ export default function PracticeResultPage() {
     const loadResult = async () => {
       setLoading(true);
       setError(null);
-      const hasExamSet = Array.isArray(storedResult?.examIds) && storedResult.examIds.length > 0;
-      if (!storedResult?.lectureId && !storedResult?.examId && !hasExamSet) {
+      let effectiveResult = storedResult;
+      let hasExamSet =
+        Array.isArray(effectiveResult?.examIds) &&
+        effectiveResult.examIds.length > 0;
+
+      if (!effectiveResult?.lectureId && !effectiveResult?.examId && !hasExamSet) {
+        if (!isPersistedSessionId(sessionId)) {
+          if (!active) return;
+          setLoading(false);
+          setError(RESULT_MISSING_MESSAGE);
+          return;
+        }
+
+        try {
+          const sessionResponse = await apiFetch<unknown>(
+            `/api/practice/sessions/${encodeURIComponent(sessionId)}`,
+            { cache: "no-store" }
+          );
+          const recovered = buildStoredResultFromSessionDetail(sessionResponse);
+          if (!recovered) {
+            throw new Error(CONNECTION_ERROR_MESSAGE);
+          }
+          if (!recovered.submittedAt) {
+            if (!active) return;
+            setLoading(false);
+            setError(RESULT_NOT_SUBMITTED_MESSAGE);
+            return;
+          }
+
+          effectiveResult = recovered;
+          hasExamSet =
+            Array.isArray(effectiveResult.examIds) &&
+            effectiveResult.examIds.length > 0;
+
+          if (active) {
+            setStoredResult(recovered);
+            if (typeof window !== "undefined") {
+              sessionStorage.setItem(
+                `practice:result:${sessionId}`,
+                JSON.stringify(recovered)
+              );
+            }
+          }
+        } catch (err) {
+          if (!active) return;
+          setLoading(false);
+          setError(err instanceof Error ? err.message : CONNECTION_ERROR_MESSAGE);
+          return;
+        }
+      }
+
+      if (!effectiveResult?.lectureId && !effectiveResult?.examId && !hasExamSet) {
+        if (!active) return;
         setLoading(false);
-        setError("Result data missing. Please submit again.");
+        setError(RESULT_MISSING_MESSAGE);
+        return;
+      }
+      if (!effectiveResult) {
+        if (!active) return;
+        setLoading(false);
+        setError(RESULT_MISSING_MESSAGE);
         return;
       }
 
       try {
         const params = new URLSearchParams();
         params.set("includeAnswer", "true");
-        if (storedResult.lectureId) {
-          appendExamParams(params, storedResult.examIds, storedResult.filterActive);
+        if (effectiveResult.lectureId) {
+          appendExamParams(
+            params,
+            effectiveResult.examIds,
+            effectiveResult.filterActive
+          );
         }
-        if (!storedResult.lectureId && !storedResult.examId && hasExamSet) {
-          for (const examId of storedResult.examIds ?? []) {
+        if (!effectiveResult.lectureId && !effectiveResult.examId && hasExamSet) {
+          for (const examId of effectiveResult.examIds ?? []) {
             params.append("exam_ids", String(examId));
           }
         }
-        const endpoint = storedResult.lectureId
+        const endpoint = effectiveResult.lectureId
           ? `/api/practice/lecture/${encodeURIComponent(
-            storedResult.lectureId
+            effectiveResult.lectureId
           )}/result?${params.toString()}`
-          : storedResult.examId
+          : effectiveResult.examId
             ? `/api/practice/exam/${encodeURIComponent(
-              storedResult.examId
+              effectiveResult.examId
             )}/result?${params.toString()}`
             : `/api/practice/exam-set/result?${params.toString()}`;
         const response = await apiFetch<unknown>(endpoint, { cache: "no-store" });
@@ -364,6 +505,7 @@ export default function PracticeResultPage() {
       active = false;
     };
   }, [
+    sessionId,
     storageReady,
     storedResult?.lectureId,
     storedResult?.examId,

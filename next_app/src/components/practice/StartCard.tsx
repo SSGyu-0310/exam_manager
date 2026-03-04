@@ -32,6 +32,12 @@ type StartCardProps = {
   questionCount?: number;
   stats?: PracticeStats | null;
   examFilter?: ExamFilterState | null;
+  resumeSession?: {
+    answeredCount: number;
+    totalQuestions: number;
+  } | null;
+  onResume?: () => void;
+  resumeLoading?: boolean;
   mode: PracticeMode;
   onModeChange: (mode: PracticeMode) => void;
   onStart: () => void;
@@ -45,6 +51,9 @@ export function StartCard({
   questionCount,
   stats,
   examFilter,
+  resumeSession,
+  onResume,
+  resumeLoading,
   mode,
   onModeChange,
   onStart,
@@ -52,6 +61,11 @@ export function StartCard({
   error,
   validationMessage,
 }: StartCardProps) {
+  const hasResumeAction = Boolean(resumeSession && onResume);
+  const answeredCount = resumeSession?.answeredCount ?? 0;
+  const totalQuestions = resumeSession?.totalQuestions ?? 0;
+  const actionBusy = Boolean(loading || resumeLoading);
+
   return (
     <Card className="w-full max-w-4xl border border-border/70 bg-card/85 shadow-soft backdrop-blur">
       <CardHeader className="space-y-2">
@@ -203,20 +217,62 @@ export function StartCard({
             {error}
           </div>
         )}
-        <Button
-          onClick={onStart}
-          disabled={loading}
-          className="w-full rounded-2xl py-6 text-base font-bold shadow-sm transition-transform active:scale-[0.98]"
-        >
-          {loading ? (
-            <div className="flex items-center gap-2">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-              <span>준비 중...</span>
-            </div>
-          ) : (
-            "학습 시작"
-          )}
-        </Button>
+        {hasResumeAction && (
+          <div className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm">
+            <p className="font-semibold text-foreground">진행 중인 학습이 있습니다.</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              진행도 {answeredCount}/{totalQuestions}
+            </p>
+          </div>
+        )}
+        {hasResumeAction ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button
+              onClick={onResume}
+              disabled={actionBusy}
+              className="w-full rounded-2xl py-6 text-base font-bold shadow-sm transition-transform active:scale-[0.98]"
+            >
+              {resumeLoading ? (
+                <div className="flex items-center gap-2">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  <span>불러오는 중...</span>
+                </div>
+              ) : (
+                "이어하기"
+              )}
+            </Button>
+            <Button
+              onClick={onStart}
+              disabled={actionBusy}
+              variant="outline"
+              className="w-full rounded-2xl py-6 text-base font-bold shadow-sm transition-transform active:scale-[0.98]"
+            >
+              {loading ? (
+                <div className="flex items-center gap-2">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                  <span>준비 중...</span>
+                </div>
+              ) : (
+                "새로 시작"
+              )}
+            </Button>
+          </div>
+        ) : (
+          <Button
+            onClick={onStart}
+            disabled={actionBusy}
+            className="w-full rounded-2xl py-6 text-base font-bold shadow-sm transition-transform active:scale-[0.98]"
+          >
+            {loading ? (
+              <div className="flex items-center gap-2">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                <span>준비 중...</span>
+              </div>
+            ) : (
+              "학습 시작"
+            )}
+          </Button>
+        )}
       </CardContent>
     </Card>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Check, CircleHelp, Flag, Loader2, Timer, XCircle } from "lucide-react";
 
 import { useLanguage } from "@/context/LanguageContext";
@@ -219,7 +219,9 @@ export default function PracticeSessionPage() {
   const { t } = useLanguage();
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const sessionId = params.sessionId as string;
+  const targetQuestionIdFromQuery = searchParams.get("questionId");
 
   const SOLVER_SHORTCUT_SECTIONS = [
     {
@@ -276,6 +278,7 @@ export default function PracticeSessionPage() {
   });
   const questionTopRef = useRef<HTMLDivElement | null>(null);
   const previousQuestionIdRef = useRef<string | null>(null);
+  const initialQuestionAppliedRef = useRef(false);
   const copyTimeoutRef = useRef<number | null>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
   const autoSavePendingRef = useRef(false);
@@ -732,6 +735,27 @@ export default function PracticeSessionPage() {
   const currentQuestionId = currentQuestion
     ? String(currentQuestion.questionId)
     : null;
+
+  useEffect(() => {
+    initialQuestionAppliedRef.current = false;
+  }, [sessionId, targetQuestionIdFromQuery]);
+
+  useEffect(() => {
+    if (initialQuestionAppliedRef.current) return;
+    if (!targetQuestionIdFromQuery) {
+      initialQuestionAppliedRef.current = true;
+      return;
+    }
+    if (!orderedQuestions.length) return;
+
+    const matchedIndex = orderedQuestions.findIndex(
+      (question) => String(question.questionId) === String(targetQuestionIdFromQuery)
+    );
+    if (matchedIndex >= 0) {
+      setCurrentIndex(matchedIndex);
+    }
+    initialQuestionAppliedRef.current = true;
+  }, [orderedQuestions, targetQuestionIdFromQuery]);
 
   useEffect(() => {
     if (!currentQuestionId) return;
