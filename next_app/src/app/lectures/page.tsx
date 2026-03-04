@@ -21,7 +21,7 @@ export default function LecturesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<LectureSort>("title");
+  const [sort, setSort] = useState<LectureSort>("manual");
 
   useEffect(() => {
     let active = true;
@@ -67,6 +67,7 @@ export default function LecturesPage() {
           {!loading && !error && (
             <LectureGrid
               blocks={blocks}
+              studyMetaByLecture={{}}
               query={query}
               onQueryChange={setQuery}
               sort={sort}

@@ -4,6 +4,7 @@
 
 ## Product
 - Feature snapshot: `docs/features.md`
+- Ontology (domain/file semantics): `docs/ontology.md`
 - API guide: `docs/api.md`
 - API for development: `docs/api-dev.md`
 - API for operations: `docs/api-ops.md`

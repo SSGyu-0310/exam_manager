@@ -3,7 +3,7 @@ import json
 import os
 import hashlib
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 from flask import Blueprint, request, render_template, current_app
 from app import db
 from app.models import Question, Block, PreviousExam, ClassificationJob, Lecture
@@ -48,6 +48,10 @@ except ImportError:
 
 ai_bp = Blueprint('ai', __name__, url_prefix='/ai')
 _KST_TZ = ZoneInfo("Asia/Seoul") if ZoneInfo else timezone(timedelta(hours=9))
+_NO_WRITE_GUARD_ENDPOINTS = {'ai.correct_text', 'ai.practice_chat'}
+_NO_AUTH_ENDPOINTS = {'ai.correct_text'}
+_DEFAULT_PRACTICE_CHAT_MODEL = "gemini-3.1-flash-lite-preview"
+_PRACTICE_CHAT_MAX_HISTORY = 12
 
 
 def _json_success(payload: Optional[dict] = None, status: int = 200):
@@ -87,9 +91,147 @@ def _format_kst(dt: Optional[datetime], fmt: str = "%m/%d %H:%M") -> Optional[st
     return aware.astimezone(_KST_TZ).strftime(fmt)
 
 
+def _normalize_chat_messages(raw_messages: Any) -> list[dict[str, str]]:
+    if not isinstance(raw_messages, list):
+        return []
+
+    normalized: list[dict[str, str]] = []
+    for item in raw_messages[-_PRACTICE_CHAT_MAX_HISTORY:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        normalized.append(
+            {
+                "role": role,
+                "content": content[:4000],
+            }
+        )
+    return normalized
+
+
+def _extract_question_image_urls(
+    current_question: dict[str, Any], raw_image_urls: Any
+) -> list[str]:
+    ordered_urls: list[str] = []
+    seen: set[str] = set()
+
+    def _append(value: Any):
+        if isinstance(value, list):
+            for item in value:
+                _append(item)
+            return
+        if not isinstance(value, str):
+            return
+        candidate = value.strip()
+        if not candidate or candidate in seen:
+            return
+        seen.add(candidate)
+        ordered_urls.append(candidate)
+
+    _append(raw_image_urls)
+    _append(current_question.get("questionImageUrls"))
+
+    question_payload = current_question.get("question")
+    if isinstance(question_payload, dict):
+        _append(question_payload.get("imageUrl"))
+        _append(question_payload.get("originalImageUrl"))
+        _append(question_payload.get("stemImageUrls"))
+        raw_choices = question_payload.get("choices")
+        if isinstance(raw_choices, list):
+            for choice in raw_choices:
+                if not isinstance(choice, dict):
+                    continue
+                _append(choice.get("imageUrl"))
+
+    return ordered_urls
+
+
+def _build_practice_chat_prompt(
+    *,
+    message: str,
+    history: list[dict[str, str]],
+    current_question: dict[str, Any],
+    request_source: str,
+    image_urls: list[str],
+) -> str:
+    history_lines = []
+    for item in history:
+        speaker = "사용자" if item["role"] == "user" else "튜터"
+        history_lines.append(f"- {speaker}: {item['content']}")
+    history_text = "\n".join(history_lines) if history_lines else "- (이전 대화 없음)"
+
+    current_question_json = json.dumps(
+        current_question,
+        ensure_ascii=False,
+        indent=2,
+    )
+    image_url_text = (
+        "\n".join(f"- {url}" for url in image_urls[:20])
+        if image_urls
+        else "- (이미지 없음)"
+    )
+    request_source_text = (
+        "기본해설요청"
+        if request_source == "default_explanation"
+        else "일반 질문"
+    )
+    is_default_explanation = request_source == "default_explanation"
+    answer_format_text = (
+        """답변 형식:
+1) 핵심 결론(정답/판단 포인트)
+2) 근거 설명(문항 JSON의 근거 사용)
+3) 오답 포인트 또는 실수하기 쉬운 함정
+4) 짧은 복습 체크(1~2개)"""
+        if is_default_explanation
+        else "답변 형식: 사용자의 질문 의도에 맞는 자연스러운 형식으로 답하라."
+    )
+    request_instruction_text = (
+        """- 현재 문제 JSON을 반드시 반영해서 해설하라.
+- 문제 이미지 URL이 있으면 이미지 내용까지 반영해 해설하라.
+- 사용자가 명시하지 않아도 개념 강의처럼 이해 중심으로 설명하라.
+- JSON에 없는 사실은 단정하지 말고, 필요한 경우 추정임을 명시하라."""
+        if is_default_explanation
+        else """- 현재 문제 JSON을 반드시 반영해서 사용자 질문에 직접 답하라.
+- 문제 이미지 URL이 있으면 이미지 내용까지 반영하라.
+- 사용자가 물은 범위를 벗어나 결론/오답 포인트/복습 체크 형식으로 강제 확장하지 마라.
+- JSON에 없는 사실은 단정하지 말고, 필요한 경우 추정임을 명시하라."""
+    )
+
+    return f"""너는 의학/보건 계열 문제풀이 튜터다.
+항상 한국어로 답하고, 불필요한 장황함 없이 핵심부터 설명한다.
+
+{answer_format_text}
+
+현재 문제 JSON:
+```json
+{current_question_json}
+```
+
+문제 이미지 URL:
+{image_url_text}
+
+이전 대화:
+{history_text}
+
+사용자 질문:
+{message}
+
+요청 타입:
+{request_source_text}
+
+요청:
+{request_instruction_text}
+"""
+
+
 @ai_bp.before_request
 def guard_read_only():
-    if request.endpoint in {'ai.correct_text'}:
+    if request.endpoint in _NO_WRITE_GUARD_ENDPOINTS:
         return None
     blocked = guard_write_request()
     if blocked is not None:
@@ -99,7 +241,7 @@ def guard_read_only():
 
 @ai_bp.before_request
 def attach_user():
-    if request.endpoint in {'ai.correct_text'}:
+    if request.endpoint in _NO_AUTH_ENDPOINTS:
         return None
     return attach_current_user(require=True)
 
@@ -1073,3 +1215,86 @@ def correct_text():
         
     except Exception as e:
         return _json_error(str(e), code="TEXT_CORRECTION_FAILED", status=500)
+
+
+@ai_bp.route('/practice-chat', methods=['POST'])
+def practice_chat():
+    """문제 결과 페이지 전용 AI 채팅"""
+    if not GENAI_AVAILABLE:
+        return _json_error(
+            "google-genai 패키지가 설치되지 않았습니다.",
+            code="GENAI_NOT_AVAILABLE",
+            status=500,
+        )
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _json_error(
+            "요청 본문(JSON)이 필요합니다.",
+            code="INVALID_PAYLOAD",
+            status=400,
+        )
+
+    message = str(data.get("message") or "").strip()
+    if not message:
+        return _json_error(
+            "질문 내용이 비어 있습니다.",
+            code="MESSAGE_REQUIRED",
+            status=400,
+        )
+
+    current_question = data.get("currentQuestion")
+    if not isinstance(current_question, dict):
+        return _json_error(
+            "현재 문제 JSON이 필요합니다.",
+            code="CURRENT_QUESTION_REQUIRED",
+            status=400,
+        )
+
+    history = _normalize_chat_messages(data.get("messages"))
+    request_source = str(data.get("requestSource") or "manual").strip().lower()
+    requested_model = str(data.get("model") or "").strip()
+    model_name = requested_model or _DEFAULT_PRACTICE_CHAT_MODEL
+    image_urls = _extract_question_image_urls(
+        current_question, data.get("questionImageUrls")
+    )
+
+    cfg = get_config()
+    api_key = cfg.runtime.gemini_api_key or os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        return _json_error(
+            "GEMINI_API_KEY 또는 GOOGLE_API_KEY가 설정되지 않았습니다.",
+            code="GEMINI_API_KEY_MISSING",
+            status=500,
+        )
+
+    try:
+        client = genai.Client(api_key=api_key)
+        prompt = _build_practice_chat_prompt(
+            message=message[:3000],
+            history=history,
+            current_question=current_question,
+            request_source=request_source,
+            image_urls=image_urls,
+        )
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.3,
+                top_p=0.9,
+                max_output_tokens=2048,
+            ),
+        )
+        reply = (response.text or "").strip()
+        if not reply:
+            reply = "모델 응답이 비어 있어 해설을 만들지 못했습니다. 질문을 조금 더 구체적으로 보내주세요."
+
+        return _json_success(
+            {
+                "reply": reply,
+                "model": model_name,
+            }
+        )
+    except Exception as e:
+        return _json_error(str(e), code="PRACTICE_CHAT_FAILED", status=500)
