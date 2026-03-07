@@ -1151,6 +1151,444 @@ def start_super_classification():
         )
 
 
+@ai_bp.route('/classify/super/batch-start', methods=['POST'])
+def start_super_classification_batch():
+    """Super AI 분류 배치 시작 (여러 시험 + 여러 블록)."""
+    user = current_user()
+    if not GENAI_AVAILABLE:
+        return _json_error(
+            "google-genai 패키지가 설치되지 않았습니다.",
+            code="GENAI_NOT_AVAILABLE",
+            status=500,
+        )
+
+    data = request.get_json()
+    if data is None:
+        return _json_error("데이터가 없습니다.", code="INVALID_PAYLOAD", status=400)
+
+    def _normalize_subject(value):
+        if value is None:
+            return ""
+        return " ".join(str(value).strip().lower().split())
+
+    def _to_unique_int_list(raw_values):
+        if raw_values is None:
+            return [], [None]
+        if not isinstance(raw_values, (list, tuple, set)):
+            raw_values = [raw_values]
+        parsed: list[int] = []
+        invalid: list[object] = []
+        for raw_value in raw_values:
+            try:
+                parsed.append(int(raw_value))
+            except (TypeError, ValueError):
+                invalid.append(raw_value)
+        return sorted(set(parsed)), invalid
+
+    raw_exam_ids = data.get("exam_ids")
+    if raw_exam_ids is None:
+        raw_exam_ids = data.get("examIds")
+    if raw_exam_ids is None:
+        single_exam_id = data.get("exam_id")
+        if single_exam_id is None:
+            single_exam_id = data.get("examId")
+        raw_exam_ids = [] if single_exam_id in (None, "") else [single_exam_id]
+
+    exam_ids, invalid_exam_ids = _to_unique_int_list(raw_exam_ids)
+    if not exam_ids:
+        return _json_error(
+            "exam_ids가 필요합니다.",
+            code="EXAM_IDS_REQUIRED",
+            status=400,
+        )
+    if invalid_exam_ids:
+        return _json_error(
+            "유효하지 않은 exam_id가 포함되어 있습니다.",
+            code="INVALID_EXAM_ID",
+            status=400,
+            payload={"invalid_exam_ids": invalid_exam_ids},
+        )
+
+    raw_scope = data.get("scope")
+    if not isinstance(raw_scope, dict):
+        raw_scope = {}
+    raw_block_ids = data.get("block_ids")
+    if raw_block_ids is None:
+        raw_block_ids = data.get("blockIds")
+    if raw_block_ids is None:
+        raw_block_ids = raw_scope.get("block_ids")
+    if raw_block_ids is None:
+        raw_block_ids = raw_scope.get("blockIds")
+    if raw_block_ids is None:
+        single_block_id = data.get("block_id")
+        if single_block_id is None:
+            single_block_id = data.get("blockId")
+        if single_block_id is None:
+            single_block_id = raw_scope.get("block_id")
+        if single_block_id is None:
+            single_block_id = raw_scope.get("blockId")
+        raw_block_ids = [] if single_block_id in (None, "") else [single_block_id]
+
+    block_ids, invalid_block_ids = _to_unique_int_list(raw_block_ids)
+    if not block_ids:
+        return _json_error(
+            "Super AI 분류를 위해 블록을 선택하세요.",
+            code="SUPER_BLOCK_ID_REQUIRED",
+            status=400,
+        )
+    if invalid_block_ids:
+        return _json_error(
+            "유효하지 않은 block_id가 포함되어 있습니다.",
+            code="SUPER_INVALID_BLOCK_ID",
+            status=400,
+            payload={"invalid_block_ids": invalid_block_ids},
+        )
+
+    unrestricted_user = _is_super_unrestricted_user(user)
+    include_descendants = parse_bool(
+        data.get("include_descendants") or data.get("includeDescendants"),
+        True,
+    )
+    idempotency_key = data.get("idempotency_key") or data.get("idempotencyKey")
+    force = parse_bool(data.get("force"), False)
+    retry_failed = parse_bool(
+        data.get("retry") or data.get("retry_failed") or data.get("retryFailed"),
+        False,
+    )
+    retry_missing = parse_bool(
+        data.get("retry_missing") or data.get("retryMissing"),
+        True,
+    )
+
+    blocks: list[Block] = []
+    missing_block_ids: list[int] = []
+    for block_id in block_ids:
+        block = (
+            db.session.get(Block, block_id)
+            if unrestricted_user
+            else get_scoped_by_id(Block, block_id, user, include_public=True)
+        )
+        if block is None:
+            missing_block_ids.append(block_id)
+            continue
+        blocks.append(block)
+    if missing_block_ids:
+        return _json_error(
+            "블록을 찾을 수 없습니다.",
+            code="SUPER_BLOCK_NOT_FOUND",
+            status=404,
+            payload={"block_ids": sorted(set(missing_block_ids))},
+        )
+
+    block_subject_map = {
+        block.id: (block.subject_ref.name if block.subject_ref else block.subject)
+        for block in blocks
+    }
+
+    jobs: list[dict[str, object]] = []
+    errors: list[dict[str, object]] = []
+
+    for exam_id in exam_ids:
+        exam = (
+            db.session.get(PreviousExam, exam_id)
+            if unrestricted_user
+            else get_scoped_by_id(PreviousExam, exam_id, user)
+        )
+        if not exam:
+            errors.append(
+                {
+                    "exam_id": exam_id,
+                    "code": "EXAM_NOT_FOUND",
+                    "message": "시험을 찾을 수 없습니다.",
+                }
+            )
+            continue
+
+        question_query = (
+            Question.query
+            if unrestricted_user
+            else scope_query(Question.query, Question, user)
+        )
+        exam_questions = (
+            question_query
+            .filter(Question.exam_id == exam_id)
+            .order_by(Question.question_number)
+            .all()
+        )
+        question_ids = [q.id for q in exam_questions]
+        if not question_ids:
+            errors.append(
+                {
+                    "exam_id": exam_id,
+                    "code": "NO_QUESTIONS",
+                    "message": "시험에 문제가 없습니다.",
+                }
+            )
+            continue
+
+        exam_subject = _normalize_subject(exam.subject)
+        if not exam_subject:
+            errors.append(
+                {
+                    "exam_id": exam_id,
+                    "code": "SUPER_EXAM_SUBJECT_REQUIRED",
+                    "message": "시험 과목(subject)이 비어 있어 블록 매칭을 검증할 수 없습니다.",
+                }
+            )
+            continue
+
+        matching_blocks: list[Block] = []
+        for block in blocks:
+            block_subject = _normalize_subject(block_subject_map.get(block.id))
+            if block_subject == exam_subject:
+                matching_blocks.append(block)
+        if not matching_blocks:
+            errors.append(
+                {
+                    "exam_id": exam_id,
+                    "code": "SUPER_SCOPE_SUBJECT_MISMATCH",
+                    "message": "선택한 블록 중 시험 과목과 일치하는 블록이 없습니다.",
+                    "exam_subject": exam.subject,
+                    "block_ids": [block.id for block in blocks],
+                }
+            )
+            continue
+
+        matched_block_ids = sorted({block.id for block in matching_blocks})
+        if unrestricted_user:
+            lecture_ids = [
+                int(lecture_id)
+                for (lecture_id,) in (
+                    db.session.query(Lecture.id)
+                    .filter(Lecture.block_id.in_(matched_block_ids))
+                    .all()
+                )
+            ]
+            scope = {
+                "block_ids": matched_block_ids,
+                "include_descendants": bool(include_descendants),
+                "lecture_ids": sorted({int(lecture_id) for lecture_id in (lecture_ids or [])}),
+            }
+            if len(matched_block_ids) == 1:
+                scope["block_id"] = matched_block_ids[0]
+        else:
+            lecture_id_set: set[int] = set()
+            for block in matching_blocks:
+                normalized_scope = normalize_classification_scope(
+                    {
+                        "block_id": block.id,
+                        "include_descendants": bool(include_descendants),
+                    }
+                )
+                resolved_scope = resolve_scope_lecture_ids(
+                    normalized_scope,
+                    user=user,
+                    include_public=True,
+                )
+                for lecture_id in resolved_scope.get("lecture_ids") or []:
+                    try:
+                        lecture_id_set.add(int(lecture_id))
+                    except (TypeError, ValueError):
+                        continue
+            lecture_ids = sorted(lecture_id_set)
+            scope = {
+                "block_ids": matched_block_ids,
+                "include_descendants": bool(include_descendants),
+                "lecture_ids": lecture_ids,
+            }
+            if len(matched_block_ids) == 1:
+                scope["block_id"] = matched_block_ids[0]
+
+        if not lecture_ids:
+            errors.append(
+                {
+                    "exam_id": exam_id,
+                    "code": "NO_AVAILABLE_LECTURES",
+                    "message": "분류 가능한 강의가 없습니다.",
+                    "block_ids": matched_block_ids,
+                }
+            )
+            continue
+
+        signature = _build_super_request_signature(
+            exam_id,
+            question_ids,
+            idempotency_key=idempotency_key,
+            scope=scope or None,
+        )
+
+        existing_job = None
+        retry_source_job = None
+        if not force:
+            existing_job = _find_recent_job(signature)
+            if existing_job and not _job_visible_to_user(existing_job, user):
+                existing_job = None
+
+        if existing_job and existing_job.status not in (
+            ClassificationJob.STATUS_FAILED,
+            ClassificationJob.STATUS_CANCELLED,
+        ):
+            if retry_missing and existing_job.status == ClassificationJob.STATUS_COMPLETED:
+                missing_retry_ids = _super_retry_missing_question_ids(existing_job)
+                if missing_retry_ids:
+                    retry_source_job = existing_job
+                    question_ids = missing_retry_ids
+                    signature = _build_super_request_signature(
+                        exam_id,
+                        question_ids,
+                        idempotency_key=idempotency_key,
+                        scope=scope or None,
+                    )
+                    retry_job = _find_recent_job(signature)
+                    if retry_job and _job_visible_to_user(retry_job, user):
+                        if retry_job.status not in (
+                            ClassificationJob.STATUS_FAILED,
+                            ClassificationJob.STATUS_CANCELLED,
+                        ):
+                            jobs.append(
+                                {
+                                    "exam_id": exam_id,
+                                    "exam_title": exam.title,
+                                    "job_id": retry_job.id,
+                                    "total_count": retry_job.total_count,
+                                    "status": retry_job.status,
+                                    "reused": True,
+                                    "retry_missing": True,
+                                    "super_classify": True,
+                                    "request_signature": signature,
+                                    "block_ids": matched_block_ids,
+                                }
+                            )
+                            continue
+                else:
+                    jobs.append(
+                        {
+                            "exam_id": exam_id,
+                            "exam_title": exam.title,
+                            "job_id": existing_job.id,
+                            "total_count": existing_job.total_count,
+                            "status": existing_job.status,
+                            "reused": True,
+                            "retry_missing": False,
+                            "super_classify": True,
+                            "request_signature": signature,
+                            "block_ids": matched_block_ids,
+                        }
+                    )
+                    continue
+            else:
+                jobs.append(
+                    {
+                        "exam_id": exam_id,
+                        "exam_title": exam.title,
+                        "job_id": existing_job.id,
+                        "total_count": existing_job.total_count,
+                        "status": existing_job.status,
+                        "reused": True,
+                        "retry_missing": False,
+                        "super_classify": True,
+                        "request_signature": signature,
+                        "block_ids": matched_block_ids,
+                    }
+                )
+                continue
+
+        if (
+            existing_job
+            and existing_job.status in (
+                ClassificationJob.STATUS_FAILED,
+                ClassificationJob.STATUS_CANCELLED,
+            )
+            and not retry_failed
+        ):
+            existing_job = None
+
+        requested_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        request_meta = {
+            "signature": signature,
+            "question_ids": question_ids,
+            "requested_at": requested_at,
+            "scope_user_id": user.id,
+            "super_classify": True,
+            "exam_id": exam_id,
+            "scope": scope,
+        }
+        if idempotency_key:
+            request_meta["idempotency_key"] = str(idempotency_key)
+        if retry_source_job is not None:
+            request_meta["retry_of_job_id"] = retry_source_job.id
+            request_meta["retry_missing"] = True
+        if (
+            existing_job
+            and existing_job.status == ClassificationJob.STATUS_FAILED
+            and retry_failed
+        ):
+            request_meta["retry_of_job_id"] = existing_job.id
+
+        try:
+            from app.services.super_classifier import SuperClassifier
+
+            job_id = SuperClassifier.start_super_classification_job(
+                exam_id,
+                request_meta=request_meta,
+                lecture_ids=lecture_ids,
+                question_ids=question_ids,
+                block_id=matched_block_ids[0] if len(matched_block_ids) == 1 else None,
+                include_descendants=bool(include_descendants),
+            )
+        except Exception as exc:
+            errors.append(
+                {
+                    "exam_id": exam_id,
+                    "code": "SUPER_CLASSIFICATION_START_FAILED",
+                    "message": str(exc),
+                }
+            )
+            continue
+
+        jobs.append(
+            {
+                "exam_id": exam_id,
+                "exam_title": exam.title,
+                "job_id": job_id,
+                "total_count": len(question_ids),
+                "status": ClassificationJob.STATUS_PENDING,
+                "reused": False,
+                "retry_missing": retry_source_job is not None,
+                "super_classify": True,
+                "request_signature": signature,
+                "block_ids": matched_block_ids,
+            }
+        )
+
+    if not jobs:
+        return _json_error(
+            "선택한 시험/블록 조합으로 시작 가능한 Super AI 분류 작업이 없습니다.",
+            code="SUPER_BATCH_START_FAILED",
+            status=400,
+            payload={
+                "super_classify": True,
+                "is_batch": True,
+                "jobs": [],
+                "errors": errors,
+            },
+        )
+
+    first_job = jobs[0]
+    return _json_success(
+        {
+            "super_classify": True,
+            "is_batch": True,
+            "queued_count": len(jobs),
+            "failed_count": len(errors),
+            "job_id": first_job.get("job_id"),
+            "status": first_job.get("status"),
+            "jobs": jobs,
+            "errors": errors,
+        }
+    )
+
+
 @ai_bp.route('/correct-text', methods=['POST'])
 def correct_text():
     """AI 텍스트 교정 (띄어쓰기, 맞춤법)"""

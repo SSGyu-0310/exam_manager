@@ -10,10 +10,10 @@ import { cn } from "@/lib/utils";
 interface ExamExplorerProps {
     exams: ExamSummary[];
     blocks: BlockSummary[];
-    examFilter: string;
-    setExamFilter: (val: string) => void;
-    superBlockFilter: string;
-    setSuperBlockFilter: (val: string) => void;
+    examFilters: string[];
+    setExamFilters: (val: string[]) => void;
+    superBlockFilters: string[];
+    setSuperBlockFilters: (val: string[]) => void;
 }
 
 function getYear(exam: ExamSummary): number | null {
@@ -70,14 +70,15 @@ function ColumnItem({
 function YearGroup({
     year,
     exams,
-    examFilter,
+    examFilters,
     onExamClick,
 }: {
     year: string;
     exams: ExamSummary[];
-    examFilter: string;
+    examFilters: string[];
     onExamClick: (id: string) => void;
 }) {
+    const selected = new Set(examFilters);
     return (
         <div className="mb-1">
             <div className="px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
@@ -88,7 +89,7 @@ function YearGroup({
                     <ColumnItem
                         key={exam.id}
                         label={getTermLabel(exam)}
-                        selected={examFilter === String(exam.id)}
+                        selected={selected.has(String(exam.id))}
                         onClick={() => onExamClick(String(exam.id))}
                     />
                 ))}
@@ -128,10 +129,10 @@ function Column({
 export function ExamExplorer({
     exams,
     blocks,
-    examFilter,
-    setExamFilter,
-    superBlockFilter,
-    setSuperBlockFilter,
+    examFilters,
+    setExamFilters,
+    superBlockFilters,
+    setSuperBlockFilters,
 }: ExamExplorerProps) {
     const { t } = useLanguage();
     const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
@@ -183,16 +184,28 @@ export function ExamExplorer({
     /* ── Handlers ── */
     const handleSubjectClick = (subject: string) => {
         setSelectedSubject(subject);
-        setExamFilter("");
-        setSuperBlockFilter("");
     };
 
     const handleExamClick = (examId: string) => {
-        setExamFilter(examFilter === examId ? "" : examId);
+        const selected = new Set(examFilters);
+        if (selected.has(examId)) {
+            selected.delete(examId);
+        } else {
+            selected.add(examId);
+        }
+        setExamFilters(Array.from(selected).sort((a, b) => Number(a) - Number(b)));
     };
 
     const handleBlockClick = (blockId: string) => {
-        setSuperBlockFilter(superBlockFilter === blockId ? "" : blockId);
+        const selected = new Set(superBlockFilters);
+        if (selected.has(blockId)) {
+            selected.delete(blockId);
+        } else {
+            selected.add(blockId);
+        }
+        setSuperBlockFilters(
+            Array.from(selected).sort((a, b) => Number(a) - Number(b))
+        );
     };
 
     return (
@@ -200,6 +213,9 @@ export function ExamExplorer({
             {/* Header */}
             <div className="shrink-0 border-b border-border/50 bg-muted/30 px-3 py-2">
                 <h3 className="text-xs font-semibold">{t("classifications.tableExam")} 탐색기</h3>
+                <p className="text-[10px] text-muted-foreground">
+                    Super 선택: 시험 {examFilters.length}개 · 블록 {superBlockFilters.length}개
+                </p>
             </div>
 
             {/* Multi-column body */}
@@ -211,8 +227,6 @@ export function ExamExplorer({
                         selected={!selectedSubject}
                         onClick={() => {
                             setSelectedSubject(null);
-                            setExamFilter("");
-                            setSuperBlockFilter("");
                         }}
                     />
                     {subjects.map((subject) => (
@@ -238,7 +252,7 @@ export function ExamExplorer({
                             key={year}
                             year={year}
                             exams={yearExams}
-                            examFilter={examFilter}
+                            examFilters={examFilters}
                             onExamClick={handleExamClick}
                         />
                     ))}
@@ -255,7 +269,7 @@ export function ExamExplorer({
                         <ColumnItem
                             key={block.id}
                             label={block.name}
-                            selected={superBlockFilter === String(block.id)}
+                            selected={superBlockFilters.includes(String(block.id))}
                             onClick={() => handleBlockClick(String(block.id))}
                         />
                     ))}
