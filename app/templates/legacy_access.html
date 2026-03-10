@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flask UI 인증</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: radial-gradient(circle at top, #21325b 0%, #121826 55%, #090d16 100%);
+            color: #fff;
+        }
+
+        .card {
+            width: min(100%, 420px);
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 18px;
+            padding: 1.6rem;
+            backdrop-filter: blur(14px);
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+        }
+
+        h1 {
+            font-size: 1.6rem;
+            margin-bottom: 0.75rem;
+        }
+
+        p {
+            color: #c7d3f4;
+            line-height: 1.65;
+            margin-bottom: 1rem;
+        }
+
+        .hint {
+            padding: 0.95rem;
+            border-radius: 12px;
+            background: rgba(127, 156, 255, 0.12);
+            color: #dbe5ff;
+            margin-bottom: 1rem;
+            line-height: 1.6;
+        }
+
+        .flash {
+            padding: 0.9rem 1rem;
+            border-radius: 12px;
+            margin-bottom: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .flash.success {
+            background: rgba(46, 204, 113, 0.18);
+            color: #87f0b4;
+        }
+
+        .flash.error {
+            background: rgba(231, 76, 60, 0.18);
+            color: #ff9e97;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.45rem;
+            color: #dbe5ff;
+            font-weight: 600;
+        }
+
+        input[type="password"] {
+            width: 100%;
+            padding: 0.9rem 1rem;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            background: rgba(8, 13, 28, 0.52);
+            color: #fff;
+            font-size: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        button {
+            width: 100%;
+            padding: 0.95rem 1rem;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #7f9cff 0%, #5ac8fa 100%);
+            color: #071124;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .meta {
+            margin-top: 1rem;
+            color: #95a4c8;
+            font-size: 0.92rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        <h1>Flask UI 인증</h1>
+        <p>Legacy Flask 화면은 별도 로그인 페이지 대신 로컬 개발용 PIN으로 바로 접근할 수 있게 설정되어 있습니다.</p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <div class="hint">
+            현재 브라우저에 `auth_token` 쿠키를 발급해서 `/manage`, `/exam`, `/practice` 같은 Flask 화면을 사용할 수 있게 합니다.
+            {% if pin_hint %}
+            <br>기본 PIN: <strong>{{ pin_hint }}</strong>
+            {% endif %}
+        </div>
+
+        <form method="post">
+            <input type="hidden" name="next" value="{{ next_path }}">
+            <label for="pin">인증번호</label>
+            <input id="pin" name="pin" type="password" inputmode="numeric" autocomplete="one-time-code" autofocus required>
+            <button type="submit">인증 후 계속</button>
+        </form>
+
+        <div class="meta">
+            이동 대상: {{ next_path }}<br>
+            다른 PIN을 쓰고 싶으면 `LEGACY_UI_PIN` 환경변수로 바꿀 수 있습니다.
+        </div>
+    </div>
+</body>
+
+</html>

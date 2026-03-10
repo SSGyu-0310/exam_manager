@@ -28,7 +28,9 @@ def get_pdf_parser(mode: str = "legacy") -> Callable[..., Any]:
     if mode == "experimental":
         from app.services.pdf_parser_experimental import parse_pdf_to_questions
     elif mode == "legacy":
-        from app.services.pdf_parser import parse_pdf_to_questions
+        from app.services.pdf_lab_parser import (
+            parse_pdf_to_lab_questions as parse_pdf_to_questions,
+        )
     else:
         raise ValueError(
             f"Invalid PDF parser mode: {mode}. Must be 'legacy' or 'experimental'."

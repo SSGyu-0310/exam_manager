@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-from flask import current_app, request, g
-from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
+from flask import current_app, request, g, redirect, url_for, flash
+from flask_jwt_extended import (
+    get_jwt_identity,
+    verify_jwt_in_request,
+    unset_jwt_cookies,
+)
 from flask_jwt_extended.exceptions import JWTExtendedException, NoAuthorizationError
+from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
 from sqlalchemy import or_, false
 
 from app import db
@@ -37,17 +42,79 @@ def _unauthorized(message: str = "Authentication required."):
     )
 
 
+def _normalized_next_path() -> str:
+    path = request.path or "/"
+    query = request.query_string.decode("utf-8", errors="ignore").strip()
+    if query:
+        return f"{path}?{query}"
+    return path
+
+
+def _is_browser_html_request() -> bool:
+    accept = request.accept_mimetypes
+    best = accept.best_match(["text/html", "application/json"])
+    if best == "text/html":
+        return True
+
+    raw_accept = (request.headers.get("Accept") or "").lower()
+    if "text/html" in raw_accept:
+        return True
+
+    if request.method in {"GET", "HEAD"} and not raw_accept:
+        return True
+    return False
+
+
+def _is_browser_form_request() -> bool:
+    if request.method in {"GET", "HEAD"}:
+        return False
+    if request.is_json:
+        return False
+
+    content_type = (request.content_type or "").lower()
+    if content_type.startswith("application/x-www-form-urlencoded"):
+        return True
+    if content_type.startswith("multipart/form-data"):
+        return True
+    return _is_browser_html_request()
+
+
+def should_redirect_to_legacy_access(require: bool, error) -> bool:
+    if not require or error is None:
+        return False
+    if request.path.startswith("/api/"):
+        return False
+    if request.path.startswith("/legacy-access"):
+        return False
+    if request.method == "OPTIONS":
+        return False
+    return _is_browser_html_request() or _is_browser_form_request()
+
+
+def build_legacy_access_redirect(message: str | None = None):
+    response = redirect(
+        url_for("main.legacy_access", next=_normalized_next_path())
+    )
+    unset_jwt_cookies(response)
+    if message:
+        flash(message, "error")
+    return response
+
+
 def attach_current_user(require: bool = False):
     """Attach current user to request context (g.current_user)."""
     user = None
     error = None
+    redirect_message = None
 
     try:
         verify_jwt_in_request(optional=not require)
     except NoAuthorizationError:
         if require:
+            redirect_message = "로그인이 필요합니다."
             error = _unauthorized()
-    except JWTExtendedException as exc:
+    except (JWTExtendedException, ExpiredSignatureError, InvalidTokenError) as exc:
+        redirect_message = "세션이 만료되었거나 유효하지 않습니다. 다시 로그인해주세요."
         error = _unauthorized(str(exc))
     else:
         identity = get_jwt_identity()
@@ -62,6 +129,9 @@ def attach_current_user(require: bool = False):
         error = None
 
     g.current_user = user
+
+    if should_redirect_to_legacy_access(require, error):
+        return build_legacy_access_redirect(redirect_message)
 
     if user is None and error is not None:
         return error
