@@ -475,6 +475,188 @@ def test_ai_super_classify_start_passes_scoped_lectures_and_signature(
     assert request_meta["signature"] == payload["data"]["request_signature"]
 
 
+def test_ai_super_classify_batch_start_enqueues_jobs_for_multiple_exams(
+    client, app, monkeypatch
+):
+    with app.app_context():
+        user = _create_user("contract-super-batch-success@example.com")
+        token = _token_for(user)
+
+        block_a = Block(name="Batch Block A", subject="생리학", user_id=user.id)
+        block_b = Block(name="Batch Block B", subject="생리학", user_id=user.id)
+        db.session.add_all([block_a, block_b])
+        db.session.flush()
+
+        lecture_a = Lecture(block_id=block_a.id, title="Lecture A", user_id=user.id)
+        lecture_b = Lecture(block_id=block_b.id, title="Lecture B", user_id=user.id)
+        exam_a = PreviousExam(title="Batch Exam A", subject="생리학", user_id=user.id)
+        exam_b = PreviousExam(title="Batch Exam B", subject="생리학", user_id=user.id)
+        db.session.add_all([lecture_a, lecture_b, exam_a, exam_b])
+        db.session.flush()
+
+        question_a = Question(
+            exam_id=exam_a.id,
+            user_id=user.id,
+            question_number=1,
+            content="batch question a",
+            q_type=Question.TYPE_MULTIPLE_CHOICE,
+            answer="1",
+            is_classified=False,
+            lecture_id=None,
+        )
+        question_b = Question(
+            exam_id=exam_b.id,
+            user_id=user.id,
+            question_number=1,
+            content="batch question b",
+            q_type=Question.TYPE_MULTIPLE_CHOICE,
+            answer="1",
+            is_classified=False,
+            lecture_id=None,
+        )
+        db.session.add_all([question_a, question_b])
+        db.session.commit()
+
+        exam_ids = [exam_a.id, exam_b.id]
+        block_ids = [block_a.id, block_b.id]
+        lecture_ids = sorted([lecture_a.id, lecture_b.id])
+
+    captured: list[dict[str, object]] = []
+    seq = {"value": 7000}
+
+    def _fake_start(
+        cls,
+        exam_id,
+        request_meta=None,
+        lecture_ids=None,
+        question_ids=None,
+        **kwargs,
+    ):
+        seq["value"] += 1
+        captured.append(
+            {
+                "exam_id": exam_id,
+                "request_meta": request_meta or {},
+                "lecture_ids": sorted(lecture_ids or []),
+                "question_ids": sorted(question_ids or []),
+            }
+        )
+        return seq["value"]
+
+    monkeypatch.setattr("app.routes.ai.GENAI_AVAILABLE", True)
+    monkeypatch.setattr(
+        "app.services.super_classifier.SuperClassifier.start_super_classification_job",
+        classmethod(_fake_start),
+    )
+
+    response = client.post(
+        "/ai/classify/super/batch-start",
+        headers=_auth_header(token),
+        json={"exam_ids": exam_ids, "block_ids": block_ids},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    _assert_contract_shape(payload)
+    assert payload["ok"] is True
+    assert payload["data"]["super_classify"] is True
+    assert payload["data"]["is_batch"] is True
+    assert payload["data"]["queued_count"] == 2
+    assert payload["data"]["failed_count"] == 0
+    assert len(payload["data"]["jobs"]) == 2
+    assert len(captured) == 2
+
+    by_exam = {entry["exam_id"]: entry for entry in captured}
+    assert sorted(by_exam.keys()) == sorted(exam_ids)
+    for exam_id in exam_ids:
+        entry = by_exam[exam_id]
+        request_meta = entry["request_meta"]
+        assert entry["lecture_ids"] == lecture_ids
+        assert request_meta["super_classify"] is True
+        assert request_meta["exam_id"] == exam_id
+        assert request_meta["scope"]["block_ids"] == sorted(block_ids)
+        assert request_meta["scope"]["include_descendants"] is True
+        assert request_meta["scope"]["lecture_ids"] == lecture_ids
+
+
+def test_ai_super_classify_batch_start_reports_subject_mismatch_per_exam(
+    client, app, monkeypatch
+):
+    with app.app_context():
+        user = _create_user("contract-super-batch-mismatch@example.com")
+        token = _token_for(user)
+
+        block = Block(name="Batch Scope Block", subject="생리학", user_id=user.id)
+        db.session.add(block)
+        db.session.flush()
+        lecture = Lecture(block_id=block.id, title="Batch Scope Lecture", user_id=user.id)
+        db.session.add(lecture)
+        db.session.flush()
+
+        matched_exam = PreviousExam(
+            title="Matched Batch Exam", subject="생리학", user_id=user.id
+        )
+        mismatch_exam = PreviousExam(
+            title="Mismatch Batch Exam", subject="해부학", user_id=user.id
+        )
+        db.session.add_all([matched_exam, mismatch_exam])
+        db.session.flush()
+
+        matched_question = Question(
+            exam_id=matched_exam.id,
+            user_id=user.id,
+            question_number=1,
+            content="matched question",
+            q_type=Question.TYPE_MULTIPLE_CHOICE,
+            answer="1",
+            is_classified=False,
+            lecture_id=None,
+        )
+        mismatch_question = Question(
+            exam_id=mismatch_exam.id,
+            user_id=user.id,
+            question_number=1,
+            content="mismatch question",
+            q_type=Question.TYPE_MULTIPLE_CHOICE,
+            answer="1",
+            is_classified=False,
+            lecture_id=None,
+        )
+        db.session.add_all([matched_question, mismatch_question])
+        db.session.commit()
+
+        matched_exam_id = matched_exam.id
+        mismatch_exam_id = mismatch_exam.id
+        block_id = block.id
+
+    monkeypatch.setattr("app.routes.ai.GENAI_AVAILABLE", True)
+    monkeypatch.setattr(
+        "app.services.super_classifier.SuperClassifier.start_super_classification_job",
+        classmethod(lambda cls, *args, **kwargs: 8123),
+    )
+
+    response = client.post(
+        "/ai/classify/super/batch-start",
+        headers=_auth_header(token),
+        json={
+            "exam_ids": [matched_exam_id, mismatch_exam_id],
+            "block_ids": [block_id],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    _assert_contract_shape(payload)
+    assert payload["ok"] is True
+    assert payload["data"]["queued_count"] == 1
+    assert payload["data"]["failed_count"] == 1
+    assert len(payload["data"]["jobs"]) == 1
+    assert payload["data"]["jobs"][0]["exam_id"] == matched_exam_id
+    assert len(payload["data"]["errors"]) == 1
+    assert payload["data"]["errors"][0]["exam_id"] == mismatch_exam_id
+    assert payload["data"]["errors"][0]["code"] == "SUPER_SCOPE_SUBJECT_MISMATCH"
+
+
 def test_ai_super_classify_start_allows_trusted_local_email_override(
     client, app, monkeypatch
 ):

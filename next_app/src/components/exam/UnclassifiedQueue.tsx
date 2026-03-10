@@ -68,6 +68,25 @@ type AiResultPayload = {
   summary?: AiStatus["summary"];
 };
 
+type SuperBatchJobPayload = {
+  exam_id?: number;
+  job_id?: number;
+  status?: string;
+  total_count?: number;
+  reused?: boolean;
+  retry_missing?: boolean;
+  block_ids?: number[];
+};
+
+type SuperBatchPayload = {
+  jobs?: SuperBatchJobPayload[];
+  errors?: unknown[];
+  queued_count?: number;
+  failed_count?: number;
+  super_classify?: boolean;
+  is_batch?: boolean;
+};
+
 const previewRoute = (jobId: number) => `/manage/classifications/${jobId}`;
 
 const normalizeSubject = (value: string | null | undefined) =>
@@ -96,8 +115,8 @@ export function UnclassifiedQueue() {
   const [items, setItems] = useState<UnclassifiedQuestion[]>([]);
   const [blocks, setBlocks] = useState<BlockSummary[]>([]);
   const [exams, setExams] = useState<ExamSummary[]>([]);
-  const [examFilter, setExamFilter] = useState<string>("");
-  const [superBlockFilter, setSuperBlockFilter] = useState<string>("");
+  const [examFilters, setExamFilters] = useState<string[]>([]);
+  const [superBlockFilters, setSuperBlockFilters] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<"unclassified" | "all">(
     "unclassified"
   );
@@ -113,7 +132,7 @@ export function UnclassifiedQueue() {
     try {
       const data = await getUnclassifiedQueue({
         status: statusFilter,
-        examId: examFilter || undefined,
+        examId: examFilters.length === 1 ? examFilters[0] : undefined,
         query: query || undefined,
       });
       setItems(data.items);
@@ -125,7 +144,7 @@ export function UnclassifiedQueue() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, examFilter, query, t]);
+  }, [statusFilter, examFilters, query, t]);
 
   useEffect(() => {
     void loadQueue();
@@ -151,10 +170,11 @@ export function UnclassifiedQueue() {
     void loadRecent();
   }, []);
 
-  const selectedExam = useMemo(
-    () => exams.find((exam) => String(exam.id) === examFilter) ?? null,
-    [exams, examFilter]
-  );
+  const selectedExams = useMemo(() => {
+    if (!examFilters.length) return [];
+    const selected = new Set(examFilters);
+    return exams.filter((exam) => selected.has(String(exam.id)));
+  }, [exams, examFilters]);
   const recentJobsPreview = useMemo(() => recentJobs.slice(0, 2), [recentJobs]);
   const displayedRecentJobs = useMemo(
     () => (recentJobsOpen ? recentJobs : recentJobsPreview),
@@ -174,20 +194,29 @@ export function UnclassifiedQueue() {
   );
 
   const superCandidateBlocks = useMemo(() => {
-    if (!selectedExam) return [];
-    const examSubject = normalizeSubject(selectedExam.subject);
-    if (!examSubject) return [];
-    return blocks.filter(
-      (block) => normalizeSubject(block.subject) === examSubject
+    const selectedSubjects = new Set(
+      selectedExams
+        .map((exam) => normalizeSubject(exam.subject))
+        .filter((subject) => Boolean(subject))
     );
-  }, [blocks, selectedExam]);
+    if (!selectedSubjects.size) return [];
+    return blocks.filter(
+      (block) => selectedSubjects.has(normalizeSubject(block.subject))
+    );
+  }, [blocks, selectedExams]);
 
   useEffect(() => {
-    if (!superBlockFilter) return;
-    if (!superCandidateBlocks.some((block) => String(block.id) === superBlockFilter)) {
-      setSuperBlockFilter("");
+    if (!superBlockFilters.length) return;
+    const candidateIds = new Set(
+      superCandidateBlocks.map((block) => String(block.id))
+    );
+    const nextFilters = superBlockFilters.filter((blockId) =>
+      candidateIds.has(blockId)
+    );
+    if (nextFilters.length !== superBlockFilters.length) {
+      setSuperBlockFilters(nextFilters);
     }
-  }, [superCandidateBlocks, superBlockFilter]);
+  }, [superCandidateBlocks, superBlockFilters]);
 
   const toggleSelected = (id: number) => {
     setSelected((prev) => {
@@ -252,39 +281,45 @@ export function UnclassifiedQueue() {
   };
 
   const startSuperClassification = async () => {
-    if (!examFilter) {
+    if (!examFilters.length) {
       setError(t("classifications.errorSuperExamRequired"));
       return;
     }
-    if (!superBlockFilter) {
+    if (!superBlockFilters.length) {
       setError(t("classifications.errorSuperBlockRequired"));
       return;
     }
     try {
-      const blockId = Number(superBlockFilter);
-      const payload = await apiFetch<ApiEnvelope<AiStartPayload & { super_classify?: boolean }>>(
-        "/ai/classify/super/start",
+      const examIds = examFilters
+        .map((examId) => Number(examId))
+        .filter((examId) => Number.isInteger(examId));
+      const blockIds = superBlockFilters
+        .map((blockId) => Number(blockId))
+        .filter((blockId) => Number.isInteger(blockId));
+      const payload = await apiFetch<ApiEnvelope<SuperBatchPayload>>(
+        "/ai/classify/super/batch-start",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            exam_id: Number(examFilter),
-            block_id: blockId,
-            scope: {
-              block_id: blockId,
-              include_descendants: true,
-            },
+            exam_ids: examIds,
+            block_ids: blockIds,
+            include_descendants: true,
+            force: true,
+            retry_failed: true,
           }),
         }
       );
       const data = getApiEnvelopeData(payload);
-      if (!isApiEnvelopeOk(payload) || !data?.job_id) {
+      const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
+      const firstJob = jobs[0];
+      if (!isApiEnvelopeOk(payload) || !firstJob?.job_id) {
         throw new Error(
           getApiEnvelopeMessage(payload, t("classifications.errorSuperStart"))
         );
       }
-      setAiStatus({ jobId: data.job_id, status: data.status, error: null });
-      window.location.href = previewRoute(data.job_id);
+      setAiStatus({ jobId: firstJob.job_id, status: firstJob.status, error: null });
+      window.location.href = previewRoute(firstJob.job_id);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : t("classifications.errorSuperStart")
@@ -383,10 +418,10 @@ export function UnclassifiedQueue() {
             <ExamExplorer
               exams={exams}
               blocks={blocks}
-              examFilter={examFilter}
-              setExamFilter={setExamFilter}
-              superBlockFilter={superBlockFilter}
-              setSuperBlockFilter={setSuperBlockFilter}
+              examFilters={examFilters}
+              setExamFilters={setExamFilters}
+              superBlockFilters={superBlockFilters}
+              setSuperBlockFilters={setSuperBlockFilters}
             />
           </div>
         </div>
@@ -477,7 +512,7 @@ export function UnclassifiedQueue() {
                 <Button
                   variant="outline"
                   onClick={startSuperClassification}
-                  disabled={!examFilter || !superBlockFilter}
+                  disabled={!examFilters.length || !superBlockFilters.length}
                   title={t("classifications.superButtonTitle")}
                 >
                   {t("classifications.startSuperAi")}
