@@ -13,11 +13,6 @@ import { LectureCard } from "@/components/lectures/LectureCard";
 import { LectureEmptyState } from "@/components/lectures/LectureEmptyState";
 import { LectureHeader } from "@/components/lectures/LectureHeader";
 import { useLectureQuestionCounts } from "@/components/lectures/useLectureQuestionCounts";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
 type LectureGridProps = {
@@ -257,60 +252,53 @@ export function LectureGrid({
             const showHeader = Boolean(blockTitle) || visibleBlocks.length > 1;
             const isOpen = openBlocks[blockKey] ?? true;
             return (
-              <Collapsible
-                key={blockKey}
-                open={isOpen}
-                onOpenChange={() => toggleBlock(blockKey)}
-              >
-                <section id={`lecture-block-${blockIndex}`} className="space-y-3">
-                  {showHeader && (
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <CollapsibleTrigger asChild>
-                        <button
-                          type="button"
-                          className="group flex min-w-0 flex-1 items-center gap-3 rounded-xl px-1 py-1 text-left transition hover:bg-muted/40"
-                        >
-                          <span className="mt-5 text-muted-foreground">
-                            {isOpen ? (
-                              <ChevronDown className="h-4 w-4" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4" />
-                            )}
-                          </span>
-                          <div className="min-w-0">
-                            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-muted-foreground">
-                              {t("learn.block")}
-                            </p>
-                            <h2 className="truncate text-xl font-semibold text-foreground">
-                              {blockTitle ?? t("learn.untitledBlock")}
-                            </h2>
-                          </div>
-                        </button>
-                      </CollapsibleTrigger>
-                      <span
-                        className={cn(
-                          "rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground",
-                          !isOpen && "bg-secondary/70"
+              <section key={blockKey} id={`lecture-block-${blockIndex}`} className="space-y-3">
+                {showHeader && (
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleBlock(blockKey)}
+                      className="group flex min-w-0 flex-1 items-center gap-3 rounded-xl px-1 py-1 text-left transition hover:bg-muted/40"
+                    >
+                      <span className="mt-5 text-muted-foreground">
+                        {isOpen ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4" />
                         )}
-                      >
-                        {block.lectures.length} {t("learn.lecturesCount")}
                       </span>
-                    </div>
-                  )}
-                  <CollapsibleContent className="space-y-3">
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {block.lectures.map((lecture, lectureIndex) => (
-                        <LectureCard
-                          key={lecture.id ?? lecture.title ?? `${blockKey}-${lectureIndex}`}
-                          lecture={lecture}
-                          questionCount={getLectureCount(lecture)}
-                          studyMeta={getLectureStudyMeta(lecture)}
-                        />
-                      ))}
-                    </div>
-                  </CollapsibleContent>
-                </section>
-              </Collapsible>
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-[0.25em] text-muted-foreground">
+                          {t("learn.block")}
+                        </p>
+                        <h2 className="truncate text-xl font-semibold text-foreground">
+                          {blockTitle ?? t("learn.untitledBlock")}
+                        </h2>
+                      </div>
+                    </button>
+                    <span
+                      className={cn(
+                        "rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground",
+                        !isOpen && "bg-secondary/70"
+                      )}
+                    >
+                      {block.lectures.length} {t("learn.lecturesCount")}
+                    </span>
+                  </div>
+                )}
+                {isOpen && (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {block.lectures.map((lecture, lectureIndex) => (
+                      <LectureCard
+                        key={lecture.id ?? lecture.title ?? `${blockKey}-${lectureIndex}`}
+                        lecture={lecture}
+                        questionCount={getLectureCount(lecture)}
+                        studyMeta={getLectureStudyMeta(lecture)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
             );
           })}
         </div>
