@@ -10,6 +10,7 @@ from flask import (
     current_app,
     abort,
     session,
+    send_file,
 )
 from werkzeug.utils import secure_filename
 from datetime import datetime
@@ -38,6 +39,17 @@ from app.services.material_storage import (
     resolve_material_path,
     resolve_upload_folder,
     should_keep_pdf_after_index,
+)
+from app.services.pdf_lab_review import (
+    REVIEW_STATUS_ISSUE,
+    REVIEW_STATUS_OK,
+    REVIEW_STATUS_PENDING,
+    create_session as create_pdf_lab_session,
+    delete_session as delete_pdf_lab_session,
+    list_sessions as list_pdf_lab_sessions,
+    load_session_bundle as load_pdf_lab_session_bundle,
+    resolve_session_file as resolve_pdf_lab_session_file,
+    update_question_review as update_pdf_lab_question_review,
 )
 from app.services.api_response import (
     success_response as _success_response,
@@ -179,6 +191,70 @@ def _ensure_editable(resource, user):
     return None
 
 
+PDF_LAB_TRUSTED_EMAILS = {"hisukgyu@gmail.com"}
+
+
+def _has_pdf_lab_access(user) -> bool:
+    if user is None:
+        return False
+    if getattr(user, "is_admin", False):
+        return True
+    email = (getattr(user, "email", "") or "").strip().lower()
+    return email in PDF_LAB_TRUSTED_EMAILS
+
+
+def _require_pdf_lab_access():
+    user = current_user()
+    if _has_pdf_lab_access(user):
+        return user
+    flash("실험실은 hisukgyu@gmail.com 또는 관리자만 사용할 수 있습니다.", "error")
+    return None
+
+
+def _pdf_lab_root():
+    return current_app.config.get("PDF_LAB_REVIEW_ROOT")
+
+
+def _pdf_lab_question_view_model(session_id: str, session_meta, question):
+    view_question = dict(question)
+    image_path = (question.get("image_path") or "").strip()
+    if image_path:
+        view_question["image_url"] = url_for(
+            "manage.pdf_lab_file",
+            session_id=session_id,
+            relative_path=f"parser_media/{image_path}",
+        )
+    else:
+        view_question["image_url"] = None
+
+    crop_lookup = session_meta.get("crop_images") or {}
+    crop_filename = crop_lookup.get(str(question.get("question_number")))
+    if crop_filename:
+        view_question["crop_url"] = url_for(
+            "manage.pdf_lab_file",
+            session_id=session_id,
+            relative_path=f"crops/{crop_filename}",
+        )
+    else:
+        view_question["crop_url"] = None
+
+    options = []
+    for option in question.get("options", []):
+        view_option = dict(option)
+        option_image = (option.get("image_path") or "").strip()
+        if option_image:
+            view_option["image_url"] = url_for(
+                "manage.pdf_lab_file",
+                session_id=session_id,
+                relative_path=f"parser_media/{option_image}",
+            )
+        else:
+            view_option["image_url"] = None
+        options.append(view_option)
+    view_question["options"] = options
+    return view_question
+
+
 # ===== 대시보드 =====
 
 
@@ -189,6 +265,247 @@ def dashboard():
     return render_template(
         "manage/dashboard.html",
         **get_dashboard_stats(user),
+    )
+
+
+@manage_bp.route("/pdf-lab", methods=["GET", "POST"])
+def pdf_lab():
+    user = _require_pdf_lab_access()
+    if user is None:
+        return redirect(url_for("manage.dashboard"))
+
+    if request.method == "POST":
+        if "pdf_file" not in request.files:
+            flash("PDF 파일을 선택해주세요.", "error")
+            return redirect(request.url)
+
+        file = request.files["pdf_file"]
+        if file.filename == "":
+            flash("파일이 선택되지 않았습니다.", "error")
+            return redirect(request.url)
+        if not file.filename.lower().endswith(".pdf"):
+            flash("PDF 파일만 업로드 가능합니다.", "error")
+            return redirect(request.url)
+
+        parser_mode = current_app.config.get("PDF_PARSER_MODE", "legacy")
+        try:
+            session_meta = create_pdf_lab_session(
+                file_storage=file,
+                title=request.form.get("title"),
+                parser_mode=parser_mode,
+                created_by=getattr(user, "email", None),
+                root_dir=_pdf_lab_root(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            current_app.logger.exception("PDF lab session create failed")
+            flash(f"실험실 세션 생성 실패: {exc}", "error")
+            return redirect(request.url)
+
+        flash(
+            f"실험실 세션 생성 완료: {session_meta['question_count']}문항",
+            "success",
+        )
+        return redirect(url_for("manage.pdf_lab_review", session_id=session_meta["id"]))
+
+    sessions = list_pdf_lab_sessions(root_dir=_pdf_lab_root())
+    parser_mode = current_app.config.get("PDF_PARSER_MODE", "legacy")
+    return render_template(
+        "manage/pdf_lab.html",
+        sessions=sessions,
+        parser_mode=parser_mode,
+    )
+
+
+@manage_bp.route("/pdf-lab/<session_id>")
+def pdf_lab_review(session_id):
+    user = _require_pdf_lab_access()
+    if user is None:
+        return redirect(url_for("manage.dashboard"))
+
+    try:
+        bundle = load_pdf_lab_session_bundle(session_id, root_dir=_pdf_lab_root())
+    except FileNotFoundError:
+        flash("실험실 세션을 찾을 수 없습니다.", "error")
+        return redirect(url_for("manage.pdf_lab"))
+    except Exception as exc:  # noqa: BLE001
+        current_app.logger.exception("PDF lab session load failed")
+        flash(f"실험실 세션 로드 실패: {exc}", "error")
+        return redirect(url_for("manage.pdf_lab"))
+
+    questions = bundle["questions"]
+    if not questions:
+        flash("표시할 문항이 없습니다.", "error")
+        return redirect(url_for("manage.pdf_lab"))
+
+    review_items = bundle["review"]["items"]
+    review_map = {int(item["review_index"]): item for item in review_items}
+    total_questions = len(questions)
+    index = request.args.get("index", type=int)
+    if index is None:
+        pending = next(
+            (
+                int(item["review_index"])
+                for item in review_items
+                if item["status"] == REVIEW_STATUS_PENDING
+            ),
+            None,
+        )
+        index = pending or 1
+    index = max(1, min(index, total_questions))
+
+    current_question = next(
+        (question for question in questions if int(question["review_index"]) == index),
+        None,
+    )
+    if current_question is None:
+        flash("문항을 찾을 수 없습니다.", "error")
+        return redirect(url_for("manage.pdf_lab"))
+
+    review_item = review_map.get(index)
+    if review_item is None:
+        flash("문항 리뷰 정보를 찾을 수 없습니다.", "error")
+        return redirect(url_for("manage.pdf_lab"))
+
+    current_question = _pdf_lab_question_view_model(
+        session_id,
+        bundle["meta"],
+        current_question,
+    )
+    nav_items = [
+        {
+            "review_index": int(item["review_index"]),
+            "question_number": int(item["question_number"]),
+            "status": item["status"],
+        }
+        for item in review_items
+    ]
+
+    return render_template(
+        "manage/pdf_lab_review.html",
+        session_meta=bundle["meta"],
+        report=bundle["report"],
+        current_question=current_question,
+        review_item=review_item,
+        nav_items=nav_items,
+        prev_index=index - 1 if index > 1 else None,
+        next_index=index + 1 if index < total_questions else None,
+        total_questions=total_questions,
+        review_status_pending=REVIEW_STATUS_PENDING,
+        review_status_ok=REVIEW_STATUS_OK,
+        review_status_issue=REVIEW_STATUS_ISSUE,
+    )
+
+
+@manage_bp.route("/pdf-lab/<session_id>/review", methods=["POST"])
+def save_pdf_lab_review(session_id):
+    user = _require_pdf_lab_access()
+    if user is None:
+        return redirect(url_for("manage.dashboard"))
+
+    review_index = request.form.get("review_index", type=int)
+    if not review_index:
+        flash("저장할 문항 번호가 필요합니다.", "error")
+        return redirect(url_for("manage.pdf_lab_review", session_id=session_id))
+
+    status = (request.form.get("status") or REVIEW_STATUS_PENDING).strip().lower()
+    comment = request.form.get("comment", "")
+    try:
+        update_pdf_lab_question_review(
+            session_id=session_id,
+            review_index=review_index,
+            status=status,
+            comment=comment,
+            root_dir=_pdf_lab_root(),
+        )
+        bundle = load_pdf_lab_session_bundle(session_id, root_dir=_pdf_lab_root())
+    except FileNotFoundError:
+        flash("실험실 세션을 찾을 수 없습니다.", "error")
+        return redirect(url_for("manage.pdf_lab"))
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(
+            url_for("manage.pdf_lab_review", session_id=session_id, index=review_index)
+        )
+    except Exception as exc:  # noqa: BLE001
+        current_app.logger.exception("PDF lab review update failed")
+        flash(f"리뷰 저장 실패: {exc}", "error")
+        return redirect(
+            url_for("manage.pdf_lab_review", session_id=session_id, index=review_index)
+        )
+
+    total_questions = len(bundle["questions"])
+    navigation = (request.form.get("navigation") or "stay").strip().lower()
+    if navigation == "prev":
+        target_index = max(1, review_index - 1)
+    elif navigation == "next":
+        target_index = min(total_questions, review_index + 1)
+    elif navigation == "next_pending":
+        pending_indices = [
+            int(item["review_index"])
+            for item in bundle["review"]["items"]
+            if item["status"] == REVIEW_STATUS_PENDING and int(item["review_index"]) > review_index
+        ]
+        if not pending_indices:
+            pending_indices = [
+                int(item["review_index"])
+                for item in bundle["review"]["items"]
+                if item["status"] == REVIEW_STATUS_PENDING
+            ]
+        target_index = pending_indices[0] if pending_indices else review_index
+    else:
+        target_index = review_index
+
+    flash("문항 평가가 저장되었습니다.", "success")
+    return redirect(
+        url_for("manage.pdf_lab_review", session_id=session_id, index=target_index)
+    )
+
+
+@manage_bp.route("/pdf-lab/<session_id>/delete", methods=["POST"])
+def delete_pdf_lab_review_session(session_id):
+    user = _require_pdf_lab_access()
+    if user is None:
+        return redirect(url_for("manage.dashboard"))
+
+    try:
+        meta = delete_pdf_lab_session(session_id, root_dir=_pdf_lab_root())
+    except FileNotFoundError:
+        flash("실험실 세션을 찾을 수 없습니다.", "error")
+    except Exception as exc:  # noqa: BLE001
+        current_app.logger.exception("PDF lab session delete failed")
+        flash(f"실험실 세션 삭제 실패: {exc}", "error")
+    else:
+        flash(
+            f"실험실 세션을 삭제했습니다: {meta.get('title') or session_id}",
+            "success",
+        )
+
+    return redirect(url_for("manage.pdf_lab"))
+
+
+@manage_bp.route("/pdf-lab/<session_id>/files/<path:relative_path>")
+def pdf_lab_file(session_id, relative_path):
+    user = _require_pdf_lab_access()
+    if user is None:
+        return redirect(url_for("manage.dashboard"))
+
+    try:
+        target = resolve_pdf_lab_session_file(
+            session_id,
+            relative_path,
+            root_dir=_pdf_lab_root(),
+        )
+    except (FileNotFoundError, ValueError):
+        abort(404)
+
+    if not target.exists() or not target.is_file():
+        abort(404)
+
+    as_attachment = request.args.get("download") == "1"
+    return send_file(
+        target,
+        as_attachment=as_attachment,
+        download_name=target.name if as_attachment else None,
     )
 
 
@@ -925,10 +1242,7 @@ def upload_pdf():
         crop_dir = None
         try:
             parser_mode = current_app.config.get("PDF_PARSER_MODE", "legacy")
-            if parser_mode == "experimental":
-                from app.services.pdf_parser_experimental import parse_pdf_to_questions
-            else:
-                from app.services.pdf_parser import parse_pdf_to_questions
+            from app.services.pdf_parser_factory import parse_pdf
 
             # PDF 파일 임시 저장
             crop_question_count = 0
@@ -946,8 +1260,11 @@ def upload_pdf():
 
             # PDF 파싱 (이미지는 uploads 폴더에 저장)
             upload_folder = current_app.config["UPLOAD_FOLDER"]
-            questions_data = parse_pdf_to_questions(
-                tmp_path, upload_folder, exam_prefix
+            questions_data = parse_pdf(
+                tmp_path,
+                upload_folder,
+                exam_prefix,
+                mode=parser_mode,
             )
 
             # 임시 파일 삭제

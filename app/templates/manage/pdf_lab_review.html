@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ session_meta.title }} - PDF 실험실</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 1660px;
+            margin: 0 auto;
+            padding: 1rem 1.2rem 1.5rem;
+        }
+
+        .flash-messages {
+            margin-bottom: 1rem;
+        }
+
+        .flash {
+            padding: 1rem;
+            border-radius: 10px;
+            margin-bottom: 0.75rem;
+        }
+
+        .flash.success {
+            background: rgba(46, 204, 113, 0.18);
+            color: #7ef0aa;
+        }
+
+        .flash.error {
+            background: rgba(231, 76, 60, 0.18);
+            color: #ff8d83;
+        }
+
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .topbar h1 {
+            font-size: 1.8rem;
+            margin-bottom: 0.35rem;
+        }
+
+        .topbar p {
+            color: #aab;
+            line-height: 1.6;
+        }
+
+        .topbar-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+            justify-content: flex-end;
+        }
+
+        .chip-link,
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.75rem 1rem;
+            border-radius: 10px;
+            text-decoration: none;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .chip-link:hover,
+        .btn:hover {
+            transform: translateY(-1px);
+        }
+
+        .chip-link {
+            background: rgba(255, 255, 255, 0.08);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .chip-link.danger {
+            background: rgba(231, 76, 60, 0.18);
+            color: #ffb5ad;
+            border-color: rgba(255, 141, 131, 0.28);
+        }
+
+        .topbar-links form {
+            margin: 0;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #7f9cff 0%, #5ac8fa 100%);
+            color: #071124;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: minmax(0, 2.3fr) minmax(280px, 340px);
+            gap: 1rem;
+            align-items: start;
+        }
+
+        .panel {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 1.05rem;
+            backdrop-filter: blur(12px);
+        }
+
+        .main-panel {
+            display: grid;
+            gap: 0.9rem;
+        }
+
+        .side-rail {
+            position: sticky;
+            top: 0.9rem;
+            display: grid;
+            gap: 0.8rem;
+            max-height: calc(100vh - 1.8rem);
+            overflow: auto;
+        }
+
+        .nav-strip {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+            gap: 0.35rem;
+        }
+
+        .nav-chip {
+            display: block;
+            padding: 0.52rem 0.25rem;
+            border-radius: 9px;
+            text-align: center;
+            text-decoration: none;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(8, 13, 28, 0.42);
+        }
+
+        .nav-chip.current {
+            border-color: rgba(127, 156, 255, 0.85);
+            box-shadow: 0 0 0 1px rgba(127, 156, 255, 0.35) inset;
+        }
+
+        .nav-chip.pending {
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .nav-chip.ok {
+            background: rgba(46, 204, 113, 0.18);
+        }
+
+        .nav-chip.issue {
+            background: rgba(231, 76, 60, 0.22);
+        }
+
+        .question-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 0.8rem;
+        }
+
+        .question-header h2 {
+            font-size: 1.45rem;
+            line-height: 1.3;
+        }
+
+        .question-meta {
+            color: #aab;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            margin-top: 0.3rem;
+        }
+
+        .badge {
+            padding: 0.35rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            font-weight: 700;
+        }
+
+        .badge.pending {
+            background: rgba(255, 255, 255, 0.1);
+            color: #d6dbeb;
+        }
+
+        .badge.ok {
+            background: rgba(46, 204, 113, 0.18);
+            color: #7ef0aa;
+        }
+
+        .badge.issue {
+            background: rgba(231, 76, 60, 0.22);
+            color: #ff9990;
+        }
+
+        .viewer-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1.58fr) minmax(280px, 0.92fr);
+            gap: 0.85rem;
+        }
+
+        .viewer-grid.single {
+            grid-template-columns: 1fr;
+        }
+
+        .subpanel {
+            background: rgba(8, 13, 28, 0.45);
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 0.95rem;
+        }
+
+        .subpanel h3 {
+            margin-bottom: 0.7rem;
+            font-size: 0.96rem;
+            letter-spacing: 0.02em;
+            color: #cbd8ff;
+        }
+
+        .content-box,
+        .answer-box,
+        .comment-preview {
+            line-height: 1.8;
+            white-space: pre-wrap;
+            color: #edf2ff;
+        }
+
+        .question-stem {
+            font-size: 1.12rem;
+            letter-spacing: 0.01em;
+            padding: 1rem 1.05rem;
+            border-radius: 14px;
+            background: linear-gradient(180deg, rgba(14, 22, 48, 0.82) 0%, rgba(9, 14, 29, 0.62) 100%);
+            border: 1px solid rgba(127, 156, 255, 0.16);
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+        }
+
+        .content-box.empty {
+            color: #94a0bf;
+        }
+
+        .image {
+            width: 100%;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .image + .image {
+            margin-top: 0.8rem;
+        }
+
+        .empty-image {
+            padding: 1.5rem;
+            text-align: center;
+            border: 1px dashed rgba(255, 255, 255, 0.14);
+            border-radius: 12px;
+            color: #94a0bf;
+            line-height: 1.6;
+        }
+
+        .choices {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 0.55rem;
+            margin-top: 0.85rem;
+            align-items: start;
+        }
+
+        .choice {
+            padding: 0.62rem 0.72rem;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.045);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.015);
+            display: grid;
+            gap: 0.22rem;
+            align-content: start;
+            min-height: 0;
+        }
+
+        .choice.has-image {
+            grid-column: 1 / -1;
+        }
+
+        .choice.correct {
+            border-color: rgba(46, 204, 113, 0.45);
+            background: rgba(46, 204, 113, 0.12);
+        }
+
+        .choice-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.7rem;
+            margin-bottom: 0.12rem;
+            align-items: baseline;
+        }
+
+        .choice-number {
+            color: #99b9ff;
+            font-weight: 700;
+        }
+
+        .choice-tag {
+            color: #7ef0aa;
+            font-size: 0.82rem;
+            font-weight: 700;
+        }
+
+        .choice-text {
+            font-size: 1rem;
+            line-height: 1.42;
+            color: #eef3ff;
+            white-space: normal;
+            word-break: keep-all;
+        }
+
+        .choice-text.empty {
+            color: #94a0bf;
+        }
+
+        .choice-image {
+            margin-top: 0.35rem;
+            max-height: 240px;
+            object-fit: contain;
+        }
+
+        .form-grid {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .status-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+        }
+
+        .status-option {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.58rem 0.8rem;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .status-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+        }
+
+        .hint-key {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.76rem;
+            color: #cbd8ff;
+            padding: 0.12rem 0.38rem;
+            border-radius: 999px;
+            background: rgba(127, 156, 255, 0.12);
+            border: 1px solid rgba(127, 156, 255, 0.16);
+            white-space: nowrap;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 116px;
+            padding: 0.85rem 0.95rem;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(8, 13, 28, 0.55);
+            color: #fff;
+            resize: vertical;
+            font: inherit;
+        }
+
+        .button-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+        }
+
+        .shortcut-list {
+            display: grid;
+            gap: 0.42rem;
+        }
+
+        .shortcut-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.8rem;
+            padding: 0.5rem 0.65rem;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            font-size: 0.9rem;
+        }
+
+        .shortcut-key {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.82rem;
+            color: #d8e4ff;
+            padding: 0.16rem 0.45rem;
+            border-radius: 8px;
+            background: rgba(127, 156, 255, 0.14);
+            border: 1px solid rgba(127, 156, 255, 0.16);
+            white-space: nowrap;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+
+        .summary-box {
+            padding: 0.95rem;
+            border-radius: 12px;
+            background: rgba(8, 13, 28, 0.45);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .summary-box .number {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #9ec2ff;
+        }
+
+        .summary-box .label {
+            color: #aab;
+            margin-top: 0.25rem;
+            font-size: 0.88rem;
+        }
+
+        .issue-list {
+            display: grid;
+            gap: 0.65rem;
+        }
+
+        .issue-card {
+            padding: 0.95rem;
+            border-radius: 12px;
+            background: rgba(231, 76, 60, 0.12);
+            border: 1px solid rgba(231, 76, 60, 0.16);
+        }
+
+        .issue-card a {
+            color: #fff;
+            text-decoration: none;
+            font-weight: 700;
+        }
+
+        .issue-card p {
+            color: #f4d6d2;
+            margin-top: 0.45rem;
+            line-height: 1.6;
+        }
+
+        .muted {
+            color: #aab;
+        }
+
+        .rail-section {
+            display: grid;
+            gap: 0.7rem;
+        }
+
+        .rail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .rail-header h2,
+        .rail-header h3 {
+            font-size: 1rem;
+        }
+
+        @media (max-width: 1080px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+
+            .side-rail {
+                position: static;
+                max-height: none;
+                overflow: visible;
+            }
+
+            .viewer-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .choices {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 760px) {
+            .container {
+                padding: 1rem;
+            }
+
+            .topbar {
+                flex-direction: column;
+            }
+
+            .topbar-links {
+                justify-content: flex-start;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="topbar">
+            <div>
+                <h1>{{ session_meta.title }}</h1>
+                <p>{{ session_meta.source_filename }} · 생성 {{ session_meta.created_at }} · 파서 {{ session_meta.parser_mode }}</p>
+            </div>
+            <div class="topbar-links">
+                <a class="chip-link" href="{{ url_for('manage.pdf_lab') }}">실험실 목록</a>
+                <a class="chip-link" href="{{ url_for('manage.pdf_lab_file', session_id=session_meta.id, relative_path='report.md', download=1) }}">Markdown</a>
+                <a class="chip-link" href="{{ url_for('manage.pdf_lab_file', session_id=session_meta.id, relative_path='report.json', download=1) }}">JSON</a>
+                <a class="chip-link" href="{{ url_for('manage.pdf_lab_file', session_id=session_meta.id, relative_path=session_meta.stored_pdf_name, download=1) }}">원본 PDF</a>
+                <form method="post" action="{{ url_for('manage.delete_pdf_lab_review_session', session_id=session_meta.id) }}" onsubmit="return confirm('이 실험실 세션을 삭제할까요?');">
+                    <button class="chip-link danger" type="submit">세션 삭제</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="layout">
+            <main class="panel main-panel">
+                <div class="question-header">
+                    <div>
+                        <h2>리뷰 {{ current_question.review_index }} / {{ total_questions }} · Q{{ current_question.question_number }}</h2>
+                        <div class="question-meta">
+                            답안 감지: {{ current_question.answer_options or '-' }}{% if current_question.answer_text %} · {{ current_question.answer_text }}{% endif %}
+                            {% if current_question.examiner %}<br>출제자: {{ current_question.examiner }}{% endif %}
+                        </div>
+                    </div>
+                    <div class="badge {{ review_item.status }}">
+                        {% if review_item.status == review_status_pending %}보류{% elif review_item.status == review_status_ok %}정상{% else %}이상{% endif %}
+                    </div>
+                </div>
+
+                <div class="viewer-grid {{ 'single' if not current_question.crop_url }}">
+                    <section class="subpanel">
+                        <h3>파싱 결과</h3>
+                        <div class="content-box question-stem {{ 'empty' if not current_question.content }}">
+                            {{ current_question.content or '(텍스트 없음)' }}
+                        </div>
+
+                        {% if current_question.image_url %}
+                        <img class="image" src="{{ current_question.image_url }}" alt="문항 이미지">
+                        {% endif %}
+
+                        {% if current_question.options %}
+                        <div class="choices">
+                            {% for option in current_question.options %}
+                            <div class="choice {{ 'correct' if option.is_correct }} {{ 'has-image' if option.image_url }}">
+                                <div class="choice-head">
+                                    <span class="choice-number">{{ option.number }})</span>
+                                    {% if option.is_correct %}<span class="choice-tag">정답 감지</span>{% endif %}
+                                </div>
+                                <div class="choice-text {{ 'empty' if not option.content }}">
+                                    {{ option.content or '(텍스트 없음)' }}
+                                </div>
+                                {% if option.image_url %}
+                                <img class="image choice-image" src="{{ option.image_url }}" alt="선지 이미지">
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="answer-box" style="margin-top: 1rem;">
+                            주관식 또는 선지 없음
+                        </div>
+                        {% endif %}
+                    </section>
+
+                    {% if current_question.crop_url %}
+                    <section class="subpanel">
+                        <h3>원문 문제 크롭</h3>
+                        <img class="image" src="{{ current_question.crop_url }}" alt="원문 문제 크롭">
+                    </section>
+                    {% endif %}
+                </div>
+
+                <section class="subpanel">
+                    <h3>문항 평가 저장</h3>
+                    <form class="form-grid" method="post" action="{{ url_for('manage.save_pdf_lab_review', session_id=session_meta.id) }}">
+                        <input type="hidden" name="review_index" value="{{ current_question.review_index }}">
+
+                        <div class="status-group">
+                            <label class="status-option">
+                                <input id="status-pending" type="radio" name="status" value="{{ review_status_pending }}" {{ 'checked' if review_item.status == review_status_pending }}>
+                                <span class="status-label">보류 <span class="hint-key">Cmd/Ctrl+1</span></span>
+                            </label>
+                            <label class="status-option">
+                                <input id="status-ok" type="radio" name="status" value="{{ review_status_ok }}" {{ 'checked' if review_item.status == review_status_ok }}>
+                                <span class="status-label">정상 <span class="hint-key">Cmd/Ctrl+2</span></span>
+                            </label>
+                            <label class="status-option">
+                                <input id="status-issue" type="radio" name="status" value="{{ review_status_issue }}" {{ 'checked' if review_item.status == review_status_issue }}>
+                                <span class="status-label">이상 <span class="hint-key">Cmd/Ctrl+3</span></span>
+                            </label>
+                        </div>
+
+                        <div>
+                            <textarea id="review-comment" name="comment" placeholder="예: 12번 문항에서 3) 선지가 2)와 합쳐짐 / 페이지 경계에서 문항이 끊김">{{ review_item.comment }}</textarea>
+                        </div>
+
+                        <div class="button-row">
+                            <button id="action-stay" class="btn btn-primary" type="submit" name="navigation" value="stay">저장 (Cmd/Ctrl+S)</button>
+                            {% if prev_index %}
+                            <button id="action-prev" class="btn btn-secondary" type="submit" name="navigation" value="prev">저장 후 이전 (Cmd/Ctrl+←)</button>
+                            {% endif %}
+                            {% if next_index %}
+                            <button id="action-next" class="btn btn-secondary" type="submit" name="navigation" value="next">저장 후 다음 (Cmd/Ctrl+→)</button>
+                            {% endif %}
+                            <button id="action-next-pending" class="btn btn-secondary" type="submit" name="navigation" value="next_pending">다음 미검토로 저장 (Cmd/Ctrl+J)</button>
+                        </div>
+                    </form>
+                </section>
+            </main>
+
+            <aside class="side-rail">
+                <section class="panel rail-section">
+                    <div class="rail-header">
+                        <h2>문항 네비게이션</h2>
+                        <span class="muted">{{ current_question.review_index }}/{{ total_questions }}</span>
+                    </div>
+                    <div class="nav-strip">
+                        {% for item in nav_items %}
+                        <a
+                            class="nav-chip {{ item.status }} {{ 'current' if item.review_index == current_question.review_index }}"
+                            href="{{ url_for('manage.pdf_lab_review', session_id=session_meta.id, index=item.review_index) }}"
+                        >
+                            {{ item.review_index }}
+                        </a>
+                        {% endfor %}
+                    </div>
+                </section>
+
+                <section class="panel rail-section">
+                    <div class="rail-header">
+                        <h3>단축키</h3>
+                        <span class="muted">빠른 입력</span>
+                    </div>
+                    <div class="shortcut-list">
+                        <div class="shortcut-item"><span>보류 선택</span><span class="shortcut-key">Cmd/Ctrl+1</span></div>
+                        <div class="shortcut-item"><span>정상 선택</span><span class="shortcut-key">Cmd/Ctrl+2</span></div>
+                        <div class="shortcut-item"><span>이상 선택</span><span class="shortcut-key">Cmd/Ctrl+3</span></div>
+                        <div class="shortcut-item"><span>저장</span><span class="shortcut-key">Cmd/Ctrl+S</span></div>
+                        <div class="shortcut-item"><span>저장 후 다음</span><span class="shortcut-key">Cmd/Ctrl+→</span></div>
+                        <div class="shortcut-item"><span>저장 후 이전</span><span class="shortcut-key">Cmd/Ctrl+←</span></div>
+                        <div class="shortcut-item"><span>다음 미검토 저장</span><span class="shortcut-key">Cmd/Ctrl+J</span></div>
+                        <div class="shortcut-item"><span>빠른 저장</span><span class="shortcut-key">Ctrl/Cmd+Enter</span></div>
+                    </div>
+                </section>
+
+                <section class="panel rail-section">
+                    <h2>세션 요약</h2>
+                    <p class="muted">저장할 때마다 리포트가 자동 갱신됩니다.</p>
+
+                    <div class="summary-grid">
+                        <div class="summary-box">
+                            <div class="number">{{ report.summary.question_count }}</div>
+                            <div class="label">전체 문항</div>
+                        </div>
+                        <div class="summary-box">
+                            <div class="number">{{ report.summary.reviewed_count }}</div>
+                            <div class="label">리뷰 완료</div>
+                        </div>
+                        <div class="summary-box">
+                            <div class="number">{{ report.summary.pending_count }}</div>
+                            <div class="label">남은 문항</div>
+                        </div>
+                        <div class="summary-box">
+                            <div class="number">{{ report.summary.issue_count }}</div>
+                            <div class="label">이상 문항</div>
+                        </div>
+                    </div>
+
+                    {% if session_meta.crop_error %}
+                    <div class="issue-card">
+                        <strong>원문 크롭 경고</strong>
+                        <p>{{ session_meta.crop_error }}</p>
+                    </div>
+                    {% endif %}
+                </section>
+
+                <section class="panel rail-section">
+                    <div class="rail-header">
+                        <h3>이상 문항</h3>
+                        <span class="muted">{{ report.summary.issue_count }}건</span>
+                    </div>
+                    <div class="issue-list">
+                        {% if report.issues %}
+                        {% for issue in report.issues %}
+                        <article class="issue-card">
+                            <a href="{{ url_for('manage.pdf_lab_review', session_id=session_meta.id, index=issue.review_index) }}">
+                                리뷰 {{ issue.review_index }} · Q{{ issue.question_number }}
+                            </a>
+                            <p>{{ issue.comment or issue.excerpt }}</p>
+                        </article>
+                        {% endfor %}
+                        {% else %}
+                        <div class="subpanel">
+                            <h3>이상 문항 없음</h3>
+                            <p class="muted">아직 이상으로 체크된 문항이 없습니다.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </section>
+            </aside>
+        </div>
+    </div>
+    <script>
+        (function () {
+            const statusPending = document.getElementById('status-pending');
+            const statusOk = document.getElementById('status-ok');
+            const statusIssue = document.getElementById('status-issue');
+            const actionStay = document.getElementById('action-stay');
+            const actionPrev = document.getElementById('action-prev');
+            const actionNext = document.getElementById('action-next');
+            const actionNextPending = document.getElementById('action-next-pending');
+            const commentField = document.getElementById('review-comment');
+
+            function clickButton(button) {
+                if (button) {
+                    button.click();
+                }
+            }
+
+            document.addEventListener('keydown', function (event) {
+                const key = (event.key || '').toLowerCase();
+
+                if ((event.metaKey || event.ctrlKey) && key === 'enter') {
+                    event.preventDefault();
+                    clickButton(actionStay);
+                    return;
+                }
+
+                if (!(event.metaKey || event.ctrlKey) || event.altKey) {
+                    return;
+                }
+
+                if (key === '1' && statusPending) {
+                    event.preventDefault();
+                    statusPending.checked = true;
+                    return;
+                }
+                if (key === '2' && statusOk) {
+                    event.preventDefault();
+                    statusOk.checked = true;
+                    return;
+                }
+                if (key === '3' && statusIssue) {
+                    event.preventDefault();
+                    statusIssue.checked = true;
+                    return;
+                }
+                if (key === 's') {
+                    event.preventDefault();
+                    clickButton(actionStay);
+                    return;
+                }
+                if (key === 'arrowright') {
+                    event.preventDefault();
+                    clickButton(actionNext);
+                    return;
+                }
+                if (key === 'arrowleft') {
+                    event.preventDefault();
+                    clickButton(actionPrev);
+                    return;
+                }
+                if (key === 'j') {
+                    event.preventDefault();
+                    clickButton(actionNextPending);
+                }
+            });
+
+            if (commentField && !commentField.value.trim()) {
+                commentField.focus();
+            }
+        }());
+    </script>
+</body>
+
+</html>

@@ -214,6 +214,14 @@ def create_app(
     app.config["PDF_PARSER_MODE"] = cfg.experiment.pdf_parser_mode
     app.config["CORS_ALLOWED_ORIGINS"] = cfg.runtime.cors_allowed_origins
     app.config["CORS_ALLOW_CREDENTIALS"] = True
+    app.config["LEGACY_UI_PIN"] = os.getenv("LEGACY_UI_PIN", "4242")
+    app.config["LEGACY_UI_TRUSTED_EMAIL"] = os.getenv(
+        "LEGACY_UI_TRUSTED_EMAIL",
+        "hisukgyu@gmail.com",
+    ).strip().lower()
+    app.config["LEGACY_UI_LOCAL_ONLY"] = (
+        os.getenv("LEGACY_UI_LOCAL_ONLY", "1").strip().lower() not in {"0", "false", "no"}
+    )
 
     # Legacy config mirror: get_config() is now the single source of truth.
     # Services migrated to use get_config() directly, no full mirror needed.
@@ -233,6 +241,57 @@ def create_app(
     # SQLAlchemy 초기화
     db.init_app(app)
     jwt.init_app(app)
+
+    from app.services.api_response import error_response
+    from app.services.user_scope import (
+        build_legacy_access_redirect,
+        should_redirect_to_legacy_access,
+    )
+
+    def _jwt_error_response(message: str, *, redirect_message: str | None = None):
+        if should_redirect_to_legacy_access(require=True, error=True):
+            return build_legacy_access_redirect(redirect_message or message)
+        return error_response(
+            message=message,
+            code="UNAUTHORIZED",
+            status=401,
+            legacy={"msg": message},
+        )
+
+    @jwt.unauthorized_loader
+    def handle_missing_jwt(reason: str):
+        return _jwt_error_response(
+            "Authentication required.",
+            redirect_message="로그인이 필요합니다.",
+        )
+
+    @jwt.invalid_token_loader
+    def handle_invalid_jwt(reason: str):
+        return _jwt_error_response(
+            reason or "Invalid token.",
+            redirect_message="세션이 유효하지 않습니다. 다시 로그인해주세요.",
+        )
+
+    @jwt.expired_token_loader
+    def handle_expired_jwt(jwt_header, jwt_payload):
+        return _jwt_error_response(
+            "Token has expired",
+            redirect_message="세션이 만료되었습니다. 다시 로그인해주세요.",
+        )
+
+    @jwt.revoked_token_loader
+    def handle_revoked_jwt(jwt_header, jwt_payload):
+        return _jwt_error_response(
+            "Token has been revoked",
+            redirect_message="세션이 만료되었습니다. 다시 로그인해주세요.",
+        )
+
+    @jwt.needs_fresh_token_loader
+    def handle_needs_fresh_jwt(jwt_header, jwt_payload):
+        return _jwt_error_response(
+            "Fresh token required",
+            redirect_message="다시 로그인 후 시도해주세요.",
+        )
 
     # Backward-compatible schema patch for existing DB volumes.
     with app.app_context():

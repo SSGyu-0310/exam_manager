@@ -1,4 +1,5 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 
 import type {
@@ -12,6 +13,7 @@ import { LectureCard } from "@/components/lectures/LectureCard";
 import { LectureEmptyState } from "@/components/lectures/LectureEmptyState";
 import { LectureHeader } from "@/components/lectures/LectureHeader";
 import { useLectureQuestionCounts } from "@/components/lectures/useLectureQuestionCounts";
+import { cn } from "@/lib/utils";
 
 type LectureGridProps = {
   blocks: Block[];
@@ -37,6 +39,7 @@ export function LectureGrid({
   onSortChange,
 }: LectureGridProps) {
   const { t } = useLanguage();
+  const [openBlocks, setOpenBlocks] = useState<Record<string, boolean>>({});
   const normalizedBlocks = useMemo<NormalizedBlock[]>(
     () =>
       (blocks ?? []).map((block) => ({
@@ -158,6 +161,22 @@ export function LectureGrid({
     [sortedBlocks]
   );
 
+  useEffect(() => {
+    if (!visibleBlocks.length) {
+      setOpenBlocks({});
+      return;
+    }
+
+    setOpenBlocks((prev) => {
+      const next: Record<string, boolean> = {};
+      visibleBlocks.forEach((block, blockIndex) => {
+        const blockKey = String(block.blockId ?? block.title ?? `block-${blockIndex}`);
+        next[blockKey] = prev[blockKey] ?? true;
+      });
+      return next;
+    });
+  }, [visibleBlocks]);
+
   const totalCount = useMemo(() => {
     return normalizedBlocks.reduce((sum, block) => sum + block.lectures.length, 0);
   }, [normalizedBlocks]);
@@ -167,6 +186,10 @@ export function LectureGrid({
   }, [filteredBlocks]);
 
   const hasLectures = visibleBlocks.length > 0;
+
+  const toggleBlock = useCallback((blockKey: string) => {
+    setOpenBlocks((prev) => ({ ...prev, [blockKey]: !prev[blockKey] }));
+  }, []);
 
   const quickStartAction = (() => {
     let firstStartHref: string | null = null;
@@ -224,36 +247,57 @@ export function LectureGrid({
             </div>
           )}
           {visibleBlocks.map((block, blockIndex) => {
-            const blockKey = block.blockId ?? block.title ?? `block-${blockIndex}`;
+            const blockKey = String(block.blockId ?? block.title ?? `block-${blockIndex}`);
             const blockTitle = block.title?.trim();
             const showHeader = Boolean(blockTitle) || visibleBlocks.length > 1;
+            const isOpen = openBlocks[blockKey] ?? true;
             return (
               <section key={blockKey} id={`lecture-block-${blockIndex}`} className="space-y-3">
                 {showHeader && (
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.25em] text-muted-foreground">
-                        {t("learn.block")}
-                      </p>
-                      <h2 className="text-xl font-semibold text-foreground">
-                        {blockTitle ?? t("learn.untitledBlock")}
-                      </h2>
-                    </div>
-                    <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
+                    <button
+                      type="button"
+                      onClick={() => toggleBlock(blockKey)}
+                      className="group flex min-w-0 flex-1 items-center gap-3 rounded-xl px-1 py-1 text-left transition hover:bg-muted/40"
+                    >
+                      <span className="mt-5 text-muted-foreground">
+                        {isOpen ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4" />
+                        )}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-[0.25em] text-muted-foreground">
+                          {t("learn.block")}
+                        </p>
+                        <h2 className="truncate text-xl font-semibold text-foreground">
+                          {blockTitle ?? t("learn.untitledBlock")}
+                        </h2>
+                      </div>
+                    </button>
+                    <span
+                      className={cn(
+                        "rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground",
+                        !isOpen && "bg-secondary/70"
+                      )}
+                    >
                       {block.lectures.length} {t("learn.lecturesCount")}
                     </span>
                   </div>
                 )}
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  {block.lectures.map((lecture, lectureIndex) => (
-                    <LectureCard
-                      key={lecture.id ?? lecture.title ?? `${blockKey}-${lectureIndex}`}
-                      lecture={lecture}
-                      questionCount={getLectureCount(lecture)}
-                      studyMeta={getLectureStudyMeta(lecture)}
-                    />
-                  ))}
-                </div>
+                {isOpen && (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {block.lectures.map((lecture, lectureIndex) => (
+                      <LectureCard
+                        key={lecture.id ?? lecture.title ?? `${blockKey}-${lectureIndex}`}
+                        lecture={lecture}
+                        questionCount={getLectureCount(lecture)}
+                        studyMeta={getLectureStudyMeta(lecture)}
+                      />
+                    ))}
+                  </div>
+                )}
               </section>
             );
           })}

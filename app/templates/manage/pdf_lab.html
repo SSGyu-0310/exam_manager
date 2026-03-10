@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF 실험실</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .header-copy h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .header-copy p {
+            color: #aab;
+            line-height: 1.6;
+            max-width: 720px;
+        }
+
+        .header-links a {
+            color: #8fb3ff;
+            text-decoration: none;
+            margin-left: 1rem;
+        }
+
+        .flash-messages {
+            margin-bottom: 1rem;
+        }
+
+        .flash {
+            padding: 1rem;
+            border-radius: 10px;
+            margin-bottom: 0.75rem;
+        }
+
+        .flash.success {
+            background: rgba(46, 204, 113, 0.18);
+            color: #7ef0aa;
+        }
+
+        .flash.error {
+            background: rgba(231, 76, 60, 0.18);
+            color: #ff8d83;
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+            gap: 1.5rem;
+            align-items: start;
+        }
+
+        .panel {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 1.5rem;
+            backdrop-filter: blur(10px);
+        }
+
+        .panel h2 {
+            margin-bottom: 0.5rem;
+        }
+
+        .panel-subtitle {
+            color: #aab;
+            line-height: 1.6;
+            margin-bottom: 1.25rem;
+        }
+
+        .field {
+            margin-bottom: 1rem;
+        }
+
+        .field label {
+            display: block;
+            font-size: 0.9rem;
+            color: #cfd7ff;
+            margin-bottom: 0.4rem;
+        }
+
+        .field input[type="text"],
+        .field input[type="file"] {
+            width: 100%;
+            padding: 0.85rem 0.95rem;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            background: rgba(7, 11, 24, 0.5);
+            color: #fff;
+        }
+
+        .hint-box {
+            padding: 1rem;
+            border-radius: 12px;
+            background: rgba(102, 126, 234, 0.14);
+            color: #d8e2ff;
+            line-height: 1.6;
+            margin-bottom: 1rem;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.85rem 1.2rem;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #7f9cff 0%, #5ac8fa 100%);
+            color: #071124;
+            box-shadow: 0 12px 28px rgba(90, 200, 250, 0.18);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .btn-danger {
+            background: rgba(231, 76, 60, 0.18);
+            color: #ffb5ad;
+            border: 1px solid rgba(255, 141, 131, 0.28);
+        }
+
+        .session-list {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .session-card {
+            padding: 1.2rem;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .session-card header {
+            margin-bottom: 0.8rem;
+            align-items: center;
+        }
+
+        .session-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+
+        .session-meta {
+            color: #9fabcc;
+            font-size: 0.9rem;
+            margin-top: 0.3rem;
+            line-height: 1.5;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.75rem;
+            margin: 1rem 0;
+        }
+
+        .summary-box {
+            padding: 0.85rem;
+            border-radius: 12px;
+            background: rgba(9, 16, 36, 0.55);
+        }
+
+        .summary-box .number {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #9ec2ff;
+        }
+
+        .summary-box .label {
+            color: #9fabcc;
+            font-size: 0.85rem;
+            margin-top: 0.2rem;
+        }
+
+        .session-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+        }
+
+        .session-actions form {
+            margin: 0;
+        }
+
+        .crop-warning {
+            margin-top: 0.9rem;
+            color: #ffcf7a;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .empty-state {
+            border: 1px dashed rgba(255, 255, 255, 0.14);
+            border-radius: 14px;
+            padding: 2rem;
+            text-align: center;
+            color: #aab;
+            line-height: 1.7;
+        }
+
+        @media (max-width: 960px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+
+            header {
+                flex-direction: column;
+            }
+
+            .header-links a {
+                margin-left: 0;
+                margin-right: 1rem;
+            }
+        }
+
+        @media (max-width: 720px) {
+            .container {
+                padding: 1rem;
+            }
+
+            .summary-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="header-copy">
+                <h1>PDF 실험실</h1>
+                <p>PDF를 업로드하고 현재 운영 파서로 바로 분석한 뒤, 문항별로 이상 여부와 코멘트를 남길 수 있습니다. 세션별 결과는 JSON/Markdown 리포트로 누적됩니다.</p>
+            </div>
+            <div class="header-links">
+                <a href="{{ url_for('manage.dashboard') }}">← 대시보드</a>
+                <a href="{{ url_for('manage.list_exams') }}">시험 관리</a>
+            </div>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="layout">
+            <section class="panel">
+                <h2>새 실험 세션</h2>
+                <p class="panel-subtitle">현재 서버 설정 기준 파서 모드는 <strong>{{ parser_mode }}</strong>입니다. 업로드 후 바로 리뷰 화면으로 이동합니다.</p>
+
+                <div class="hint-box">
+                    추천 흐름: PDF 업로드 → 문항별 정상/이상 체크 → 코멘트 저장 → 세션별 `report.json`과 `report.md` 다운로드.
+                </div>
+
+                <form method="post" enctype="multipart/form-data">
+                    <div class="field">
+                        <label for="title">세션 이름 (선택)</label>
+                        <input id="title" type="text" name="title" placeholder="예: 생리학 2025-2차 파싱 점검">
+                    </div>
+                    <div class="field">
+                        <label for="pdf_file">PDF 파일</label>
+                        <input id="pdf_file" type="file" name="pdf_file" accept=".pdf,application/pdf" required>
+                    </div>
+                    <button class="btn btn-primary" type="submit">업로드 후 리뷰 시작</button>
+                </form>
+            </section>
+
+            <section class="panel">
+                <h2>최근 세션</h2>
+                <p class="panel-subtitle">중단된 세션도 이어서 리뷰할 수 있습니다. 이슈가 있는 문항은 세션 리포트에 자동 반영됩니다.</p>
+
+                {% if sessions %}
+                <div class="session-list">
+                    {% for session in sessions %}
+                    <article class="session-card">
+                        <header>
+                            <div>
+                                <div class="session-title">{{ session.title }}</div>
+                                <div class="session-meta">
+                                    {{ session.source_filename }} · {{ session.created_at }}<br>
+                                    생성자: {{ session.created_by or '-' }} · 파서: {{ session.parser_mode }}
+                                </div>
+                            </div>
+                        </header>
+
+                        <div class="summary-grid">
+                            <div class="summary-box">
+                                <div class="number">{{ session.summary.question_count }}</div>
+                                <div class="label">문항 수</div>
+                            </div>
+                            <div class="summary-box">
+                                <div class="number">{{ session.summary.reviewed_count }}</div>
+                                <div class="label">리뷰 완료</div>
+                            </div>
+                            <div class="summary-box">
+                                <div class="number">{{ session.summary.pending_count }}</div>
+                                <div class="label">남은 문항</div>
+                            </div>
+                            <div class="summary-box">
+                                <div class="number">{{ session.summary.issue_count }}</div>
+                                <div class="label">이상 문항</div>
+                            </div>
+                        </div>
+
+                        <div class="session-actions">
+                            <a class="btn btn-primary" href="{{ url_for('manage.pdf_lab_review', session_id=session.id) }}">리뷰 계속</a>
+                            <a class="btn btn-secondary" href="{{ url_for('manage.pdf_lab_file', session_id=session.id, relative_path='report.md', download=1) }}">Markdown</a>
+                            <a class="btn btn-secondary" href="{{ url_for('manage.pdf_lab_file', session_id=session.id, relative_path='report.json', download=1) }}">JSON</a>
+                            <a class="btn btn-secondary" href="{{ url_for('manage.pdf_lab_file', session_id=session.id, relative_path=session.stored_pdf_name, download=1) }}">원본 PDF</a>
+                            <form method="post" action="{{ url_for('manage.delete_pdf_lab_review_session', session_id=session.id) }}" onsubmit="return confirm('이 실험실 세션을 삭제할까요?');">
+                                <button class="btn btn-danger" type="submit">세션 삭제</button>
+                            </form>
+                        </div>
+
+                        {% if session.crop_error %}
+                        <div class="crop-warning">원문 크롭은 일부 준비되지 않았습니다: {{ session.crop_error }}</div>
+                        {% endif %}
+                    </article>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="empty-state">
+                    아직 생성된 실험 세션이 없습니다.<br>
+                    첫 PDF를 업로드해서 리뷰 데이터를 쌓기 시작하면 됩니다.
+                </div>
+                {% endif %}
+            </section>
+        </div>
+    </div>
+</body>
+
+</html>

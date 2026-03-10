@@ -9,6 +9,13 @@ import fitz  # PyMuPDF
 
 QUESTION_NUM_RE = re.compile(r"^\s*(\d{1,3})\.(?!\d)(?:\s+.*)?$")
 WHITESPACE_RE = re.compile(r"\s+")
+PANEL_COORD_TOL = 1.5
+PANEL_MIN_WIDTH = 180.0
+PANEL_MIN_HEIGHT = 22.0
+PANEL_MAX_LIGHT_GRAY = 0.82
+BANNER_PANEL_MAX_HEIGHT = 42.0
+BANNER_PANEL_MIN_ASPECT_RATIO = 8.0
+PANEL_INTERSECTION_MIN_RATIO = 0.1
 
 
 def is_grayish(col, gray_min=0.70, gray_max=0.95, equal_tol=0.06):
@@ -18,6 +25,143 @@ def is_grayish(col, gray_min=0.70, gray_max=0.95, equal_tol=0.06):
     if max(abs(r-g), abs(g-b), abs(r-b)) > equal_tol:
         return False
     return (gray_min <= r <= gray_max) and (gray_min <= g <= gray_max) and (gray_min <= b <= gray_max)
+
+
+def _coerce_gray_value(col):
+    if not col:
+        return None
+    if isinstance(col, (list, tuple)) and len(col) == 3:
+        try:
+            values = [float(v) for v in col]
+        except (TypeError, ValueError):
+            return None
+        if max(values) - min(values) > 0.08:
+            return None
+        return sum(values) / 3.0
+    if isinstance(col, (int, float)):
+        try:
+            return float(col)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _is_candidate_panel_border(color, width):
+    gray = _coerce_gray_value(color)
+    if gray is not None and gray > PANEL_MAX_LIGHT_GRAY:
+        return False
+    return float(width or 0.0) >= 0.5
+
+
+def _rect_area(rect: fitz.Rect) -> float:
+    return max(0.0, rect.width) * max(0.0, rect.height)
+
+
+def _panel_kind(rect: fitz.Rect) -> str:
+    aspect_ratio = rect.width / rect.height if rect.height > 0 else 0.0
+    if rect.height <= BANNER_PANEL_MAX_HEIGHT and aspect_ratio >= BANNER_PANEL_MIN_ASPECT_RATIO:
+        return "banner"
+    return "panel"
+
+
+def _normalize_drawing_line(item, coord_tol=PANEL_COORD_TOL):
+    if item[0] != "l":
+        return None
+    p1, p2 = item[1], item[2]
+    if abs(p1.y - p2.y) <= coord_tol:
+        return {
+            "orientation": "h",
+            "x0": min(p1.x, p2.x),
+            "x1": max(p1.x, p2.x),
+            "y": (p1.y + p2.y) / 2.0,
+        }
+    if abs(p1.x - p2.x) <= coord_tol:
+        return {
+            "orientation": "v",
+            "x": (p1.x + p2.x) / 2.0,
+            "top": min(p1.y, p2.y),
+            "bottom": max(p1.y, p2.y),
+        }
+    return None
+
+
+def _line_covers_horizontal(line, *, y, x0, x1, coord_tol=PANEL_COORD_TOL):
+    return (
+        line.get("orientation") == "h"
+        and abs(float(line["y"]) - y) <= coord_tol
+        and float(line["x0"]) <= x0 + coord_tol
+        and float(line["x1"]) >= x1 - coord_tol
+    )
+
+
+def detect_page_panels(page: fitz.Page,
+                       coord_tol: float = PANEL_COORD_TOL,
+                       min_width: float = PANEL_MIN_WIDTH,
+                       min_height: float = PANEL_MIN_HEIGHT):
+    drawings = page.get_drawings() or []
+    horizontal_lines = []
+    vertical_lines = []
+    panels: dict[tuple[float, float, float, float], dict] = {}
+
+    def register(rect: fitz.Rect):
+        if rect.width < min_width or rect.height < min_height:
+            return
+        key = tuple(round(v, 2) for v in (rect.x0, rect.y0, rect.x1, rect.y1))
+        panels[key] = {
+            "bbox": fitz.Rect(rect),
+            "kind": _panel_kind(rect),
+        }
+
+    for drawing in drawings:
+        color = drawing.get("color")
+        width = drawing.get("width")
+        if not _is_candidate_panel_border(color, width):
+            continue
+        for item in drawing.get("items", []):
+            if item[0] == "re":
+                register(fitz.Rect(item[1]))
+                continue
+            segment = _normalize_drawing_line(item, coord_tol=coord_tol)
+            if not segment:
+                continue
+            if segment["orientation"] == "h" and (segment["x1"] - segment["x0"]) >= min_width:
+                horizontal_lines.append(segment)
+            elif segment["orientation"] == "v" and (segment["bottom"] - segment["top"]) >= min_height:
+                vertical_lines.append(segment)
+
+    for left_index, left in enumerate(vertical_lines):
+        for right in vertical_lines[left_index + 1:]:
+            x0 = min(float(left["x"]), float(right["x"]))
+            x1 = max(float(left["x"]), float(right["x"]))
+            if x1 - x0 < min_width:
+                continue
+            top = (float(left["top"]) + float(right["top"])) / 2.0
+            bottom = (float(left["bottom"]) + float(right["bottom"])) / 2.0
+            if (
+                abs(float(left["top"]) - float(right["top"])) > coord_tol
+                or abs(float(left["bottom"]) - float(right["bottom"])) > coord_tol
+                or (bottom - top) < min_height
+            ):
+                continue
+            if not any(
+                _line_covers_horizontal(candidate, y=top, x0=x0, x1=x1, coord_tol=coord_tol)
+                for candidate in horizontal_lines
+            ):
+                continue
+            if not any(
+                _line_covers_horizontal(candidate, y=bottom, x0=x0, x1=x1, coord_tol=coord_tol)
+                for candidate in horizontal_lines
+            ):
+                continue
+            register(fitz.Rect(x0, top, x1, bottom))
+
+    sorted_panels = sorted(
+        panels.values(),
+        key=lambda item: (item["bbox"].y0, item["bbox"].x0, item["bbox"].y1, item["bbox"].x1),
+    )
+    for index, panel in enumerate(sorted_panels, start=1):
+        panel["panel_id"] = f"p{page.number + 1}-panel{index}"
+    return sorted_panels
 
 
 def get_horiz_gray_lines(page: fitz.Page,
@@ -203,7 +347,24 @@ def extract_question_number(
     return nums[0]
 
 
-def content_bbox_in_rect(page: fitz.Page, rect: fitz.Rect) -> fitz.Rect | None:
+def _normalize_continuation_candidate_qnum(
+    pdf_qnum: int | None,
+    *,
+    expected_qnum: int | None,
+    is_continuation_candidate: bool,
+) -> int | None:
+    if pdf_qnum is None or expected_qnum is None or not is_continuation_candidate:
+        return pdf_qnum
+    if pdf_qnum < max(1, expected_qnum - 3):
+        return None
+    return pdf_qnum
+
+
+def content_bbox_in_rect(
+    page: fitz.Page,
+    rect: fitz.Rect,
+    panels: list[dict] | None = None,
+) -> fitz.Rect | None:
     """
     Compute union bbox of text/image content within rect.
     If there is no content in rect, return None.
@@ -230,12 +391,34 @@ def content_bbox_in_rect(page: fitz.Page, rect: fitz.Rect) -> fitz.Rect | None:
     if not boxes:
         return None
 
-    u = boxes[0]
+    u = fitz.Rect(boxes[0])
     for bx in boxes[1:]:
         u |= bx
-    # intersect with input rect for safety
     u &= rect
-    return u
+
+    if panels:
+        for panel in panels:
+            panel_rect = fitz.Rect(panel["bbox"])
+            panel_in_rect = panel_rect & rect
+            if panel_in_rect.is_empty:
+                continue
+            overlap = panel_in_rect & u
+            panel_area = _rect_area(panel_in_rect)
+            content_area = _rect_area(u)
+            overlap_ratio = _rect_area(overlap) / panel_area if panel_area > 0 else 0.0
+            center_x = (u.x0 + u.x1) / 2.0
+            center_y = (u.y0 + u.y1) / 2.0
+            center_inside = panel_in_rect.contains(fitz.Point(center_x, center_y))
+            content_overlap_ratio = (
+                _rect_area(overlap) / content_area if content_area > 0 else 0.0
+            )
+            if not center_inside and overlap_ratio < PANEL_INTERSECTION_MIN_RATIO and content_overlap_ratio < 0.5:
+                continue
+            if not count_text_chars_in_rect(page, panel_in_rect) and not has_image_block_in_rect(page, panel_in_rect):
+                continue
+            u |= panel_in_rect
+
+    return u & rect
 
 
 def build_segments_from_boundaries(page: fitz.Page, boundaries: list[float], pad_top=2.0, pad_bottom=2.0):
@@ -300,6 +483,7 @@ def crop_with_merge_contentaware(pdf_path: str,
         page = doc[pi]
         H = page.rect.height
         W = page.rect.width
+        panels = detect_page_panels(page)
 
         real_lines = get_horiz_gray_lines(page)
 
@@ -340,6 +524,11 @@ def crop_with_merge_contentaware(pdf_path: str,
 
                 # Continuation filtering logic:
                 is_continuation_candidate = (prev_page_open and not is_first_content_found)
+                pdf_qnum = _normalize_continuation_candidate_qnum(
+                    pdf_qnum,
+                    expected_qnum=next_qnum,
+                    is_continuation_candidate=is_continuation_candidate,
+                )
 
                 current_min_height = 15.0 if is_continuation_candidate else min_height
                 current_min_chars = 10 if is_continuation_candidate else min_chars
@@ -359,7 +548,7 @@ def crop_with_merge_contentaware(pdf_path: str,
                 # 유효한 컨텐츠를 찾았으므로 플래그 설정
                 is_first_content_found = True
 
-                cb = content_bbox_in_rect(page, seg_rect)
+                cb = content_bbox_in_rect(page, seg_rect, panels=panels)
                 if cb is None:
                     continue
 
@@ -528,6 +717,14 @@ def crop_with_merge_contentaware(pdf_path: str,
         },
         "questions": questions
     }
+    qnum_counts: dict[int, int] = {}
+    for question in questions:
+        qnum = question.get("qnum")
+        if isinstance(qnum, int):
+            qnum_counts[qnum] = qnum_counts.get(qnum, 0) + 1
+    duplicate_qnums = sorted(qnum for qnum, count in qnum_counts.items() if count > 1)
+    if duplicate_qnums:
+        meta["duplicate_qnums"] = duplicate_qnums
     with open(os.path.join(out_dir, "bboxes.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 

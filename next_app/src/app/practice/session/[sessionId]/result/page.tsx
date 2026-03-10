@@ -638,21 +638,16 @@ export default function PracticeResultPage() {
   const [editedCorrectAnswerText, setEditedCorrectAnswerText] = useState("");
   const latestEditQuestionIdRef = useRef<string | null>(null);
   const [showCropImage, setShowCropImage] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => [
-    {
-      id: "assistant-welcome",
-      role: "assistant",
-      content:
-        "현재 보고 있는 문제 JSON을 함께 보내서 해설해드립니다. 질문을 입력하거나 아래 기본 해설 요청 버튼을 눌러주세요.",
-      createdAt: Date.now(),
-    },
-  ]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
-  const [chatModelName, setChatModelName] = useState(DEFAULT_PRACTICE_CHAT_MODEL);
   const chatMessagesRef = useRef<ChatMessage[]>([]);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const chatMessageElementRefs = useRef<Record<string, HTMLElement | null>>({});
+  const pendingChatScrollRef = useRef<
+    { mode: "bottom" } | { mode: "start"; messageId: string } | null
+  >(null);
   const [savingExplanationMessageId, setSavingExplanationMessageId] =
     useState<string | null>(null);
   const [savedExplanationByMessageId, setSavedExplanationByMessageId] = useState<
@@ -670,19 +665,12 @@ export default function PracticeResultPage() {
     setLoading(true);
     setChatInput("");
     setChatError(null);
-    setChatModelName(DEFAULT_PRACTICE_CHAT_MODEL);
     setSavingExplanationMessageId(null);
     setSavedExplanationByMessageId({});
     setExplanationSaveErrorByMessageId({});
-    setChatMessages([
-      {
-        id: "assistant-welcome",
-        role: "assistant",
-        content:
-          "현재 보고 있는 문제 JSON을 함께 보내서 해설해드립니다. 질문을 입력하거나 아래 기본 해설 요청 버튼을 눌러주세요.",
-        createdAt: Date.now(),
-      },
-    ]);
+    pendingChatScrollRef.current = null;
+    chatMessageElementRefs.current = {};
+    setChatMessages([]);
     const stored = sessionStorage.getItem(`practice:result:${sessionId}`);
     if (stored) {
       try {
@@ -707,11 +695,29 @@ export default function PracticeResultPage() {
   }, [chatMessages]);
 
   useEffect(() => {
-    if (!chatScrollRef.current) {
+    const pendingScroll = pendingChatScrollRef.current;
+    if (!chatScrollRef.current || !pendingScroll) {
       return;
     }
     const container = chatScrollRef.current;
-    container.scrollTop = container.scrollHeight;
+    const rafId = window.requestAnimationFrame(() => {
+      if (pendingScroll.mode === "bottom") {
+        container.scrollTop = container.scrollHeight;
+      } else {
+        const messageElement =
+          chatMessageElementRefs.current[pendingScroll.messageId];
+        if (messageElement) {
+          container.scrollTop = Math.max(
+            0,
+            messageElement.offsetTop - 12
+          );
+        }
+      }
+      pendingChatScrollRef.current = null;
+    });
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
   }, [chatMessages, chatLoading]);
 
   useEffect(() => {
@@ -973,10 +979,10 @@ export default function PracticeResultPage() {
         createdAt: Date.now(),
       };
       const historyForRequest = chatMessagesRef.current
-        .filter((item) => item.id !== "assistant-welcome")
         .slice(-12)
         .map((item) => ({ role: item.role, content: item.content }));
 
+      pendingChatScrollRef.current = { mode: "bottom" };
       setChatMessages((prev) => [...prev, userMessage]);
       setChatInput("");
       setChatError(null);
@@ -994,12 +1000,16 @@ export default function PracticeResultPage() {
             currentQuestion: activeQuestionPayload,
           }),
         });
-        const { reply, model } = extractPracticeChatReply(payload);
-        setChatModelName(model);
+        const { reply } = extractPracticeChatReply(payload);
+        const assistantMessageId = `assistant-${Date.now()}`;
+        pendingChatScrollRef.current =
+          source === "default_explanation"
+            ? { mode: "start", messageId: assistantMessageId }
+            : { mode: "bottom" };
         setChatMessages((prev) => [
           ...prev,
           {
-            id: `assistant-${Date.now()}`,
+            id: assistantMessageId,
             role: "assistant",
             content: reply,
             createdAt: Date.now(),
@@ -1508,8 +1518,8 @@ export default function PracticeResultPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen px-4 py-6">
-        <div className="mx-auto w-full max-w-screen-xl space-y-6">
+      <div className="min-h-screen px-4 py-4">
+        <div className="mx-auto w-full max-w-[1520px] space-y-4">
           <div className="h-10 w-40 animate-pulse rounded-full bg-muted" />
           <div className="h-32 animate-pulse rounded-3xl bg-muted" />
           <div className="h-64 animate-pulse rounded-3xl bg-muted" />
@@ -1520,8 +1530,8 @@ export default function PracticeResultPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen px-4 py-6">
-        <div className="mx-auto w-full max-w-screen-xl">
+      <div className="min-h-screen px-4 py-4">
+        <div className="mx-auto w-full max-w-[1520px]">
           <Card className="border border-danger/30 bg-danger/10">
             <CardContent className="space-y-2 p-6">
               <p className="text-lg font-semibold text-foreground">{t("practiceResult.errorLoad")}</p>
@@ -1537,13 +1547,13 @@ export default function PracticeResultPage() {
   }
 
   return (
-    <div className="min-h-screen px-4 py-6">
-      <div className="mx-auto w-full max-w-screen-xl space-y-6">
+    <div className="min-h-screen px-4 py-4">
+      <div className="mx-auto w-full max-w-[1520px] space-y-4">
         <Card className="border border-border/70 bg-card/90 shadow-soft">
-          <CardContent className="p-5">
+          <CardContent className="p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0 space-y-2">
-                <h1 className="truncate text-3xl font-semibold text-foreground">
+              <div className="min-w-0 space-y-1.5">
+                <h1 className="truncate text-[2rem] font-semibold text-foreground">
                   {storedResult?.lectureTitle || storedResult?.examTitle || t("practiceResult.sessionSummary")}
                 </h1>
                 <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
@@ -1555,8 +1565,8 @@ export default function PracticeResultPage() {
                 </div>
               </div>
               <div className="shrink-0">
-                <div className="relative h-24 w-24">
-                  <svg className="h-24 w-24" viewBox="0 0 96 96" aria-hidden="true">
+                <div className="relative h-20 w-20">
+                  <svg className="h-20 w-20" viewBox="0 0 96 96" aria-hidden="true">
                     <circle
                       cx="48"
                       cy="48"
@@ -1580,7 +1590,7 @@ export default function PracticeResultPage() {
                     />
                   </svg>
                   <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
-                    <span className="text-base font-bold text-foreground">{accuracyValue}%</span>
+                    <span className="text-sm font-bold text-foreground">{accuracyValue}%</span>
                     <span className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                       {t("practiceResult.metricAccuracy")}
                     </span>
@@ -1591,8 +1601,8 @@ export default function PracticeResultPage() {
           </CardContent>
         </Card>
 
-        <div className="grid gap-8 xl:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)]">
-          <div className="space-y-6">
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.75fr)_minmax(420px,1.05fr)]">
+          <div className="space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="inline-flex rounded-full border border-border/70 bg-muted/70 p-1 text-sm">
                 <button
@@ -2042,36 +2052,41 @@ export default function PracticeResultPage() {
             ) : null}
           </div>
 
-          <aside className="space-y-4 xl:sticky xl:top-24">
-            <Card className="overflow-hidden border border-border/70 bg-card/90 shadow-soft">
-              <CardContent className="p-0">
-                <div className="flex items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
-                  <div>
-                    <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                      <Bot className="h-3.5 w-3.5" />
-                      AI Tutor
-                    </p>
-                    <p className="text-xs text-muted-foreground">{chatModelName}</p>
-                  </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={handleAskDefaultExplanation}
-                    disabled={chatLoading || !activeQuestionPayload}
-                  >
-                    <Sparkles className="h-4 w-4" />
-                    기본 해설 요청
-                  </Button>
+          <aside className="space-y-3 xl:sticky xl:top-20">
+            <Card className="overflow-hidden border border-border/70 bg-card/90 shadow-soft xl:flex xl:h-[min(720px,calc(100vh-13.5rem))] xl:min-h-[620px] xl:flex-col">
+              <CardContent className="flex h-full flex-col p-0">
+                <div className="border-b border-border/70 px-4 py-2.5">
+                  <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    <Bot className="h-3.5 w-3.5" />
+                    AI Tutor
+                  </p>
                 </div>
 
                 <div
                   ref={chatScrollRef}
-                  className="min-h-[420px] max-h-[56vh] overflow-y-auto bg-card"
+                  className="min-h-[220px] flex-1 overflow-y-auto bg-card"
                 >
+                  {chatMessages.length === 0 && !chatLoading ? (
+                    <div className="flex min-h-[160px] items-start px-5 py-6 text-left">
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium text-foreground">
+                          질문을 입력하거나 기본 해설 요청으로 시작하세요.
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          현재 보고 있는 문제 기준으로 바로 설명합니다.
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
                   {chatMessages.map((message, index) =>
                     message.role === "user" ? (
-                      <div key={message.id} className="flex justify-end px-4 pb-2 pt-4">
+                      <div
+                        key={message.id}
+                        ref={(element) => {
+                          chatMessageElementRefs.current[message.id] = element;
+                        }}
+                        className="flex justify-end px-4 pb-2 pt-4"
+                      >
                         <p className="max-w-[90%] rounded-full bg-muted px-4 py-2 text-[13px] leading-relaxed text-foreground">
                           {message.content}
                         </p>
@@ -2079,6 +2094,9 @@ export default function PracticeResultPage() {
                     ) : (
                       <article
                         key={message.id}
+                        ref={(element) => {
+                          chatMessageElementRefs.current[message.id] = element;
+                        }}
                         className={`px-4 py-5 ${index === 0 ? "" : "border-t border-border/70"}`}
                       >
                         {message.canSaveToExplanation && message.relatedQuestionId && (
@@ -2118,7 +2136,7 @@ export default function PracticeResultPage() {
                         )}
                         <ChatMarkdown
                           content={message.content}
-                          className="space-y-3 text-[16px] leading-8 text-foreground"
+                          className="space-y-3 text-[15px] leading-7 text-foreground"
                         />
                       </article>
                     )
@@ -2140,41 +2158,53 @@ export default function PracticeResultPage() {
                 )}
 
                 <form
-                  className="space-y-2 border-t border-border/70 bg-card px-3 py-3"
+                  className="border-t border-border/70 bg-card px-3 py-2.5"
                   onSubmit={(event) => {
                     event.preventDefault();
                     void sendPracticeChat(chatInput);
                   }}
                 >
-                  <Textarea
-                    value={chatInput}
-                    onChange={(event) => setChatInput(event.target.value)}
-                    placeholder="질문을 입력하세요 (예: 왜 이 선택지가 정답인지 단계별로 설명해줘)"
-                    className="min-h-[88px] resize-none bg-card"
-                    disabled={chatLoading || !activeQuestionPayload}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey) {
-                        event.preventDefault();
-                        void sendPracticeChat(chatInput);
-                      }
-                    }}
-                  />
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[11px] text-muted-foreground">
-                      현재 문제 JSON이 함께 전송됩니다.
-                    </p>
-                    <Button
-                      type="submit"
-                      size="sm"
-                      disabled={
-                        chatLoading ||
-                        !activeQuestionPayload ||
-                        chatInput.trim().length === 0
-                      }
-                    >
-                      <SendHorizontal className="h-4 w-4" />
-                      전송
-                    </Button>
+                  <div className="rounded-[26px] border border-border/70 bg-background/95 px-4 py-2.5 shadow-sm">
+                    <Textarea
+                      value={chatInput}
+                      onChange={(event) => setChatInput(event.target.value)}
+                      placeholder="무엇이든 물어보세요"
+                      className="min-h-[60px] resize-none border-0 bg-transparent px-0 py-0 text-[14px] leading-6 shadow-none focus-visible:ring-0"
+                      disabled={chatLoading || !activeQuestionPayload}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && !event.shiftKey) {
+                          event.preventDefault();
+                          void sendPracticeChat(chatInput);
+                        }
+                      }}
+                    />
+                    <div className="mt-3 flex items-center justify-end gap-2 border-t border-border/60 pt-2.5">
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 rounded-full px-3 text-sm"
+                          onClick={handleAskDefaultExplanation}
+                          disabled={chatLoading || !activeQuestionPayload}
+                        >
+                          <Sparkles className="h-3.5 w-3.5" />
+                          기본 해설 요청
+                        </Button>
+                        <Button
+                          type="submit"
+                          size="icon"
+                          className="h-9 w-9 rounded-full"
+                          disabled={
+                            chatLoading ||
+                            !activeQuestionPayload ||
+                            chatInput.trim().length === 0
+                          }
+                          aria-label="전송"
+                        >
+                          <SendHorizontal className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 </form>
               </CardContent>
