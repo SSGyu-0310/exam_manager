@@ -56,11 +56,21 @@ Terminal 2:
 
 ## 5) Access
 - Web: `http://localhost:4000`
-- API health: `http://localhost:5000/health`
+- API health: `http://localhost:${API_PORT:-5000}/health`
 
 ## 6) Run backend tests (Postgres)
 ```bash
 ./scripts/dev-test-backend
+```
+
+## 7) Stop
+When running split mode:
+- `./scripts/dev-backend` and `./scripts/dev-frontend`: stop with `Ctrl+C` in each terminal
+- DB container: `./scripts/dev-db down`
+
+When running one-command mode:
+```bash
+./scripts/dev-stack down
 ```
 
 ## Local Dev Commands

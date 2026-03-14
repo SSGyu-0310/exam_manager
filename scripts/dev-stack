@@ -6,6 +6,20 @@ RUN_DIR="$ROOT_DIR/.dev-runtime"
 LOG_DIR="$RUN_DIR/logs"
 PID_DIR="$RUN_DIR/pids"
 
+load_env_file() {
+  local file="$1"
+  if [[ -f "$file" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$file"
+    set +a
+  fi
+}
+
+# Load docker defaults first, then let local .env override for host dev.
+load_env_file "$ROOT_DIR/.env.docker"
+load_env_file "$ROOT_DIR/.env"
+
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
 usage() {
@@ -50,9 +64,10 @@ is_port_listening() {
 
 service_port() {
   local name="$1"
+  local api_port="${API_PORT:-5000}"
   case "$name" in
     backend)
-      echo "5000"
+      echo "$api_port"
       ;;
     frontend)
       echo "4000"
@@ -301,7 +316,7 @@ case "$command" in
 
     echo "[dev-stack] ready"
     echo "[dev-stack] web: http://localhost:4000"
-    echo "[dev-stack] api: http://localhost:5000/health"
+    echo "[dev-stack] api: http://localhost:${API_PORT:-5000}/health"
     echo "[dev-stack] logs: ./scripts/dev-stack logs all"
     ;;
   down)

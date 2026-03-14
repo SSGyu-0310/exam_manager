@@ -43,7 +43,7 @@ cd next_app && npm install
 4. 접속
 
 - Web: `http://localhost:4000`
-- API health: `http://localhost:5000/health`
+- API health: `http://localhost:${API_PORT:-5000}/health`
 
 5. 최초 계정 생성
 
@@ -56,6 +56,20 @@ cd next_app && npm install
 ./scripts/dev-init-db
 ./scripts/dev-backend
 ./scripts/dev-frontend
+```
+
+분리 실행 종료:
+
+```bash
+./scripts/dev-db down
+```
+
+`./scripts/dev-backend`, `./scripts/dev-frontend`는 각 터미널에서 `Ctrl+C`
+
+원클릭 실행 종료:
+
+```bash
+./scripts/dev-stack down
 ```
 
 ## Docker 전체 스택 실행
