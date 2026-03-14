@@ -53,4 +53,37 @@ if [[ -z "$DOCKER_CMD" ]]; then
   exit 1
 fi
 
+current_docker_context() {
+  if [[ -n "${DOCKER_CONTEXT:-}" ]]; then
+    echo "$DOCKER_CONTEXT"
+    return 0
+  fi
+
+  "$DOCKER_CMD" context show 2>/dev/null || true
+}
+
+ensure_docker_daemon() {
+  if "$DOCKER_CMD" info >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local context
+  context="$(current_docker_context)"
+
+  echo "[dc] unable to reach the Docker daemon." >&2
+  if [[ "$context" == "colima" ]]; then
+    if command -v colima >/dev/null 2>&1; then
+      echo "[dc] current Docker context is 'colima'. Start the runtime first: colima start" >&2
+    else
+      echo "[dc] current Docker context is 'colima', but the colima CLI is not installed." >&2
+      echo "[dc] install Colima or switch to a running Docker context." >&2
+    fi
+  else
+    echo "[dc] start Docker Desktop or switch to a running Docker context." >&2
+  fi
+  exit 1
+}
+
+ensure_docker_daemon
+
 exec "$DOCKER_CMD" compose --env-file "$ENV_FILE" "$@"

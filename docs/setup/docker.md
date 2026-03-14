@@ -2,6 +2,7 @@
 
 Docker full stack is recommended for deployment-like verification.
 For fast coding iteration, see `docs/setup/local-dev.md`.
+Shared runtime policy is documented in `runtime-policy.md`.
 
 ## 1) Prepare
 ```bash

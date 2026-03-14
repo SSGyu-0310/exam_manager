@@ -1,6 +1,7 @@
 # WSL Setup (Docker)
 
 WSL usage is Docker-first.
+Shared runtime policy is documented in `runtime-policy.md`.
 
 ## Prerequisites
 - Docker Desktop installed on Windows
