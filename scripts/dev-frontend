@@ -3,10 +3,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NEXT_DIR="$ROOT_DIR/next_app"
+api_port="${API_PORT:-5000}"
 
 if [[ ! -f "$NEXT_DIR/.env.local" ]]; then
-  cat > "$NEXT_DIR/.env.local" <<'EOF'
-FLASK_BASE_URL=http://127.0.0.1:5000
+  cat > "$NEXT_DIR/.env.local" <<EOF
+FLASK_BASE_URL=http://127.0.0.1:${api_port}
 NEXT_PUBLIC_SITE_URL=http://localhost:4000
 NEXT_PUBLIC_APP_URL=http://localhost:4000
 EOF
@@ -19,4 +20,5 @@ if [[ ! -d "$NEXT_DIR/node_modules" ]]; then
 fi
 
 cd "$NEXT_DIR"
+export FLASK_BASE_URL="${FLASK_BASE_URL:-http://127.0.0.1:${api_port}}"
 exec npm run dev

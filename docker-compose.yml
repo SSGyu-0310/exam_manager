@@ -50,7 +50,7 @@ services:
       CLASSIFIER_REQUIRE_VERBATIM_QUOTE: ${CLASSIFIER_REQUIRE_VERBATIM_QUOTE:-1}
       CLASSIFIER_REQUIRE_PAGE_SPAN: ${CLASSIFIER_REQUIRE_PAGE_SPAN:-1}
     ports:
-      - "5000:5000"
+      - "${API_PORT:-5000}:5000"
     volumes:
       - app_data:/app/data
       - app_uploads:/app/app/static/uploads

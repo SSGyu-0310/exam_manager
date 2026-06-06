@@ -1,6 +1,7 @@
 # Windows Setup (Docker)
 
 Windows execution is Docker-first.
+Shared runtime policy is documented in `runtime-policy.md`.
 
 ## Prerequisites
 - Docker Desktop installed

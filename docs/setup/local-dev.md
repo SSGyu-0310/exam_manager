@@ -4,6 +4,8 @@ Recommended workflow for fast backend/frontend iteration:
 - Postgres in Docker
 - Flask + Next.js on host (hot reload)
 
+Shared runtime policy is documented in `runtime-policy.md`.
+
 Quick start (one command):
 ```bash
 ./scripts/dev-stack up --init-db
@@ -54,11 +56,21 @@ Terminal 2:
 
 ## 5) Access
 - Web: `http://localhost:4000`
-- API health: `http://localhost:5000/health`
+- API health: `http://localhost:${API_PORT:-5000}/health`
 
 ## 6) Run backend tests (Postgres)
 ```bash
 ./scripts/dev-test-backend
+```
+
+## 7) Stop
+When running split mode:
+- `./scripts/dev-backend` and `./scripts/dev-frontend`: stop with `Ctrl+C` in each terminal
+- DB container: `./scripts/dev-db down`
+
+When running one-command mode:
+```bash
+./scripts/dev-stack down
 ```
 
 ## Local Dev Commands
@@ -90,3 +102,4 @@ Terminal 2:
 - `scripts/dev-frontend` auto-creates `next_app/.env.local` if missing.
 - If you want isolated local DB volume, run with `DEV_DB_COMPOSE_FILE=docker-compose.local.yml`.
 - Use `./scripts/dc up -d --build` when you need full Docker verification before deploy.
+- macOS standard choice is either Docker Desktop or Colima. This repo standardizes on the Docker CLI and `docker compose`; if your current Docker context is `colima`, start Colima yourself before running Compose commands.

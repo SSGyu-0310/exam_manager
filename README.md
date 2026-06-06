@@ -17,6 +17,8 @@ Exam Manager는 시험지 PDF를 업로드해 문항을 생성하고, 강의 체
 
 권장: DB는 Docker, 백엔드/프론트는 호스트에서 실행
 
+공통 런타임 기준은 [docs/setup/runtime-policy.md](docs/setup/runtime-policy.md)를 따릅니다.
+
 1. 환경 파일 생성
 
 ```bash
@@ -41,7 +43,7 @@ cd next_app && npm install
 4. 접속
 
 - Web: `http://localhost:4000`
-- API health: `http://localhost:5000/health`
+- API health: `http://localhost:${API_PORT:-5000}/health`
 
 5. 최초 계정 생성
 
@@ -56,7 +58,23 @@ cd next_app && npm install
 ./scripts/dev-frontend
 ```
 
+분리 실행 종료:
+
+```bash
+./scripts/dev-db down
+```
+
+`./scripts/dev-backend`, `./scripts/dev-frontend`는 각 터미널에서 `Ctrl+C`
+
+원클릭 실행 종료:
+
+```bash
+./scripts/dev-stack down
+```
+
 ## Docker 전체 스택 실행
+
+배포 전 검증용 Docker 실행 기준도 [docs/setup/runtime-policy.md](docs/setup/runtime-policy.md)에 정리돼 있습니다.
 
 1. `.env.docker` 생성
 
